@@ -11,6 +11,7 @@ import {
   normalizeSafetyClassification,
   planTelegramSafetyAction,
 } from '@aichattg/telegram-core';
+import { createHash } from 'node:crypto';
 import { createProviderAdapter, isProviderUnavailableError } from './provider-adapter.mjs';
 
 const HELP_TEXT = 'Используйте /ask <вопрос>, чтобы обратиться к ассистенту.';
@@ -36,6 +37,41 @@ function unavailableKnowledge() {
 }
 
 function sleep(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+function canonicalJson(value) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? JSON.stringify(value) : 'null';
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  throw new Error('Telegram update must be JSON-compatible');
+}
+
+function inboundPayloadFingerprint(update) {
+  return createHash('sha256').update(canonicalJson(update)).digest('hex');
+}
+
+function inboundRevisionIdentity(classified, update) {
+  return classified.comment?.platformMessageId || classified.question?.platformMessageId || `update:${update.update_id}`;
+}
+
+function replayInboundResult({ eventId, receiptId, existing, collision }) {
+  if (collision) return { kind: 'delivery_conflict', eventId, receiptId, reason: 'receipt_identity_conflict' };
+  if (existing?.status === 'completed' || existing?.status === 'skipped') {
+    try {
+      const result = JSON.parse(existing.result_json);
+      if (result && typeof result === 'object' && !Array.isArray(result)) return result;
+    } catch { /* A corrupt terminal result must not be retried as a side effect. */ }
+    return { kind: 'uncertain_delivery', eventId, receiptId, reason: 'terminal_result_unreadable' };
+  }
+  if (existing?.status === 'processing') return { kind: 'processing', eventId, receiptId, reason: 'claim_in_progress' };
+  return {
+    kind: 'uncertain_delivery', eventId, receiptId,
+    reason: existing?.error_code || 'recovery_required', recoveryId: existing?.recovery_id || null,
+  };
+}
 
 /**
  * The assistant reads only the moderator's durable terminal result for the exact
@@ -243,25 +279,54 @@ export function createTelegramRuntime({
   return {
     async handleUpdate(role, update) {
       const eventId = incomingEventId(role, update);
-      const claim = store.claimEvent({ eventId, role, updateId: update.update_id });
-      if (!claim.claimed) return { kind: 'duplicate', eventId, status: claim.existing?.status || 'unknown' };
+      const adapterConfig = roleConfig(config, role);
+      const classified = classifyTelegramUpdate({
+        role, update, acceptedChatIds: adapterConfig.chatIds, botUsername: adapterConfig.botUsername,
+        botId: botIdFromToken(adapterConfig.botToken), exemptBotIds: adapterConfig.exemptBotIds,
+      });
+      const receiptId = eventId;
+      const inboundClaim = store.claimInboundDelivery({
+        receiptId, role, updateId: update.update_id,
+        revisionIdentity: inboundRevisionIdentity(classified, update),
+        payloadFingerprint: inboundPayloadFingerprint(update),
+      });
+      if (!inboundClaim.claimed) {
+        return replayInboundResult({ eventId, receiptId, existing: inboundClaim.existing, collision: inboundClaim.collision });
+      }
+      // Existing moderation/assistant business records still retain their
+      // event_id foreign keys. A legacy event without the new receipt is not
+      // safe to resume because its payload/effect boundary was never recorded.
+      const legacyClaim = store.claimEvent({ eventId, role, updateId: update.update_id });
+      if (!legacyClaim.claimed) {
+        store.markInboundDeliveryUncertain({ claim: inboundClaim.claim, errorCode: 'legacy_event_unresolved' });
+        return { kind: 'uncertain_delivery', eventId, receiptId, reason: 'legacy_event_unresolved', recoveryId: null };
+      }
       try {
-        const adapterConfig = roleConfig(config, role);
-        const classified = classifyTelegramUpdate({
-          role, update, acceptedChatIds: adapterConfig.chatIds, botUsername: adapterConfig.botUsername,
-          botId: botIdFromToken(adapterConfig.botToken), exemptBotIds: adapterConfig.exemptBotIds,
-        });
         const result = classified.kind === 'comment'
           ? await handleModerator(eventId, classified.comment)
           : classified.kind === 'question'
             ? await handleAssistant(eventId, classified.question)
             : { kind: 'skipped', reason: classified.reason };
-        store.completeEvent(eventId, result.kind === 'skipped' ? 'skipped' : 'completed', result);
-        return { eventId, ...result };
-      } catch (error) {
-        store.completeEvent(eventId, 'error', null, error.message);
-        throw error;
+        const response = { eventId, ...result };
+        const completed = store.completeInboundDelivery({
+          claim: inboundClaim.claim,
+          status: result.kind === 'skipped' ? 'skipped' : 'completed',
+          result: response,
+        });
+        if (!completed.completed) return { kind: 'uncertain_delivery', eventId, receiptId, reason: 'claim_fenced', recoveryId: null };
+        store.completeEvent(eventId, result.kind === 'skipped' ? 'skipped' : 'completed', response);
+        return response;
+      } catch {
+        const marked = store.markInboundDeliveryUncertain({ claim: inboundClaim.claim, errorCode: 'runtime_error' });
+        return {
+          kind: 'uncertain_delivery', eventId, receiptId,
+          reason: marked.marked ? 'runtime_error' : 'claim_fenced', recoveryId: null,
+        };
       }
+    },
+    /** Explicit, side-effect-free recovery: fence in-flight claims into review. */
+    recoverInboundDeliveries({ recoveryId }) {
+      return store.quarantineProcessingInboundDeliveries({ recoveryId });
     },
   };
 }

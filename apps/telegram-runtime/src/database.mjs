@@ -14,6 +14,37 @@ CREATE TABLE IF NOT EXISTS runtime_inbound_events (
   created_at INTEGER NOT NULL,
   completed_at INTEGER
 );
+-- A receipt names one delivery from one bot stream. A claim is deliberately
+-- separate from that receipt: stale workers may never finalize a row once its
+-- claim generation has been fenced by controlled recovery.
+CREATE TABLE IF NOT EXISTS runtime_inbound_update_receipts (
+  receipt_id TEXT PRIMARY KEY,
+  bot_role TEXT NOT NULL CHECK(bot_role IN ('moderator', 'assistant')),
+  update_id INTEGER NOT NULL CHECK(update_id >= 0),
+  revision_identity TEXT NOT NULL,
+  payload_fingerprint TEXT NOT NULL,
+  claim_id TEXT NOT NULL,
+  claim_generation INTEGER NOT NULL CHECK(claim_generation >= 1),
+  status TEXT NOT NULL CHECK(status IN ('processing', 'completed', 'skipped', 'uncertain')),
+  result_json TEXT,
+  error_code TEXT,
+  recovery_id TEXT,
+  received_at INTEGER NOT NULL,
+  claimed_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  recovered_at INTEGER,
+  UNIQUE(bot_role, update_id)
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_inbound_update_receipts_recovery
+  ON runtime_inbound_update_receipts(status, received_at);
+CREATE TABLE IF NOT EXISTS runtime_inbound_update_conflicts (
+  id TEXT PRIMARY KEY,
+  receipt_id TEXT NOT NULL REFERENCES runtime_inbound_update_receipts(receipt_id),
+  revision_identity TEXT NOT NULL,
+  payload_fingerprint TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  UNIQUE(receipt_id, payload_fingerprint)
+);
 CREATE TABLE IF NOT EXISTS runtime_moderation_records (
   id TEXT PRIMARY KEY,
   event_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_events(event_id),
@@ -133,6 +164,27 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const event = db.prepare('SELECT * FROM runtime_inbound_events WHERE event_id = ?');
   const finish = db.prepare(`UPDATE runtime_inbound_events
     SET status = ?, result_json = ?, error_text = ?, completed_at = ? WHERE event_id = ?`);
+  const inboundReceipt = db.prepare('SELECT * FROM runtime_inbound_update_receipts WHERE receipt_id = ?');
+  const createInboundReceipt = db.prepare(`INSERT INTO runtime_inbound_update_receipts
+    (receipt_id, bot_role, update_id, revision_identity, payload_fingerprint,
+     claim_id, claim_generation, status, received_at, claimed_at)
+    VALUES (?, ?, ?, ?, ?, ?, 1, 'processing', ?, ?)
+    ON CONFLICT(receipt_id) DO NOTHING`);
+  const completeInboundReceipt = db.prepare(`UPDATE runtime_inbound_update_receipts
+    SET status = ?, result_json = ?, error_code = NULL, completed_at = ?
+    WHERE receipt_id = ? AND claim_id = ? AND claim_generation = ? AND status = 'processing'`);
+  const markInboundReceiptUncertain = db.prepare(`UPDATE runtime_inbound_update_receipts
+    SET status = 'uncertain', error_code = ?, completed_at = NULL
+    WHERE receipt_id = ? AND claim_id = ? AND claim_generation = ? AND status = 'processing'`);
+  const quarantineInboundReceipts = db.prepare(`UPDATE runtime_inbound_update_receipts
+    SET status = 'uncertain', error_code = 'recovery_required', recovery_id = ?,
+        recovered_at = ?, claim_generation = claim_generation + 1
+    WHERE status = 'processing'`);
+  const listInboundRecovery = db.prepare(`SELECT * FROM runtime_inbound_update_receipts
+    WHERE status IN ('processing', 'uncertain') ORDER BY received_at ASC, receipt_id ASC LIMIT ?`);
+  const recordInboundConflict = db.prepare(`INSERT INTO runtime_inbound_update_conflicts
+    (id, receipt_id, revision_identity, payload_fingerprint, observed_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(receipt_id, payload_fingerprint) DO NOTHING`);
   const dialogue = db.prepare('SELECT * FROM runtime_assistant_dialogues WHERE chat_id = ? AND user_id = ?');
   const turns = db.prepare(`SELECT question, answer FROM runtime_assistant_turns
     WHERE dialogue_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`);
@@ -201,6 +253,69 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   });
 
   return {
+    /**
+     * Create the only executable claim for a Telegram delivery. The update
+     * payload itself is deliberately not copied into the inbox; its stable
+     * SHA-256 fingerprint and exact revision identity are enough to detect a
+     * receipt collision while avoiding a second raw-message store.
+     */
+    claimInboundDelivery({ receiptId, role, updateId, revisionIdentity, payloadFingerprint }) {
+      const normalizedReceiptId = String(receiptId);
+      const claimId = randomUUID();
+      const at = now();
+      const claimed = createInboundReceipt.run(
+        normalizedReceiptId, String(role), Number(updateId), String(revisionIdentity),
+        String(payloadFingerprint), claimId, at, at,
+      ).changes === 1;
+      const existing = claimed ? null : inboundReceipt.get(normalizedReceiptId);
+      const collision = !claimed && existing != null && (
+        existing.bot_role !== String(role)
+        || Number(existing.update_id) !== Number(updateId)
+        || existing.revision_identity !== String(revisionIdentity)
+        || existing.payload_fingerprint !== String(payloadFingerprint)
+      );
+      if (collision) {
+        recordInboundConflict.run(
+          randomUUID(), normalizedReceiptId, String(revisionIdentity), String(payloadFingerprint), at,
+        );
+      }
+      return {
+        claimed,
+        claim: claimed ? { receiptId: normalizedReceiptId, claimId, claimGeneration: 1 } : null,
+        existing,
+        collision,
+      };
+    },
+    completeInboundDelivery({ claim: inboundClaim, status, result }) {
+      if (!inboundClaim || !['completed', 'skipped'].includes(status)) return { completed: false, row: null };
+      const completed = completeInboundReceipt.run(
+        status, JSON.stringify(result), now(), inboundClaim.receiptId,
+        inboundClaim.claimId, inboundClaim.claimGeneration,
+      ).changes === 1;
+      return { completed, row: inboundReceipt.get(inboundClaim.receiptId) || null };
+    },
+    markInboundDeliveryUncertain({ claim: inboundClaim, errorCode = 'runtime_error' }) {
+      if (!inboundClaim) return { marked: false, row: null };
+      const marked = markInboundReceiptUncertain.run(
+        String(errorCode).slice(0, 120), inboundClaim.receiptId,
+        inboundClaim.claimId, inboundClaim.claimGeneration,
+      ).changes === 1;
+      return { marked, row: inboundReceipt.get(inboundClaim.receiptId) || null };
+    },
+    /**
+     * This is an explicit operator/recovery action, not a retry mechanism. It
+     * fences every in-flight claim and records an observable uncertain state;
+     * it never invokes a provider or Telegram adapter.
+     */
+    quarantineProcessingInboundDeliveries({ recoveryId }) {
+      const normalizedRecoveryId = String(recoveryId || '').trim();
+      if (!normalizedRecoveryId) throw new Error('recoveryId is required to quarantine inbound deliveries');
+      return { recoveryId: normalizedRecoveryId, quarantined: quarantineInboundReceipts.run(normalizedRecoveryId, now()).changes };
+    },
+    listInboundRecovery({ limit = 50 } = {}) {
+      return listInboundRecovery.all(Math.max(1, Math.min(500, Number(limit) || 50)));
+    },
+    getInboundDelivery(receiptId) { return inboundReceipt.get(String(receiptId)) || null; },
     claimEvent({ eventId, role, updateId }) {
       const claimed = claim.run(eventId, role, updateId, now()).changes === 1;
       return { claimed, existing: claimed ? null : event.get(eventId) };

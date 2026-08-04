@@ -354,3 +354,191 @@ test('HTTP ingress is opt-in and validates role-specific webhook secrets', async
     await new Promise((resolve) => server.close(resolve)); db.close(); rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test('a terminal webhook receipt is persisted once and replayed deterministically', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-inbox-replay-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let moderationCalls = 0;
+  const provider = fakeLlm();
+  provider.moderate = async () => {
+    moderationCalls++;
+    return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' };
+  };
+  const loaded = config({ ingressEnabled: true, moderationMode: 'shadow' });
+  const runtime = createTelegramRuntime({
+    config: loaded, store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const server = createTelegramRuntimeHttpServer({ config: loaded, runtime, logger: { error() {} } });
+  const delivery = update(401, 90, '/ask replay');
+  await new Promise((resolve) => server.listen(0, resolve));
+  try {
+    const first = await request(server, '/webhooks/telegram/moderator', {
+      'x-telegram-bot-api-secret-token': 'moderator-secret',
+    }, delivery);
+    const replay = await request(server, '/webhooks/telegram/moderator', {
+      'x-telegram-bot-api-secret-token': 'moderator-secret',
+    }, delivery);
+
+    assert.equal(first.status, 200);
+    assert.deepEqual(replay, first);
+    assert.equal(moderationCalls, 1);
+    const conflict = await request(server, '/webhooks/telegram/moderator', {
+      'x-telegram-bot-api-secret-token': 'moderator-secret',
+    }, update(401, 90, '/ask altered'));
+    assert.deepEqual(conflict.body.result, {
+      kind: 'delivery_conflict', eventId: 'moderator:401', receiptId: 'moderator:401', reason: 'receipt_identity_conflict',
+    });
+    assert.equal(moderationCalls, 1);
+    assert.deepEqual(db.prepare(`SELECT receipt_id, revision_identity FROM runtime_inbound_update_conflicts`).get(), {
+      receipt_id: 'moderator:401', revision_identity: '-100:90',
+    });
+    assert.deepEqual(db.prepare(`SELECT receipt_id, bot_role, update_id, revision_identity,
+      status, claim_generation, result_json FROM runtime_inbound_update_receipts`).get(), {
+      receipt_id: 'moderator:401', bot_role: 'moderator', update_id: 401,
+      revision_identity: '-100:90', status: 'completed', claim_generation: 1,
+      result_json: JSON.stringify(first.body.result),
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve)); db.close(); rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('concurrent redelivery observes the active fenced claim and never runs it twice', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-inbox-concurrency-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let moderationCalls = 0;
+  let releaseModeration;
+  const provider = fakeLlm();
+  provider.moderate = async () => {
+    moderationCalls++;
+    return new Promise((resolve) => { releaseModeration = resolve; });
+  };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const delivery = update(402, 91, 'concurrent');
+  try {
+    const first = runtime.handleUpdate('moderator', delivery);
+    await new Promise((resolve) => setImmediate(resolve));
+    const duplicate = await runtime.handleUpdate('moderator', delivery);
+    assert.deepEqual(duplicate, {
+      kind: 'processing', eventId: 'moderator:402', receiptId: 'moderator:402', reason: 'claim_in_progress',
+    });
+    assert.equal(moderationCalls, 1);
+
+    releaseModeration({ safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' });
+    const completed = await first;
+    const replay = await runtime.handleUpdate('moderator', delivery);
+    assert.deepEqual(replay, completed);
+    assert.equal(moderationCalls, 1);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('original and edited revisions remain separate inbound receipts', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-inbox-revision-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let moderationCalls = 0;
+  const provider = fakeLlm();
+  provider.moderate = async () => {
+    moderationCalls++;
+    return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' };
+  };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    const original = await runtime.handleUpdate('moderator', update(403, 92, 'original'));
+    const edited = await runtime.handleUpdate('moderator', editedUpdate(404, 92, 'edited'));
+    assert.equal(original.kind, 'moderated');
+    assert.equal(edited.kind, 'moderated');
+    assert.equal(moderationCalls, 2);
+    assert.deepEqual(db.prepare(`SELECT receipt_id, revision_identity, status
+      FROM runtime_inbound_update_receipts ORDER BY update_id`).all(), [
+      { receipt_id: 'moderator:403', revision_identity: '-100:92', status: 'completed' },
+      { receipt_id: 'moderator:404', revision_identity: '-100:edit:404:92', status: 'completed' },
+    ]);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('restart recovery quarantines an abandoned claim without replaying a provider or Telegram call', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-inbox-restart-'));
+  const databasePath = join(folder, 'runtime.db');
+  const firstDb = openRuntimeDatabase(databasePath);
+  const firstActions = [];
+  const hangingProvider = fakeLlm();
+  hangingProvider.moderate = async () => new Promise(() => {});
+  const firstRuntime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(firstDb), provider: hangingProvider,
+    knowledge: availableKnowledge(), ...adapters(firstActions),
+  });
+  const delivery = update(405, 93, 'recover me');
+  try {
+    void firstRuntime.handleUpdate('moderator', delivery);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(firstDb.prepare("SELECT status FROM runtime_inbound_update_receipts WHERE receipt_id = 'moderator:405'").get().status, 'processing');
+    firstDb.close();
+
+    const restartedDb = openRuntimeDatabase(databasePath);
+    let providerCalls = 0;
+    const provider = fakeLlm();
+    provider.moderate = async () => { providerCalls++; throw new Error('must not run during recovery'); };
+    const restartedStore = createRuntimeStore(restartedDb);
+    const restartedRuntime = createTelegramRuntime({
+      config: config(), store: restartedStore, provider, knowledge: availableKnowledge(), ...adapters([]),
+    });
+    try {
+      assert.deepEqual(await restartedRuntime.handleUpdate('moderator', delivery), {
+        kind: 'processing', eventId: 'moderator:405', receiptId: 'moderator:405', reason: 'claim_in_progress',
+      });
+      assert.equal(providerCalls, 0);
+      assert.deepEqual(restartedRuntime.recoverInboundDeliveries({ recoveryId: 'operator-recovery-405' }), {
+        recoveryId: 'operator-recovery-405', quarantined: 1,
+      });
+      assert.deepEqual(await restartedRuntime.handleUpdate('moderator', delivery), {
+        kind: 'uncertain_delivery', eventId: 'moderator:405', receiptId: 'moderator:405',
+        reason: 'recovery_required', recoveryId: 'operator-recovery-405',
+      });
+      assert.equal(providerCalls, 0);
+      const stale = restartedDb.prepare(`SELECT receipt_id, claim_id, claim_generation
+        FROM runtime_inbound_update_receipts WHERE receipt_id = 'moderator:405'`).get();
+      assert.equal(restartedStore.completeInboundDelivery({
+        claim: { receiptId: stale.receipt_id, claimId: stale.claim_id, claimGeneration: stale.claim_generation - 1 },
+        status: 'completed', result: { kind: 'must_not_finalize' },
+      }).completed, false);
+    } finally { restartedDb.close(); }
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an ambiguous Telegram delivery is quarantined and exact redelivery cannot resend it', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-inbox-uncertain-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db);
+  const delivery = update(406, 94, '/help');
+  let sends = 0;
+  store.upsertAssistantDisposition({
+    chatId: '-100', messageId: '94', status: 'allowed', verdict: 'clean', reason: 'fixture',
+    moderationMessageId: '-100:94', moderationEventId: 'moderator:94',
+  });
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeLlm(), knowledge: availableKnowledge(),
+    moderatorTelegram: adapters([]).moderatorTelegram,
+    assistantTelegram: {
+      async sendMessage() { sends++; throw new Error('delivery outcome unknown'); },
+    },
+    notifier: adapters([]).notifier,
+  });
+  try {
+    const first = await runtime.handleUpdate('assistant', delivery);
+    const replay = await runtime.handleUpdate('assistant', delivery);
+    assert.equal(first.kind, 'uncertain_delivery');
+    assert.equal(first.reason, 'runtime_error');
+    assert.equal(replay.kind, 'uncertain_delivery');
+    assert.equal(replay.reason, 'runtime_error');
+    assert.equal(sends, 1);
+    assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_inbound_update_receipts
+      WHERE receipt_id = 'assistant:406'`).get(), { status: 'uncertain', error_code: 'runtime_error' });
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
