@@ -19,9 +19,25 @@ database, data root, secrets, bot webhook paths, health endpoint, and release
 receipt. It must never read the News Digest database directly.
 
 The current migration is documented in
-[docs/MIGRATION_FROM_NEWS.md](docs/MIGRATION_FROM_NEWS.md). No production
-webhook, bot token, model call, or Telegram message is changed by this initial
-repository setup.
+[docs/MIGRATION_FROM_NEWS.md](docs/MIGRATION_FROM_NEWS.md). Gatekeeper has
+been ported with its isolated persistence boundary, and the first independent
+Moderator/Assistant runtime core is present. Course knowledge, provider
+adapters, historical-state migration, and the live webhook cutover remain
+separate reviewed stages. No production webhook, bot token, model call, or
+Telegram message is changed by this repository setup.
+
+## Local checks
+
+Use Node 20.20.x. Each runnable application has its own lockfile, so install
+dependencies in the application directories before running the aggregate
+checks:
+
+```bash
+npm --prefix apps/gatekeeper ci
+npm --prefix apps/telegram-runtime ci
+npm test
+npm run check:gatekeeper
+```
 
 ## Planned layout
 
