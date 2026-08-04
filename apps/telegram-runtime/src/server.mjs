@@ -1,6 +1,7 @@
 import { loadRuntimeConfig } from './config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from './database.mjs';
 import { createLlmAdapter } from './llm-adapter.mjs';
+import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
 import { createNotificationAdapter } from './notification-adapter.mjs';
 import { createTelegramAdapter } from './telegram-adapter.mjs';
 import { createTelegramRuntime } from './runtime.mjs';
@@ -12,6 +13,7 @@ const runtime = createTelegramRuntime({
   config,
   store: createRuntimeStore(database),
   llm: createLlmAdapter(config.llm),
+  knowledge: createKnowledgeAdapter(config.knowledge),
   moderatorTelegram: createTelegramAdapter(config.moderator),
   assistantTelegram: createTelegramAdapter(config.assistant),
   notifier: createNotificationAdapter(config.notification),

@@ -1,11 +1,35 @@
 import { createHash } from 'node:crypto';
 
+export {
+  KNOWLEDGE_MANIFEST_FORMAT,
+  loadKnowledgeSnapshot,
+  validateKnowledgeManifest,
+} from './knowledge.mjs';
+
 export const BOT_ROLES = Object.freeze({
   MODERATOR: 'moderator',
   ASSISTANT: 'assistant',
 });
 
+export const ASSISTANT_DISPOSITION_STATUSES = Object.freeze([
+  'pending', 'allowed', 'blocked', 'error',
+]);
+
+export const ASSISTANT_SOURCE_PACKAGES = Object.freeze({
+  COURSE_CONTENT: 'course-content-v1',
+  COURSE_OPERATIONS: 'course-operations-v1',
+});
+
+export const ASSISTANT_ROLE_ACTIONS = Object.freeze({
+  TEACH: 'teach',
+  NAVIGATE: 'navigate',
+  SUPPORT: 'support',
+  REDIRECT: 'redirect',
+});
+
 const ROLE_SET = new Set(Object.values(BOT_ROLES));
+const ASSISTANT_DISPOSITION_SET = new Set(ASSISTANT_DISPOSITION_STATUSES);
+const ASSISTANT_ROLE_ACTION_SET = new Set(Object.values(ASSISTANT_ROLE_ACTIONS));
 const ASSISTANT_CMD_RE = /^\s*\/(ask|help)(?:@([A-Za-z0-9_]+))?(?:\s+|$)/i;
 const QUOTED_LITERAL_ENTITY_TYPES = new Set([
   'blockquote', 'expandable_blockquote', 'code', 'pre', 'pre_code',
@@ -175,4 +199,116 @@ export function normalizeModerationVerdict(value) {
     quote: String(value.quote || ''),
     modelId: value.modelId == null ? null : String(value.modelId),
   };
+}
+
+/**
+ * Validate the provider-neutral safety result before any Telegram action is
+ * planned. The provider may classify meaning, but it never selects a platform
+ * action or an Assistant disposition.
+ */
+export function normalizeSafetyClassification(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const safetyRoute = String(value.safetyRoute ?? value.safety_route ?? '');
+  if (!['clean', 'abuse', 'threat'].includes(safetyRoute)) return null;
+  const abuseLevel = value.abuseLevel ?? value.abuse_level ?? null;
+  if (safetyRoute === 'abuse' && !['weak', 'strong'].includes(abuseLevel)) return null;
+  if (safetyRoute !== 'abuse' && abuseLevel != null) return null;
+  const confidence = Number(value.confidence);
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
+  return {
+    safetyRoute,
+    abuseLevel: abuseLevel == null ? null : String(abuseLevel),
+    confidence,
+    reason: String(value.reason || ''),
+    quote: String(value.quote || ''),
+    modelId: value.modelId == null ? null : String(value.modelId),
+  };
+}
+
+/** Deterministic policy copied as behavior, not as a provider prompt. */
+export function planTelegramSafetyAction(classification, currentWeakStrikes = 0) {
+  const decision = normalizeSafetyClassification(classification);
+  if (!decision) throw new Error('invalid_safety_classification');
+  const strikeBefore = Math.max(0, Number.parseInt(currentWeakStrikes, 10) || 0);
+  const common = {
+    safetyRoute: decision.safetyRoute,
+    abuseLevel: decision.abuseLevel,
+    strikeBefore,
+    strikeAfter: strikeBefore,
+  };
+  if (decision.safetyRoute === 'clean') {
+    return { ...common, verdict: 'clean', action: 'none', warning: null };
+  }
+  if (decision.safetyRoute === 'threat' || decision.abuseLevel === 'strong') {
+    return { ...common, verdict: 'ban', action: 'ban_purge', warning: null };
+  }
+  const strikeAfter = strikeBefore + 1;
+  if (strikeAfter === 1) {
+    return { ...common, verdict: 'suspect', action: 'delete_warn_1', warning: 'warning_first', strikeAfter };
+  }
+  if (strikeAfter === 2) {
+    return { ...common, verdict: 'suspect', action: 'delete_warn_2', warning: 'warning_final', strikeAfter };
+  }
+  return { ...common, verdict: 'ban', action: 'ban_purge', warning: null, strikeAfter };
+}
+
+export function assistantDispositionForSafety(plan) {
+  if (!plan || typeof plan !== 'object') throw new Error('safety_plan_required');
+  if (plan.verdict === 'clean') return { status: 'allowed', verdict: 'clean' };
+  if (plan.verdict === 'suspect' || plan.verdict === 'ban') {
+    return { status: 'blocked', verdict: plan.verdict };
+  }
+  throw new Error('safety_plan_verdict_invalid');
+}
+
+export function normalizeAssistantDisposition(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const status = String(value.status || '');
+  if (!ASSISTANT_DISPOSITION_SET.has(status)) return null;
+  const verdict = value.verdict == null ? null : String(value.verdict);
+  if (status === 'allowed' && !['clean', 'exempt'].includes(verdict)) return null;
+  if (status === 'blocked' && !['suspect', 'ban'].includes(verdict)) return null;
+  return {
+    status,
+    verdict,
+    reason: value.reason == null ? null : String(value.reason),
+    moderationMessageId: value.moderationMessageId == null ? null : String(value.moderationMessageId),
+    moderationEventId: value.moderationEventId == null ? null : String(value.moderationEventId),
+  };
+}
+
+/**
+ * A closed routing contract keeps course operations separate from course content.
+ * Redirect intentionally has no source package and can never unlock a knowledge
+ * snapshot by accident.
+ */
+export function normalizeAssistantRoleRoute(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const action = String(value.action || '');
+  if (!ASSISTANT_ROLE_ACTION_SET.has(action)) return null;
+  const sourceId = value.sourceId ?? value.source_id ?? null;
+  const requiredSource = action === ASSISTANT_ROLE_ACTIONS.SUPPORT
+    ? ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS
+    : action === ASSISTANT_ROLE_ACTIONS.TEACH || action === ASSISTANT_ROLE_ACTIONS.NAVIGATE
+      ? ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT
+      : null;
+  if (requiredSource == null) return sourceId == null ? { action, sourceId: null } : null;
+  return sourceId === requiredSource ? { action, sourceId: requiredSource } : null;
+}
+
+/**
+ * This deliberately narrow pre-router identifies questions about operating a
+ * course rather than questions about its teaching material. It is a safety
+ * boundary: an ambiguous sentence stays with the provider route and is never
+ * silently granted access to course content.
+ */
+export function isCourseOperationsSupportQuestion(text) {
+  const normalized = String(text || '').toLowerCase().replace(/ё/g, 'е');
+  if (!normalized.includes('курс')) return false;
+  // A requested order for studying named modules is a methodological/content
+  // question, not a support request about operating the course interface.
+  if (/в каком порядке.{0,80}(?:изуч|проход).{0,80}модул/u.test(normalized)) return false;
+  return /(?:как|где|не приходит|не могу|не работает|проблем).{0,80}(?:войти|вход|урок|уроки|модул|кнопк|переход|оплат|цен|чат|сообществ|старт|начат)/u.test(normalized)
+    || /(?:оплат|цен|доступ|логин|письм|аккаунт|кабинет|урок|модул|кнопк|переход).{0,80}(?:курс)/u.test(normalized)
+    || /(?:в|на) курсе.{0,80}(?:оплат|цен|доступ|логин|письм|аккаунт|кабинет|чат|сообществ|с чего начать)/u.test(normalized);
 }
