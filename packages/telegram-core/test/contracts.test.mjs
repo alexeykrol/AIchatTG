@@ -19,7 +19,9 @@ import {
   normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
   planTelegramSafetyAction,
+  TELEGRAM_SAFETY_POLICY_VERSION,
   validateKnowledgeManifest,
+  WARNING_FIRST,
 } from '../src/index.mjs';
 
 const message = (text, extra = {}) => ({
@@ -58,7 +60,8 @@ test('closed safety policy owns actions and Assistant access dispositions', () =
   const weak = normalizeSafetyClassification({ safety_route: 'abuse', abuse_level: 'weak', confidence: 0.9, reason: 'fixture' });
   assert.deepEqual(planTelegramSafetyAction(weak, 0), {
     safetyRoute: 'abuse', abuseLevel: 'weak', strikeBefore: 0, strikeAfter: 1,
-    verdict: 'suspect', action: 'delete_warn_1', warning: 'warning_first',
+    policyVersion: TELEGRAM_SAFETY_POLICY_VERSION,
+    verdict: 'suspect', action: 'delete_warn_1', warning: WARNING_FIRST,
   });
   const strong = planTelegramSafetyAction({ safetyRoute: 'abuse', abuseLevel: 'strong', confidence: 1 }, 2);
   assert.equal(strong.action, 'ban_purge');

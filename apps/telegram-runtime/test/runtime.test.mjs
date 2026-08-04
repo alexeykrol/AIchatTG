@@ -106,11 +106,11 @@ function fakeLlm({ safetyRoute = 'clean', abuseLevel = null } = {}) {
 function enabledProviderConfig(overrides = {}) {
   return {
     enabled: true,
-    vendor: 'openai-compatible',
+    vendor: 'openai',
     endpoint: 'https://provider.example.test/v1',
     apiKey: 'fixture-key',
     modelTuples: {
-      moderatorSafety: { model: 'moderator-model', reasoningEffort: 'minimal', maxOutputTokens: 200 },
+      moderatorSafety: { model: 'gpt-5.6-terra', reasoningEffort: 'medium', maxOutputTokens: 1024 },
       assistantRouter: { model: 'router-model', reasoningEffort: 'none', maxOutputTokens: 100 },
       assistantAnswer: { model: 'answer-model', reasoningEffort: 'low', maxOutputTokens: 500 },
     },
@@ -132,7 +132,7 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_MODERATION_BAN_LINKS: 'false' }).moderationBanLinks, false);
   assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
-  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /OpenAI-compatible/);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /OpenAI safety/);
   assert.throws(() => loadRuntimeConfig({
     TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH: '/tmp/unreviewed-course-content.manifest.json',
   }, { cwd: '/tmp/aichattg-test' }), /must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT/);
@@ -180,8 +180,12 @@ test('provider adapter accepts only explicit runtime configuration and fake fetc
         headers: { get(name) { return name === 'x-request-id' ? 'fixture-request' : null; } },
         async json() {
           return {
-            model: 'moderator-model',
-            choices: [{ message: { content: JSON.stringify({ safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', quote: '' }) } }],
+            model: 'gpt-5.6-terra',
+            choices: [{ message: { content: JSON.stringify({
+              threat: { match: false, types: [], confidence: 1, evidence: [] },
+              abuse: { match: false, types: [], confidence: 1, evidence: [] },
+              target: 'none', context_used: false,
+            }) } }],
             usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
           };
         },
@@ -190,12 +194,12 @@ test('provider adapter accepts only explicit runtime configuration and fake fetc
   });
   const result = await adapter.moderate({ text: 'fixture' });
   assert.equal(result.safetyRoute, 'clean');
-  assert.equal(result.modelId, 'moderator-model');
+  assert.equal(result.modelId, 'gpt-5.6-terra');
   assert.equal(result.receipt.requestId, 'fixture-request');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://provider.example.test/v1/chat/completions');
   assert.equal(calls[0].init.headers.authorization, 'Bearer fixture-key');
-  assert.equal(JSON.parse(calls[0].init.body).model, 'moderator-model');
+  assert.equal(JSON.parse(calls[0].init.body).model, 'gpt-5.6-terra');
 });
 
 test('knowledge admissions require one matching identity per source package', () => {

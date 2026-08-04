@@ -10,6 +10,8 @@ import {
   normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
   planTelegramSafetyAction,
+  WARNING_FINAL,
+  WARNING_FIRST,
 } from '@aichattg/telegram-core';
 import { createHash } from 'node:crypto';
 import { createProviderAdapter, isProviderUnavailableError } from './provider-adapter.mjs';
@@ -18,9 +20,6 @@ import {
   ASSISTANT_HELP_TEXT,
   assistantDeterministicReply,
 } from './assistant-policy.mjs';
-
-const WARNING_FIRST = 'Сообщение удалено за нарушение правил общения. Решения модератора не обсуждаются и не обжалуются. Повторное нарушение или попытка продолжить спор приведёт к последнему предупреждению.';
-const WARNING_FINAL = 'Это второе и последнее предупреждение. Следующее нарушение или продолжение спора приведёт к немедленной блокировке.';
 
 function roleConfig(config, role) { return role === BOT_ROLES.MODERATOR ? config.moderator : config.assistant; }
 
@@ -365,10 +364,17 @@ export function createTelegramRuntime({
       return { kind: 'moderated', verdict: 'clean', action: 'exempt', actions: [] };
     }
     let decision;
+    // The semantic v3 router may use no history except the deterministic state
+    // required to recognise a dispute about an earlier warning. Read it before
+    // the non-retrying provider boundary, then use the same snapshot to plan
+    // the resulting safety action.
+    const strikeState = store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
     try {
       decision = normalizeSafetyClassification(await modelProvider.moderate({
         text: comment.text, chatId: comment.chatId, userId: comment.userId,
         messageId: comment.messageId, platformMessageId: comment.platformMessageId,
+        currentWeakStrikes: strikeState.weakStrikes,
+        warningStage: strikeState.warningStage,
       }));
     } catch (error) {
       if (isProviderUnavailableError(error)) {
@@ -392,7 +398,6 @@ export function createTelegramRuntime({
       throw new Error('moderation adapter returned an invalid closed safety verdict');
     }
     decision = applyTelegramSafetySignals(config, decision, comment);
-    const strikeState = store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
     const plan = planTelegramSafetyAction(decision, strikeState.weakStrikes);
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({

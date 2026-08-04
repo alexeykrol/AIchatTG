@@ -1,4 +1,14 @@
-const OPENAI_COMPATIBLE_VENDOR = 'openai-compatible';
+import {
+  SAFETY_ABUSE_MAX_OUTPUT_TOKENS,
+  SAFETY_MODEL,
+  SAFETY_REASONING_EFFORT,
+  SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
+  SAFETY_VENDOR,
+  SafetyV3ContractError,
+  classifySafetyV3,
+} from './safety-v3.mjs';
+
+const OPENAI_VENDOR = 'openai';
 const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_OUTPUT_TOKENS = 4_096;
@@ -9,15 +19,6 @@ const TUPLE_NAMES = Object.freeze({
   assistantRouter: 'assistantRouter',
   assistantAnswer: 'assistantAnswer',
 });
-
-const MODERATOR_SYSTEM_PROMPT = [
-  'You are the AIchatTG Moderator safety classifier.',
-  'Classify only the supplied message. Return exactly one JSON object with',
-  'safetyRoute, abuseLevel, confidence, reason, and quote. safetyRoute must be',
-  'clean, abuse, or threat. abuseLevel must be weak or strong only when',
-  'safetyRoute is abuse, otherwise null. confidence must be a number from 0 to 1.',
-  'Do not choose Telegram actions and do not add Markdown.',
-].join(' ');
 
 const ROUTER_SYSTEM_PROMPT = [
   'You route an AIchatTG Assistant question without granting access yourself.',
@@ -43,20 +44,20 @@ export class ProviderUnavailableError extends Error {
   }
 }
 
-/** A single attempted provider request failed; the adapter never retries it. */
+/** One attempted provider request failed. It is never retried automatically. */
 export class ProviderRequestError extends Error {
-  constructor(code, receipt = null) {
+  constructor(code, receipt = null, details = {}) {
     super(`AIchatTG provider request failed: ${code}`);
     this.name = 'ProviderRequestError';
     this.code = code;
     this.receipt = receipt;
     this.retryable = false;
+    Object.assign(this, details);
   }
 }
 
-function plainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
+function plainObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function invalid(code) { return { valid: false, code }; }
 
 function unavailable(code) {
   return Object.freeze({
@@ -66,18 +67,15 @@ function unavailable(code) {
   });
 }
 
-function invalid(code) {
-  return { valid: false, code };
-}
-
 function normalizeEndpoint(value) {
   let endpoint;
   try { endpoint = new URL(String(value || '')); } catch { return null; }
   if (endpoint.protocol !== 'https:' || !endpoint.hostname || endpoint.username || endpoint.password
-    || endpoint.port && endpoint.port !== '443' || endpoint.search || endpoint.hash) return null;
+    || endpoint.port && endpoint.port !== '443' || endpoint.search || endpoint.hash
+    || endpoint.pathname !== '/v1' && endpoint.pathname !== '/v1/') return null;
   const hostname = endpoint.hostname.toLowerCase();
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
-    || hostname.includes(':') || endpoint.pathname !== '/v1' && endpoint.pathname !== '/v1/') return null;
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')
+    || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':')) return null;
   endpoint.pathname = '/v1/';
   return endpoint.toString();
 }
@@ -92,14 +90,20 @@ function normalizeTuple(value) {
   return Object.freeze({ model, reasoningEffort, maxOutputTokens });
 }
 
+function isSafetyTuple(tuple) {
+  return tuple?.model === SAFETY_MODEL && tuple.reasoningEffort === SAFETY_REASONING_EFFORT
+    && tuple.maxOutputTokens === SAFETY_ROUTER_MAX_OUTPUT_TOKENS;
+}
+
 /**
- * Validate the explicit AIchatTG OpenAI-compatible transport contract. It
- * neither reads process.env nor permits a generic provider/vendor fallback.
+ * The Moderator is intentionally not a configurable arbitrary model route.
+ * OpenAI/Terra/medium and the router 1024 output limit are policy invariants;
+ * the second abuse stage has the code-owned 768-token limit below.
  */
 export function validateProviderRuntimeConfig(config) {
   if (config == null || config.enabled === false) return invalid('provider_disabled');
   if (!plainObject(config) || config.enabled !== true) return invalid('provider_configuration_invalid');
-  if (config.vendor !== OPENAI_COMPATIBLE_VENDOR) return invalid('provider_vendor_invalid');
+  if (config.vendor !== OPENAI_VENDOR) return invalid('provider_vendor_invalid');
   const endpoint = normalizeEndpoint(config.endpoint);
   if (!endpoint) return invalid('provider_endpoint_invalid');
   const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
@@ -111,31 +115,23 @@ export function validateProviderRuntimeConfig(config) {
     if (!tuple) return invalid('provider_model_tuples_invalid');
     modelTuples[tupleName] = tuple;
   }
+  if (!isSafetyTuple(modelTuples.moderatorSafety)) return invalid('provider_safety_tuple_invalid');
   return {
     valid: true,
     config: Object.freeze({
-      enabled: true,
-      vendor: OPENAI_COMPATIBLE_VENDOR,
-      endpoint,
-      apiKey,
-      modelTuples: Object.freeze(modelTuples),
+      enabled: true, vendor: OPENAI_VENDOR, endpoint, apiKey, modelTuples: Object.freeze(modelTuples),
     }),
   };
 }
 
-export function isProviderUnavailableError(error) {
-  return error instanceof ProviderUnavailableError;
-}
+export function isProviderUnavailableError(error) { return error instanceof ProviderUnavailableError; }
 
 function responseHeader(response, name) {
   const value = typeof response?.headers?.get === 'function' ? response.headers.get(name) : null;
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,256}$/.test(value) ? value : null;
 }
 
-function tokenCount(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
+function tokenCount(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
 function usageFrom(response) {
   if (response?.usage == null) return { inputTokens: null, outputTokens: null, totalTokens: null };
   if (!plainObject(response.usage)) return null;
@@ -152,18 +148,9 @@ function receiptFor({ operation, tuple, result, response, status }) {
   const responseModel = typeof result?.model === 'string' && MODEL_PATTERN.test(result.model)
     ? result.model : tuple.model;
   return Object.freeze({
-    vendor: OPENAI_COMPATIBLE_VENDOR,
-    operation,
-    modelId: responseModel,
-    configuredModelId: tuple.model,
-    reasoningEffort: tuple.reasoningEffort,
-    httpStatus: Number.isSafeInteger(status) ? status : 0,
-    requestId: responseHeader(response, 'x-request-id'),
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-    costUsd: null,
-    retryCount: 0,
+    vendor: OPENAI_VENDOR, operation, modelId: responseModel, configuredModelId: tuple.model,
+    reasoningEffort: tuple.reasoningEffort, httpStatus: Number.isSafeInteger(status) ? status : 0,
+    requestId: responseHeader(response, 'x-request-id'), ...usage, costUsd: null, retryCount: 0,
   });
 }
 
@@ -183,7 +170,6 @@ function boundedJson(value) {
   try { json = JSON.stringify(value); } catch { return null; }
   return typeof json === 'string' && json.length <= MAX_INPUT_CHARS ? json : null;
 }
-
 function questionText(value) {
   const text = typeof value === 'string' ? value.trim() : '';
   return text && text.length <= 8_192 ? text : null;
@@ -191,96 +177,123 @@ function questionText(value) {
 
 function userInput(operation, payload) {
   if (!plainObject(payload)) return null;
-  if (operation === 'moderatorSafety') {
-    const text = questionText(payload.text);
-    return text ? boundedJson({ message: text }) : null;
-  }
   if (operation === 'assistantRouter') {
     const text = questionText(payload.text);
     return text ? boundedJson({ question: text, courseOperationsHint: Boolean(payload.courseOperationsHint) }) : null;
   }
   const text = questionText(payload.text);
   if (!text || !plainObject(payload.route) || !Array.isArray(payload.dialogue) || !plainObject(payload.knowledge)) return null;
-  const dialogue = payload.dialogue.map((turn) => ({
-    question: questionText(turn?.question), answer: questionText(turn?.answer),
-  }));
+  const dialogue = payload.dialogue.map((turn) => ({ question: questionText(turn?.question), answer: questionText(turn?.answer) }));
   if (dialogue.length > 3 || dialogue.some((turn) => !turn.question || !turn.answer)) return null;
   const route = { action: String(payload.route.action || ''), sourceId: payload.route.sourceId ?? null };
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',
     entries: Array.isArray(payload.knowledge.entries)
-      ? payload.knowledge.entries.map((entry) => ({ id: String(entry?.id || ''), content: String(entry?.content || '') }))
-      : null,
+      ? payload.knowledge.entries.map((entry) => ({ id: String(entry?.id || ''), content: String(entry?.content || '') })) : null,
   };
   if (!knowledge.sourceId || !knowledge.entries || knowledge.entries.length === 0 || knowledge.entries.length > 128) return null;
   return boundedJson({ question: text, route, dialogue, knowledge });
 }
 
-function requestFor(operation, tuple, input) {
-  const system = operation === 'moderatorSafety' ? MODERATOR_SYSTEM_PROMPT
-    : operation === 'assistantRouter' ? ROUTER_SYSTEM_PROMPT : ANSWER_SYSTEM_PROMPT;
+function requestFor({ tuple, system, input, maxOutputTokens, responseFormat }) {
   const request = {
     model: tuple.model,
     messages: [{ role: 'system', content: system }, { role: 'user', content: input }],
-    max_completion_tokens: tuple.maxOutputTokens,
+    max_completion_tokens: maxOutputTokens,
   };
   if (tuple.reasoningEffort !== 'none') request.reasoning_effort = tuple.reasoningEffort;
-  if (operation !== 'assistantAnswer') request.response_format = { type: 'json_object' };
+  if (responseFormat) request.response_format = { type: 'json_object' };
   return request;
 }
 
-function parseStructuredResult(response, receipt) {
-  const text = completionText(response);
+function parseStructuredResult(text, receipt) {
   let result;
   try { result = JSON.parse(text || ''); } catch { throw new ProviderRequestError('provider_response_invalid', receipt); }
   if (!plainObject(result)) throw new ProviderRequestError('provider_response_invalid', receipt);
   return { ...result, modelId: receipt.modelId, receipt };
 }
 
+/** A single POST with no retry/fallback. Its receipt contains no prompt or answer. */
+async function callOnce({ config, fetchFn, operation, tuple, system, input, maxOutputTokens, responseFormat }) {
+  let response;
+  try {
+    response = await fetchFn(`${config.endpoint}chat/completions`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
+      body: JSON.stringify(requestFor({ tuple, system, input, maxOutputTokens, responseFormat })),
+    });
+  } catch { throw new ProviderRequestError('provider_transport_failed'); }
+  const status = Number(response?.status) || 0;
+  let result = null;
+  try { result = typeof response?.json === 'function' ? await response.json() : null; } catch { result = null; }
+  const receipt = receiptFor({ operation, tuple, result, response, status });
+  if (!response?.ok) throw new ProviderRequestError('provider_http_error', receipt);
+  if (!plainObject(result) || !receipt) throw new ProviderRequestError('provider_response_invalid', receipt);
+  const text = completionText(result);
+  if (text == null) throw new ProviderRequestError('provider_response_invalid', receipt);
+  return { text, receipt };
+}
+
 /**
- * Demand-only OpenAI Chat Completions transport. Construction and disabled or
- * invalid calls never fetch. Each enabled operation performs one POST only:
- * there are no automatic retries, field fallbacks, or secondary providers.
+ * Explicit OpenAI Chat Completions transport. Safety requests are exactly one
+ * router call plus, only for abuse, one severity call. No automatic retry can
+ * produce a second bill or repeat an ambiguous action boundary.
  */
 export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {}) {
   const validated = validateProviderRuntimeConfig(config);
   if (!validated.valid) return unavailable(validated.code);
   if (typeof fetchFn !== 'function') return unavailable('provider_transport_unavailable');
 
-  async function invoke(operation, payload) {
-    const tuple = validated.config.modelTuples[operation];
+  async function moderate(payload) {
+    const text = questionText(payload?.text);
+    if (!text) throw new ProviderRequestError('provider_request_invalid');
+    try {
+      const result = await classifySafetyV3({
+        message: text,
+        context: {
+          currentWeakStrikes: payload?.currentWeakStrikes,
+          warningStage: payload?.warningStage,
+        },
+        invoke: ({ stage, system, user, maxOutputTokens }) => callOnce({
+          config: validated.config, fetchFn, operation: `moderatorSafety.${stage}`,
+          tuple: validated.config.modelTuples.moderatorSafety, system, input: user,
+          maxOutputTokens, responseFormat: true,
+        }),
+      });
+      return { ...result, receipt: result.safetyTrace.receipts.at(-1) || null };
+    } catch (error) {
+      if (error instanceof SafetyV3ContractError) {
+        const receipt = error.receipts.at(-1)?.receipt || null;
+        throw new ProviderRequestError(`provider_safety_${error.stage}_invalid`, receipt, {
+          safetyStage: error.stage, safetyReason: error.reason,
+          safetyReceipts: error.receipts.map((item) => item?.receipt || null),
+        });
+      }
+      throw error;
+    }
+  }
+
+  async function invokeAssistant(operation, payload) {
     const input = userInput(operation, payload);
     if (!input) throw new ProviderRequestError('provider_request_invalid');
-    let response;
-    try {
-      response = await fetchFn(`${validated.config.endpoint}chat/completions`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${validated.config.apiKey}`,
-        },
-        body: JSON.stringify(requestFor(operation, tuple, input)),
-      });
-    } catch {
-      throw new ProviderRequestError('provider_transport_failed');
-    }
-    const status = Number(response?.status) || 0;
-    let result = null;
-    try { result = typeof response?.json === 'function' ? await response.json() : null; } catch { result = null; }
-    const receipt = receiptFor({ operation, tuple, result, response, status });
-    if (!response?.ok) throw new ProviderRequestError('provider_http_error', receipt);
-    if (!plainObject(result) || !receipt) throw new ProviderRequestError('provider_response_invalid', receipt);
-    if (operation === 'assistantAnswer') {
-      const text = completionText(result);
-      if (text == null) throw new ProviderRequestError('provider_response_invalid', receipt);
-      return { text, modelId: receipt.modelId, receipt };
-    }
-    return parseStructuredResult(result, receipt);
+    const tuple = validated.config.modelTuples[operation];
+    const system = operation === 'assistantRouter' ? ROUTER_SYSTEM_PROMPT : ANSWER_SYSTEM_PROMPT;
+    const raw = await callOnce({
+      config: validated.config, fetchFn, operation, tuple, system, input,
+      maxOutputTokens: tuple.maxOutputTokens, responseFormat: operation === 'assistantRouter',
+    });
+    if (operation === 'assistantAnswer') return { text: raw.text, modelId: raw.receipt.modelId, receipt: raw.receipt };
+    return parseStructuredResult(raw.text, raw.receipt);
   }
 
   return Object.freeze({
-    moderate: (payload) => invoke(TUPLE_NAMES.moderatorSafety, payload),
-    routeAssistant: (payload) => invoke(TUPLE_NAMES.assistantRouter, payload),
-    answer: (payload) => invoke(TUPLE_NAMES.assistantAnswer, payload),
+    moderate,
+    routeAssistant: (payload) => invokeAssistant(TUPLE_NAMES.assistantRouter, payload),
+    answer: (payload) => invokeAssistant(TUPLE_NAMES.assistantAnswer, payload),
   });
 }
+
+export const SAFETY_PROVIDER_TUPLE = Object.freeze({
+  vendor: SAFETY_VENDOR, model: SAFETY_MODEL, reasoningEffort: SAFETY_REASONING_EFFORT,
+  routerMaxOutputTokens: SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
+  abuseMaxOutputTokens: SAFETY_ABUSE_MAX_OUTPUT_TOKENS,
+});

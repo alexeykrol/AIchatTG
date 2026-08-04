@@ -124,7 +124,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
   };
   const validatedProvider = validateProviderRuntimeConfig(provider);
   if (provider.enabled && !validatedProvider.valid) {
-    throw new Error(`an enabled provider requires the explicit OpenAI-compatible configuration (${validatedProvider.code})`);
+    throw new Error(`an enabled provider requires the explicit OpenAI safety configuration (${validatedProvider.code})`);
   }
   return {
     port: integer(env, 'TELEGRAM_RUNTIME_PORT', 8788),

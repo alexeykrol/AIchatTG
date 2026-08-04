@@ -30,6 +30,17 @@ export const ASSISTANT_ROLE_ACTIONS = Object.freeze({
   REDIRECT: 'redirect',
 });
 
+// Code-owned deployed safety policy: model output may describe a route and
+// severity, but it never chooses text, strikes, deletions, or bans.
+export const TELEGRAM_SAFETY_POLICY_VERSION = 'telegram-safety-v1';
+export const WARNING_FIRST =
+  'Сообщение удалено за нарушение правил общения. Решения модератора не обсуждаются '
+  + 'и не обжалуются. Повторное нарушение или попытка продолжить спор приведёт к '
+  + 'последнему предупреждению.';
+export const WARNING_FINAL =
+  'Это второе и последнее предупреждение. Следующее нарушение или продолжение '
+  + 'спора приведёт к немедленной блокировке.';
+
 const ROLE_SET = new Set(Object.values(BOT_ROLES));
 const ASSISTANT_DISPOSITION_SET = new Set(ASSISTANT_DISPOSITION_STATUSES);
 const ASSISTANT_ROLE_ACTION_SET = new Set(Object.values(ASSISTANT_ROLE_ACTIONS));
@@ -254,6 +265,7 @@ export function planTelegramSafetyAction(classification, currentWeakStrikes = 0)
     abuseLevel: decision.abuseLevel,
     strikeBefore,
     strikeAfter: strikeBefore,
+    policyVersion: TELEGRAM_SAFETY_POLICY_VERSION,
   };
   if (decision.safetyRoute === 'clean') {
     return { ...common, verdict: 'clean', action: 'none', warning: null };
@@ -263,10 +275,10 @@ export function planTelegramSafetyAction(classification, currentWeakStrikes = 0)
   }
   const strikeAfter = strikeBefore + 1;
   if (strikeAfter === 1) {
-    return { ...common, verdict: 'suspect', action: 'delete_warn_1', warning: 'warning_first', strikeAfter };
+    return { ...common, verdict: 'suspect', action: 'delete_warn_1', warning: WARNING_FIRST, strikeAfter };
   }
   if (strikeAfter === 2) {
-    return { ...common, verdict: 'suspect', action: 'delete_warn_2', warning: 'warning_final', strikeAfter };
+    return { ...common, verdict: 'suspect', action: 'delete_warn_2', warning: WARNING_FINAL, strikeAfter };
   }
   return { ...common, verdict: 'ban', action: 'ban_purge', warning: null, strikeAfter };
 }

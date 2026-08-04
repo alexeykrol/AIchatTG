@@ -8,8 +8,8 @@ credentials, databases and runtime imports are not inputs to either adapter.
 
 ## Provider adapter
 
-`apps/telegram-runtime/src/provider-adapter.mjs` is a demand-only
-OpenAI-compatible Chat Completions transport for the Moderator safety classifier
+`apps/telegram-runtime/src/provider-adapter.mjs` is a demand-only OpenAI Chat
+Completions transport for the Moderator safety classifier
 and Assistant route/answer calls. The runtime constructs it from the explicitly
 supplied `config.provider` object; the module does not read `process.env`, SDK
 defaults or any project outside AIchatTG.
@@ -24,25 +24,28 @@ endpoint, key or model defaults.
 
 | Purpose | Required variables |
 | --- | --- |
-| Provider identity and endpoint | `TELEGRAM_RUNTIME_PROVIDER_VENDOR=openai-compatible`, `TELEGRAM_RUNTIME_PROVIDER_ENDPOINT`, `TELEGRAM_RUNTIME_PROVIDER_API_KEY` |
-| Moderator safety classifier tuple | `TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MODEL`, `TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_REASONING_EFFORT`, `TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MAX_OUTPUT_TOKENS` |
+| Provider identity and endpoint | `TELEGRAM_RUNTIME_PROVIDER_VENDOR=openai`, `TELEGRAM_RUNTIME_PROVIDER_ENDPOINT`, `TELEGRAM_RUNTIME_PROVIDER_API_KEY` |
+| Moderator safety classifier tuple | Fixed: `gpt-5.6-terra`, `medium`, router cap `1024`; abuse-stage cap `768` |
 | Assistant router tuple | `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MODEL`, `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_REASONING_EFFORT`, `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MAX_OUTPUT_TOKENS` |
 | Assistant answer tuple | `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MODEL`, `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT`, `TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS` |
 
 The endpoint must be an explicit HTTPS base URL ending exactly in `/v1`, with no
 credentials, query, fragment or non-443 port; literal localhost and IP endpoints
-are rejected. The only accepted vendor literal is `openai-compatible`. Each tuple needs a model identifier, one of
-`none`, `minimal`, `low`, `medium`, or `high` for reasoning effort, and an
-integer output cap from 1 through 4096. The three tuples are independent at
-runtime; no tuple inherits a model, effort or cap from another operation.
+are rejected. The only accepted vendor literal is `openai`. The Moderator tuple
+is a safety-policy invariant, rather than a deployment knob: it must be
+`gpt-5.6-terra` with `medium` reasoning and a router cap of 1024. Its second,
+abuse-severity stage has a code-owned 768-token cap. Assistant tuples remain
+independent and each needs a model identifier, one of `none`, `minimal`, `low`,
+`medium`, or `high` for reasoning effort, and an integer output cap from 1
+through 4096.
 
-Each operation makes exactly one `POST` to `<endpoint>/chat/completions` with
-the selected tuple, `max_completion_tokens`, and `reasoning_effort` unless the
-effort is `none`. Safety and routing request JSON-mode output and normalize it
-to the existing runtime contracts; answers normalize Chat Completions text to
-`{ text, modelId }`. There is no automatic retry, no parameter fallback, and no
-secondary provider. A failed request is surfaced as `ProviderRequestError` with
-`retryable=false`.
+Each Assistant operation makes exactly one `POST` to `<endpoint>/chat/completions`
+with its selected tuple. Moderator safety makes exactly one Terra/medium router
+call and only for an admitted abuse route makes one Terra/medium severity call.
+Both safety calls request JSON-mode output and use closed duplicate-key-safe
+contracts; threat takes priority and therefore does not make a severity call.
+There is no automatic retry, no parameter fallback, and no secondary provider.
+A failed request is surfaced as `ProviderRequestError` with `retryable=false`.
 
 Successful results include a content-free `receipt` containing only vendor,
 operation, configured/returned model IDs, reasoning effort, HTTP status,
