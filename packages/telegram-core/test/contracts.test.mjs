@@ -56,6 +56,36 @@ test('roles remain structurally isolated and message identities stay chat-scoped
   assert.throws(() => incomingEventId(BOT_ROLES.MODERATOR, { update_id: -1 }), /update_id/);
 });
 
+test('only the Moderator classifies guarded-chat automatic pins as housekeeping', () => {
+  const forwarded = {
+    update_id: 9,
+    message: message('channel post', { message_id: 71, is_automatic_forward: true }),
+  };
+  assert.deepEqual(classifyTelegramUpdate({
+    role: BOT_ROLES.MODERATOR, update: forwarded, acceptedChatIds: [-1001],
+  }), {
+    kind: 'pin_governance',
+    pin: { kind: 'unpin_auto_forward', chatId: '-1001', messageId: '71' },
+  });
+  assert.equal(classifyTelegramUpdate({
+    role: BOT_ROLES.ASSISTANT, update: forwarded, acceptedChatIds: [-1001], botUsername: 'assistant_bot',
+  }).kind, 'skip');
+
+  const manualPin = {
+    update_id: 10,
+    message: message('', { message_id: 72, pinned_message: { message_id: 70 } }),
+  };
+  assert.deepEqual(classifyTelegramUpdate({
+    role: BOT_ROLES.MODERATOR, update: manualPin, acceptedChatIds: [-1001],
+  }), {
+    kind: 'pin_governance',
+    pin: { kind: 'remember_owner_pin', chatId: '-1001', messageId: '70' },
+  });
+  assert.equal(classifyTelegramUpdate({
+    role: BOT_ROLES.MODERATOR, update: forwarded, acceptedChatIds: [-2002],
+  }).reason, 'unknown_chat');
+});
+
 test('closed safety policy owns actions and Assistant access dispositions', () => {
   const weak = normalizeSafetyClassification({ safety_route: 'abuse', abuse_level: 'weak', confidence: 0.9, reason: 'fixture' });
   assert.deepEqual(planTelegramSafetyAction(weak, 0), {

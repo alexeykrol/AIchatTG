@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
 import { ASSISTANT_SOURCE_PACKAGES, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
@@ -17,6 +18,7 @@ function config(overrides = {}) {
   return {
     ingressEnabled: false,
     moderationMode: 'live',
+    moderationAntichannelPin: true,
     assistantModerationWaitMs: 0,
     assistantModerationPollMs: 1,
     moderator: { chatIds: ['-100'], botToken: '', botUsername: '', webhookSecret: 'moderator-secret', exemptBotIds: [] },
@@ -69,6 +71,7 @@ function adapters(actions) {
     async banMember(input) { actions.push(['ban', input]); return { ok: true }; },
     async banSenderChat(input) { actions.push(['ban_sender_chat', input]); return { ok: true }; },
     async deleteMessage(input) { actions.push(['delete', input]); return { ok: true }; },
+    async unpinMessage(input) { actions.push(['unpin', input]); return { ok: true }; },
     async sendMessage(input) { actions.push(['warn', input]); return { ok: true }; },
   };
   return {
@@ -77,6 +80,7 @@ function adapters(actions) {
       async verifyEnforcement() { return { proven: true, status: 'administrator' }; },
       async senderDisposition() { return { proven: true, exempt: false, reason: null }; },
       deleteMessage(input) { return moderatorTelegram.deleteMessage(input); },
+      unpinMessage(input) { return moderatorTelegram.unpinMessage(input); },
       sendWarning(input) { return moderatorTelegram.sendMessage(input); },
       banAuthor(input) { return input.senderChatId != null
         ? moderatorTelegram.banSenderChat(input)
@@ -124,18 +128,48 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.equal(loaded.ingressEnabled, false);
   assert.equal(loaded.assistantModerationWaitMs, 30_000);
   assert.equal(loaded.moderationBanLinks, true);
+  assert.equal(loaded.moderationAntichannelPin, true);
   assert.equal(loaded.assistantKnowledgeEnabled, false);
   assert.equal(loaded.assistantCooldownSec, 20);
   assert.equal(loaded.assistantDailyPerUser, 20);
   assert.equal(loaded.assistantDialogueTtlSec, 604_800);
   assert.equal(loaded.assistantDialogueTurnLimit, 3);
   assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_MODERATION_BAN_LINKS: 'false' }).moderationBanLinks, false);
+  assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_MODERATION_ANTICHANNELPIN: 'false' }).moderationAntichannelPin, false);
   assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /OpenAI safety/);
   assert.throws(() => loadRuntimeConfig({
     TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH: '/tmp/unreviewed-course-content.manifest.json',
   }, { cwd: '/tmp/aichattg-test' }), /must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT/);
+});
+
+test('an existing moderation ledger gains the additive user linkage column', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-ledger-migration-'));
+  const databasePath = join(folder, 'runtime.db');
+  const legacy = new Database(databasePath);
+  try {
+    legacy.exec(`CREATE TABLE runtime_moderation_message_ledger (
+      chat_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      latest_revision_identity TEXT NOT NULL,
+      weak_strike_event_id TEXT,
+      deletion_state TEXT,
+      deletion_at INTEGER,
+      PRIMARY KEY (chat_id, message_id)
+    )`);
+  } finally { legacy.close(); }
+
+  const db = openRuntimeDatabase(databasePath);
+  try {
+    const columns = db.prepare('PRAGMA table_info(runtime_moderation_message_ledger)').all().map((row) => row.name);
+    assert.ok(columns.includes('user_id'));
+    const store = createRuntimeStore(db);
+    store.observeModerationMessage({ chatId: '-100', messageId: 'legacy-message', userId: '7', revisionIdentity: 'message:legacy-message' });
+    assert.deepEqual(store.listKnownUndeletedModerationMessages({ chatId: '-100', userId: '7' }), [{
+      chat_id: '-100', message_id: 'legacy-message', user_id: '7', deletion_state: null,
+    }]);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
 test('enabled ingress requires both role identities and live Assistant-to-Guard chat coverage', () => {
@@ -794,7 +828,191 @@ test('link hard rule escalates URLs but never an @mention', async () => {
     linked.message.entities = [{ type: 'url', offset: 0, length: linked.message.text.length }];
     const result = await runtime.handleUpdate('moderator', linked);
     assert.deepEqual({ verdict: result.verdict, action: result.action }, { verdict: 'ban', action: 'ban_purge' });
-    assert.deepEqual(actions.map(([kind]) => kind), ['ban', 'delete']);
+    // The live ban purges this user's earlier locally known non-deleted
+    // message in the same chat, then the triggering URL message.
+    assert.deepEqual(actions.map(([kind]) => kind), ['ban', 'delete', 'delete']);
+    assert.deepEqual(actions.slice(1).map(([, input]) => input.messageId), ['103', '104']);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('Moderator unpins a channel auto-forward once, remembers manual pins and never invokes a provider', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-pin-governance-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let providerCalls = 0;
+  const provider = fakeLlm();
+  provider.moderate = async () => { providerCalls++; throw new Error('pin events must not reach provider'); };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const autoForward = {
+    update_id: 510,
+    message: {
+      message_id: 107, chat: { id: -100 }, from: { id: 19, is_bot: true },
+      text: 'channel post', is_automatic_forward: true,
+    },
+  };
+  try {
+    const first = await runtime.handleUpdate('moderator', autoForward);
+    assert.deepEqual(first, {
+      eventId: 'moderator:510', kind: 'pin_governance', action: 'auto_unpinned',
+      pin: { chatId: '-100', messageId: '107' },
+    });
+    assert.deepEqual(actions, [['unpin', { chatId: '-100', messageId: '107' }]]);
+    assert.equal(providerCalls, 0);
+
+    // Same webhook delivery replays its fenced receipt; paired Telegram service
+    // event for the same native pin also sees the exact-once native claim.
+    assert.deepEqual(await runtime.handleUpdate('moderator', autoForward), first);
+    const pinEvent = {
+      update_id: 511,
+      message: {
+        message_id: 108, chat: { id: -100 },
+        pinned_message: { message_id: 107, is_automatic_forward: true },
+      },
+    };
+    assert.equal((await runtime.handleUpdate('moderator', pinEvent)).action, 'auto_unpin_already_recorded');
+    assert.deepEqual(actions, [['unpin', { chatId: '-100', messageId: '107' }]]);
+
+    const manualPin = {
+      update_id: 512,
+      message: { message_id: 109, chat: { id: -100 }, pinned_message: { message_id: 88 } },
+    };
+    assert.equal((await runtime.handleUpdate('moderator', manualPin)).action, 'owner_pin_remembered');
+    assert.deepEqual(actions, [['unpin', { chatId: '-100', messageId: '107' }]]);
+    assert.deepEqual(db.prepare(`SELECT chat_id, message_id FROM runtime_moderation_owner_pins`).get(), {
+      chat_id: '-100', message_id: '88',
+    });
+    assert.equal(providerCalls, 0);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('pin governance stays disabled or out of role/chat scope without an unpin', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-pin-disabled-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const forwarded = {
+    update_id: 513,
+    message: { message_id: 110, chat: { id: -100 }, text: 'channel', is_automatic_forward: true },
+  };
+  try {
+    const disabled = createTelegramRuntime({
+      config: config({ moderationAntichannelPin: false }), store: createRuntimeStore(db), provider: fakeLlm(),
+      knowledge: availableKnowledge(), ...adapters(actions),
+    });
+    assert.equal((await disabled.handleUpdate('moderator', forwarded)).action, 'disabled');
+    assert.equal(actions.length, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_moderation_auto_unpins').get().count, 0);
+
+    const scoped = createTelegramRuntime({
+      config: config(), store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
+    });
+    assert.equal((await scoped.handleUpdate('assistant', { ...forwarded, update_id: 514 })).kind, 'skipped');
+    assert.equal((await scoped.handleUpdate('moderator', {
+      update_id: 515,
+      message: { ...forwarded.message, message_id: 111, chat: { id: -200 } },
+    })).reason, 'unknown_chat');
+    assert.equal(actions.length, 0);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('unproven pin rights fail closed and fence the native target against duplicate action', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-pin-rights-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const guarded = adapters(actions);
+  let unpinCalls = 0;
+  guarded.guard.unpinMessage = async () => {
+    unpinCalls++;
+    return { ok: false, skipped: 'guard_pin_rights_unproven', uncertain: false };
+  };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(), ...guarded,
+  });
+  const forwarded = {
+    update_id: 516,
+    message: { message_id: 112, chat: { id: -100 }, text: 'channel', is_automatic_forward: true },
+  };
+  try {
+    const first = await runtime.handleUpdate('moderator', forwarded);
+    assert.equal(first.action, 'auto_unpin_skipped');
+    assert.equal(first.reason, 'guard_pin_rights_unproven');
+    assert.equal(unpinCalls, 1);
+    assert.equal((await runtime.handleUpdate('moderator', { ...forwarded, update_id: 517 })).action, 'auto_unpin_already_recorded');
+    assert.equal(unpinCalls, 1);
+    assert.deepEqual(db.prepare(`SELECT state, error_code FROM runtime_moderation_auto_unpins
+      WHERE chat_id = '-100' AND message_id = '112'`).get(), {
+      state: 'skipped', error_code: 'guard_pin_rights_unproven',
+    });
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('ban purges only bounded locally known undeleted messages for the exact chat and user', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-known-purge-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db);
+  const actions = [];
+  const priorActions = [];
+  const cleanRuntime = createTelegramRuntime({
+    config: config(), store, provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters(priorActions),
+  });
+  const user = { id: 7, first_name: 'Student', is_bot: false };
+  try {
+    await cleanRuntime.handleUpdate('moderator', update(518, 113, 'ordinary one', user));
+    await cleanRuntime.handleUpdate('moderator', update(519, 114, 'ordinary two', user));
+    await cleanRuntime.handleUpdate('moderator', update(520, 115, 'another user', { id: 8, first_name: 'Other', is_bot: false }));
+
+    const runtime = createTelegramRuntime({
+      config: config(), store, provider: fakeLlm({ safetyRoute: 'threat' }), knowledge: availableKnowledge(), ...adapters(actions),
+    });
+    const trigger = update(521, 116, 'unsafe', user);
+    const first = await runtime.handleUpdate('moderator', trigger);
+    assert.deepEqual({ verdict: first.verdict, action: first.action }, { verdict: 'ban', action: 'ban_purge' });
+    assert.deepEqual(actions.map(([kind]) => kind), ['ban', 'delete', 'delete', 'delete']);
+    assert.deepEqual(actions.slice(1).map(([, input]) => input), [
+      { chatId: '-100', messageId: '113' },
+      { chatId: '-100', messageId: '114' },
+      { chatId: '-100', messageId: '116' },
+    ]);
+    assert.equal(db.prepare(`SELECT deletion_state FROM runtime_moderation_message_ledger
+      WHERE chat_id = '-100' AND message_id = '115'`).get().deletion_state, null);
+    assert.equal(first.enforcement.purge.total, 3);
+    assert.equal(first.enforcement.purge.deleted, 3);
+    assert.equal(first.enforcement.purge.failed, 0);
+
+    assert.deepEqual(await runtime.handleUpdate('moderator', trigger), first);
+    assert.equal(actions.length, 4);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an ambiguous known-message purge is fenced and not retried by a later ban', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-purge-uncertain-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db);
+  const actions = [];
+  const user = { id: 7, first_name: 'Student', is_bot: false };
+  const cleanRuntime = createTelegramRuntime({
+    config: config(), store, provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters([]),
+  });
+  await cleanRuntime.handleUpdate('moderator', update(522, 117, 'ordinary', user));
+  const guarded = adapters(actions);
+  guarded.guard.deleteMessage = async (input) => {
+    actions.push(['delete', input]);
+    return input.messageId === '117'
+      ? { ok: false, error: 'transport_unknown', uncertain: true }
+      : { ok: true };
+  };
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeLlm({ safetyRoute: 'threat' }), knowledge: availableKnowledge(), ...guarded,
+  });
+  try {
+    assert.equal((await runtime.handleUpdate('moderator', update(523, 118, 'unsafe', user))).action, 'purge_unconfirmed');
+    assert.equal(db.prepare(`SELECT deletion_state FROM runtime_moderation_message_ledger
+      WHERE chat_id = '-100' AND message_id = '117'`).get().deletion_state, 'uncertain');
+    assert.equal((await runtime.handleUpdate('moderator', update(524, 119, 'unsafe again', user))).action, 'ban_purge');
+    assert.deepEqual(actions.filter(([kind]) => kind === 'delete').map(([, input]) => input.messageId), [
+      '117', '118', '119',
+    ]);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 

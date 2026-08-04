@@ -18,6 +18,19 @@ webhook, invoke a provider, or send a notification. The two webhook routes are
 disabled unless `TELEGRAM_RUNTIME_INGRESS_ENABLED=true`, and then require
 separate Moderator and Assistant webhook secrets.
 
+The Moderator also preserves the deployed channel-pin housekeeping contract.
+`TELEGRAM_RUNTIME_MODERATION_ANTICHANNELPIN` defaults to `true`: only an
+automatic pin on an auto-forwarded channel post is removed, through the
+Moderator token after an explicit `can_pin_messages` rights check. Manual and
+anonymous-admin pins are never removed and their native message identity is
+remembered locally. These service events never reach a provider or Assistant.
+
+For a code-owned `ban_purge` safety decision, the Moderator deletes the
+triggering message plus at most 100 earlier, locally observed, still-undeleted
+messages by that exact user in that exact chat. It never discovers chat history
+through Telegram, crosses chat/user boundaries, or retries an ambiguous delete;
+the local action ledger fences that native target for operator review.
+
 `TELEGRAM_RUNTIME_PROVIDER_ENABLED=true` requires an explicit HTTPS endpoint,
 key and model; it is intentionally a separate budget/release decision. An Assistant
 question is never sent to that adapter until the Moderator has written an

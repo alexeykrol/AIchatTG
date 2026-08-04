@@ -27,6 +27,12 @@ function hasGuardCapabilities(member) {
     && member.can_restrict_members === true;
 }
 
+function hasPinGovernanceCapability(member) {
+  const status = String(member?.status || '').toLowerCase();
+  if (status === 'creator' || status === 'owner') return true;
+  return status === 'administrator' && member.can_pin_messages === true;
+}
+
 /**
  * Guard is the only adapter allowed to make a destructive Telegram request.
  * Every invocation first proves that this bot is an administrator in an
@@ -77,6 +83,29 @@ export function createGuardAdapter({
   }
 
   /**
+   * Pin management has its own Telegram administrator permission. A Moderator
+   * with only `can_pin_messages` can safely perform this housekeeping; missing
+   * proof must never turn into an external unpin request.
+   */
+  async function verifyPinGovernance({ chatId }) {
+    const normalizedChatId = String(chatId || '');
+    if (!normalizedChatId || !configuredChats.has(normalizedChatId)) {
+      return { proven: false, reason: 'guard_chat_unconfigured' };
+    }
+    if (!guardId) return { proven: false, reason: 'guard_identity_unavailable' };
+    const resolved = await member(normalizedChatId, guardId);
+    if (!resolved.ok) return { proven: false, reason: resolved.reason };
+    if (!hasPinGovernanceCapability(resolved.member)) {
+      return { proven: false, reason: 'guard_pin_rights_unproven' };
+    }
+    return {
+      proven: true,
+      chatId: normalizedChatId,
+      status: String(resolved.member.status || '').toLowerCase(),
+    };
+  }
+
+  /**
    * Match the deployed Guard exemptions: chat creators/admins, known friendly
    * bots, and anonymous messages posted as the group itself are never judged or
    * sanctioned. A failed membership lookup is intentionally not treated as a
@@ -110,8 +139,19 @@ export function createGuardAdapter({
     }
   }
 
+  async function callWithPinProof(chatId, invoke, fallback) {
+    const proof = await verifyPinGovernance({ chatId });
+    if (!proof.proven) return { ok: false, skipped: proof.reason, uncertain: false };
+    try {
+      return normalizedResult(await invoke(), fallback);
+    } catch {
+      return { ok: false, error: fallback, uncertain: true };
+    }
+  }
+
   return {
     verifyEnforcement,
+    verifyPinGovernance,
     senderDisposition,
     deleteMessage({ chatId, messageId }) {
       return callWithProof(chatId, () => telegram.deleteMessage({ chatId: String(chatId), messageId: String(messageId) }), 'delete_failed');
@@ -134,6 +174,14 @@ export function createGuardAdapter({
         return Promise.resolve({ ok: false, skipped: 'author_identity_missing', uncertain: false });
       }
       return callWithProof(chatId, () => telegram.banMember({ chatId: String(chatId), userId: String(userId) }), 'ban_failed');
+    },
+    unpinMessage({ chatId, messageId }) {
+      if (typeof telegram.unpinMessage !== 'function') {
+        return Promise.resolve({ ok: false, skipped: 'unpin_unsupported', uncertain: false });
+      }
+      return callWithPinProof(chatId, () => telegram.unpinMessage({
+        chatId: String(chatId), messageId: String(messageId),
+      }), 'unpin_failed');
     },
   };
 }

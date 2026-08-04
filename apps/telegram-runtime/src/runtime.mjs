@@ -143,7 +143,32 @@ function enforcementReceipt(plan, guardProof = null) {
       status: guardProof.status || null,
     },
     steps: {},
+    purge: { attempted: false, total: 0, deleted: 0, failed: 0, items: [] },
   };
+}
+
+const MAX_KNOWN_BAN_PURGE_MESSAGES = 100;
+
+function knownBanPurgeTargets(store, comment) {
+  const known = store.listKnownUndeletedModerationMessages({
+    chatId: comment.chatId,
+    userId: comment.userId,
+    limit: MAX_KNOWN_BAN_PURGE_MESSAGES,
+  });
+  const candidates = [...known, {
+    chat_id: String(comment.chatId), message_id: String(comment.messageId), user_id: comment.userId,
+  }];
+  const targets = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const chatId = String(candidate.chat_id ?? comment.chatId);
+    const messageId = String(candidate.message_id ?? comment.messageId);
+    const nativeKey = `${chatId}:${messageId}`;
+    if (seen.has(nativeKey)) continue;
+    seen.add(nativeKey);
+    targets.push({ chatId, messageId });
+  }
+  return targets;
 }
 
 /**
@@ -192,6 +217,84 @@ export function createTelegramRuntime({
   async function completeEnforcement(claim, status, receipt, errorCode = null) {
     const completed = store.completeModerationEnforcement({ claim, status, receipt, errorCode });
     return { receipt, persisted: completed.completed === true, status };
+  }
+
+  /**
+   * Channel auto-pins are service housekeeping, not moderation.  The native
+   * `(chat_id, message_id)` claim prevents Telegram's paired auto-forward and
+   * pinned-message updates (or a webhook redelivery) from issuing a second
+   * unpin.  We deliberately never retry a failed/ambiguous external action.
+   */
+  async function handlePinGovernance(eventId, pin) {
+    if (config.moderationAntichannelPin === false) {
+      return { kind: 'pin_governance', action: 'disabled', pin: { ...pin } };
+    }
+    if (pin.kind === 'remember_owner_pin') {
+      const remembered = store.rememberOwnerPin({
+        chatId: pin.chatId, messageId: pin.messageId, eventId,
+      });
+      return {
+        kind: 'pin_governance', action: 'owner_pin_remembered',
+        pin: { chatId: pin.chatId, messageId: pin.messageId },
+        rememberedAt: remembered?.remembered_at ?? null,
+      };
+    }
+    if (pin.kind !== 'unpin_auto_forward') {
+      return { kind: 'skipped', reason: 'unsupported_pin_governance_action' };
+    }
+
+    const claimed = store.claimAutoUnpin({
+      chatId: pin.chatId, messageId: pin.messageId, eventId,
+    });
+    if (!claimed.claimed) {
+      return {
+        kind: 'pin_governance', action: 'auto_unpin_already_recorded',
+        pin: { chatId: pin.chatId, messageId: pin.messageId },
+        state: claimed.existing?.state || 'unknown',
+      };
+    }
+    if (!guardAdapter || typeof guardAdapter.unpinMessage !== 'function') {
+      store.completeAutoUnpin({
+        chatId: pin.chatId, messageId: pin.messageId, state: 'skipped',
+        result: { ok: false, error: 'guard_adapter_missing' }, errorCode: 'guard_adapter_missing',
+      });
+      return {
+        kind: 'pin_governance', action: 'auto_unpin_skipped',
+        pin: { chatId: pin.chatId, messageId: pin.messageId }, reason: 'guard_adapter_missing',
+      };
+    }
+    if (!store.markAutoUnpinCalling({ chatId: pin.chatId, messageId: pin.messageId }).marked) {
+      return {
+        kind: 'pin_governance', action: 'auto_unpin_already_recorded',
+        pin: { chatId: pin.chatId, messageId: pin.messageId }, state: 'claim_fenced',
+      };
+    }
+
+    let unpin;
+    try {
+      unpin = await guardAdapter.unpinMessage({ chatId: pin.chatId, messageId: pin.messageId });
+    } catch {
+      store.completeAutoUnpin({
+        chatId: pin.chatId, messageId: pin.messageId, state: 'uncertain',
+        result: { ok: false, error: 'unpin_transport_unknown', uncertain: true }, errorCode: 'unpin_transport_unknown',
+      });
+      return {
+        kind: 'pin_governance', action: 'auto_unpin_uncertain',
+        pin: { chatId: pin.chatId, messageId: pin.messageId }, reason: 'unpin_transport_unknown',
+      };
+    }
+    const result = redactedActionResult(unpin, 'unpin_failed');
+    const state = result.ok ? 'completed' : result.uncertain ? 'uncertain' : 'skipped';
+    store.completeAutoUnpin({
+      chatId: pin.chatId, messageId: pin.messageId, state, result,
+      errorCode: result.ok ? null : result.error,
+    });
+    return {
+      kind: 'pin_governance',
+      action: result.ok ? 'auto_unpinned' : result.uncertain ? 'auto_unpin_uncertain' : 'auto_unpin_skipped',
+      pin: { chatId: pin.chatId, messageId: pin.messageId },
+      ...(result.ok ? {} : { reason: result.error }),
+    };
   }
 
   async function enforceSafetyPlan(eventId, comment, decision, previewPlan) {
@@ -305,23 +408,50 @@ export function createTelegramRuntime({
       await completeEnforcement(planned.claim, 'uncertain', receipt, banned.error);
       return { action: 'ban_unconfirmed', receipt, actions };
     }
-    const deleted = await callStep('delete', () => guardAdapter.deleteMessage({
-      chatId: comment.chatId, messageId: comment.messageId,
-    }));
-    if (!deleted.ok) {
-      receipt.status = deleted.uncertain ? 'uncertain' : 'guard_unproven';
-      await completeEnforcement(planned.claim, deleted.uncertain ? 'uncertain' : 'skipped', receipt, deleted.error);
-      return { action: 'purge_unconfirmed', receipt, actions };
+    receipt.purge.attempted = true;
+    for (const target of knownBanPurgeTargets(store, comment)) {
+      const item = { chatId: target.chatId, messageId: target.messageId, status: 'calling' };
+      receipt.purge.items.push(item);
+      // Fence the native target before the Telegram call. If the process dies
+      // after this point, a later ban cannot mistake an unknown delivery outcome
+      // for a safely retryable undeleted message.
+      store.recordModerationDeletion({
+        chatId: target.chatId, messageId: target.messageId, state: 'calling',
+      });
+      const deleted = await callStep(`delete:${target.messageId}`, () => guardAdapter.deleteMessage(target));
+      Object.assign(item, redactedActionResult(deleted, 'delete_failed'), {
+        status: deleted.ok ? 'completed' : deleted.uncertain ? 'uncertain' : 'skipped',
+      });
+      store.recordModerationDeletion({
+        chatId: target.chatId,
+        messageId: target.messageId,
+        state: deleted.ok ? 'deleted' : deleted.uncertain ? 'uncertain' : 'failed',
+      });
     }
-    store.recordModerationDeletion({ chatId: comment.chatId, messageId: comment.messageId, state: 'deleted' });
-    receipt.status = 'completed';
-    await completeEnforcement(planned.claim, 'completed', receipt);
-    return { action: banned.ok ? 'ban_purge' : 'delete_no_author', receipt, actions };
+    receipt.purge.total = receipt.purge.items.length;
+    receipt.purge.deleted = receipt.purge.items.filter((item) => item.ok).length;
+    receipt.purge.failed = receipt.purge.total - receipt.purge.deleted;
+    const uncertain = receipt.purge.items.some((item) => item.uncertain === true);
+    receipt.status = uncertain ? 'uncertain' : receipt.purge.failed ? 'guard_unproven' : 'completed';
+    await completeEnforcement(
+      planned.claim,
+      uncertain ? 'uncertain' : receipt.purge.failed ? 'skipped' : 'completed',
+      receipt,
+      uncertain ? 'purge_uncertain' : receipt.purge.failed ? 'purge_unconfirmed' : null,
+    );
+    return {
+      action: receipt.purge.failed
+        ? 'purge_unconfirmed'
+        : banned.ok ? 'ban_purge' : 'delete_no_author',
+      receipt,
+      actions,
+    };
   }
 
   async function handleModerator(eventId, comment) {
     store.observeModerationMessage({
-      chatId: comment.chatId, messageId: comment.messageId, revisionIdentity: comment.platformMessageId,
+      chatId: comment.chatId, messageId: comment.messageId, userId: comment.userId,
+      revisionIdentity: comment.platformMessageId,
     });
     store.upsertAssistantDisposition({
       chatId: comment.chatId,
@@ -575,6 +705,8 @@ export function createTelegramRuntime({
           ? await handleModerator(eventId, classified.comment)
           : classified.kind === 'question'
             ? await handleAssistant(eventId, classified.question)
+            : classified.kind === 'pin_governance'
+              ? await handlePinGovernance(eventId, classified.pin)
             : { kind: 'skipped', reason: classified.reason };
         const response = { eventId, ...result };
         const completed = store.completeInboundDelivery({

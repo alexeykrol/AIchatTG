@@ -9,6 +9,7 @@ export function createTelegramAdapter({ botToken = '', fetchFn = globalThis.fetc
     return {
       async sendMessage() { return disabledResult(); }, async banMember() { return disabledResult(); },
       async banSenderChat() { return disabledResult(); }, async deleteMessage() { return disabledResult(); },
+      async unpinMessage() { return disabledResult(); },
       async getChatMember() { return disabledResult(); },
     };
   }
@@ -25,6 +26,7 @@ export function createTelegramAdapter({ botToken = '', fetchFn = globalThis.fetc
     banMember: ({ chatId, userId }) => call('banChatMember', { chat_id: chatId, user_id: userId }),
     banSenderChat: ({ chatId, senderChatId }) => call('banChatSenderChat', { chat_id: chatId, sender_chat_id: senderChatId }),
     deleteMessage: ({ chatId, messageId }) => call('deleteMessage', { chat_id: chatId, message_id: messageId }),
+    unpinMessage: ({ chatId, messageId }) => call('unpinChatMessage', { chat_id: chatId, message_id: messageId }),
     getChatMember: ({ chatId, userId }) => call('getChatMember', { chat_id: chatId, user_id: userId }),
   };
 }

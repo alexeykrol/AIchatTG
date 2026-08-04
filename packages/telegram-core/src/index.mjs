@@ -159,6 +159,29 @@ function isServiceMessage(message) {
 }
 
 /**
+ * Telegram automatically pins posts forwarded from a linked channel.  The
+ * deployed Moderator treats that as housekeeping, not as a comment: remove
+ * the automatic pin, but never disturb a human or anonymous-admin pin.  Keep
+ * the native target here (rather than deriving it from a corpus id) so the
+ * runtime always acts on the exact chat and message Telegram supplied.
+ */
+function pinGovernanceAction(message) {
+  const chatId = String(message.chat.id);
+  const pinned = message.pinned_message;
+  if (pinned) {
+    if (pinned.message_id == null) return { kind: 'skip', reason: 'invalid_pinned_message' };
+    if (pinned.is_automatic_forward) {
+      return { kind: 'unpin_auto_forward', chatId, messageId: String(pinned.message_id) };
+    }
+    return { kind: 'remember_owner_pin', chatId, messageId: String(pinned.message_id) };
+  }
+  if (message.is_automatic_forward) {
+    return { kind: 'unpin_auto_forward', chatId, messageId: String(message.message_id) };
+  }
+  return null;
+}
+
+/**
  * Preserve the two-bot structural split: an Assistant can never classify a
  * moderation comment and a Moderator can never classify an assistant question.
  */
@@ -180,11 +203,11 @@ export function classifyTelegramUpdate({
   if (message.from?.is_bot && new Set(exemptBotIds.map(String)).has(String(message.from.id))) {
     return { kind: 'skip', reason: 'exempt_bot' };
   }
-  if (botId != null && String(message.from?.id) === String(botId)) {
-    return { kind: 'skip', reason: 'own_bot' };
-  }
 
   if (role === BOT_ROLES.ASSISTANT) {
+    if (botId != null && String(message.from?.id) === String(botId)) {
+      return { kind: 'skip', reason: 'own_bot' };
+    }
     if (message.from?.is_bot) return { kind: 'skip', reason: 'bot_sender' };
     const question = detectAssistantQuestion(message, botUsername);
     if (!question.isQuestion) return { kind: 'skip', reason: 'not_assistant_command' };
@@ -198,6 +221,19 @@ export function classifyTelegramUpdate({
         text: question.text,
       },
     };
+  }
+
+  // Only the Moderator owns the guard token and can perform pin
+  // housekeeping.  This is deliberately before text/service-message
+  // classification: Telegram pin updates do not normally contain user text.
+  const pinAction = pinGovernanceAction(message);
+  if (pinAction) {
+    if (pinAction.kind === 'skip') return pinAction;
+    return { kind: 'pin_governance', pin: pinAction };
+  }
+
+  if (botId != null && String(message.from?.id) === String(botId)) {
+    return { kind: 'skip', reason: 'own_bot' };
   }
 
   if (!identity.text.trim()) {

@@ -153,6 +153,10 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     // signal. @mentions are excluded by the core detector, so this default does
     // not turn normal conversation into a link violation.
     moderationBanLinks: boolean(env, 'TELEGRAM_RUNTIME_MODERATION_BAN_LINKS', true),
+    // Preserve the deployed Moderator's safe default: only Telegram's automatic
+    // pin of an auto-forwarded channel post is removed; manual pins are never
+    // touched. The action remains behind the Moderator guard-rights check.
+    moderationAntichannelPin: boolean(env, 'TELEGRAM_RUNTIME_MODERATION_ANTICHANNELPIN', true),
     assistantModerationWaitMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_WAIT_MS', 30_000),
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     // No course snapshot is admitted during the project split. This explicit

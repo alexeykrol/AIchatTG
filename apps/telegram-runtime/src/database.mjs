@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_weak_strikes (
 CREATE TABLE IF NOT EXISTS runtime_moderation_message_ledger (
   chat_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
+  user_id TEXT,
   latest_revision_identity TEXT NOT NULL,
   weak_strike_event_id TEXT,
   deletion_state TEXT,
@@ -156,6 +157,31 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_enforcement_receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_moderation_enforcement_recovery
   ON runtime_moderation_enforcement_receipts(status, updated_at);
+-- Pin governance is separate from safety enforcement.  Telegram can surface
+-- one channel auto-forward as both the post and a pinned-message service event;
+-- this native-key claim makes the harmless unpin exactly-once across those
+-- deliveries and keeps an unknown Telegram outcome fenced for operator review.
+CREATE TABLE IF NOT EXISTS runtime_moderation_auto_unpins (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  first_event_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_events(event_id),
+  state TEXT NOT NULL CHECK(state IN ('planned', 'calling', 'completed', 'skipped', 'uncertain')),
+  result_json TEXT,
+  error_code TEXT,
+  claimed_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  PRIMARY KEY (chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_moderation_auto_unpins_recovery
+  ON runtime_moderation_auto_unpins(state, claimed_at);
+-- A manual/owner pin is never unpinned.  Retaining its native identity mirrors
+-- the deployed Moderator's owner-pin state without storing message text.
+CREATE TABLE IF NOT EXISTS runtime_moderation_owner_pins (
+  chat_id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL REFERENCES runtime_inbound_events(event_id),
+  remembered_at INTEGER NOT NULL
+);
 `;
 
 const MIGRATION_RECEIPT_SCHEMA = `
@@ -190,6 +216,8 @@ export function ensureRuntimeDatabaseSchema(db) {
   if (!columns.has('warning_stage')) db.exec("ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN warning_stage TEXT NOT NULL DEFAULT 'none'");
   if (!columns.has('warning_delivered_at')) db.exec('ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN warning_delivered_at INTEGER');
   if (!columns.has('last_event_id')) db.exec('ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN last_event_id TEXT');
+  const messageColumns = new Set(db.prepare('PRAGMA table_info(runtime_moderation_message_ledger)').all().map((row) => row.name));
+  if (!messageColumns.has('user_id')) db.exec('ALTER TABLE runtime_moderation_message_ledger ADD COLUMN user_id TEXT');
 }
 
 /**
@@ -325,12 +353,23 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       last_event_id = excluded.last_event_id,
       updated_at = excluded.updated_at`);
   const observeModerationMessage = db.prepare(`INSERT INTO runtime_moderation_message_ledger
-    (chat_id, message_id, latest_revision_identity) VALUES (?, ?, ?)
+    (chat_id, message_id, user_id, latest_revision_identity) VALUES (?, ?, ?, ?)
     ON CONFLICT(chat_id, message_id) DO UPDATE SET latest_revision_identity = excluded.latest_revision_identity`);
+  const observeModerationMessageWithUser = db.prepare(`INSERT INTO runtime_moderation_message_ledger
+    (chat_id, message_id, user_id, latest_revision_identity) VALUES (?, ?, ?, ?)
+    ON CONFLICT(chat_id, message_id) DO UPDATE SET
+      user_id = COALESCE(excluded.user_id, runtime_moderation_message_ledger.user_id),
+      latest_revision_identity = excluded.latest_revision_identity`);
   const weakMessageClaim = db.prepare(`UPDATE runtime_moderation_message_ledger
     SET weak_strike_event_id = ? WHERE chat_id = ? AND message_id = ? AND weak_strike_event_id IS NULL`);
   const moderationMessage = db.prepare(`SELECT * FROM runtime_moderation_message_ledger
     WHERE chat_id = ? AND message_id = ?`);
+  const knownUndeletedMessagesForUser = db.prepare(`SELECT chat_id, message_id, user_id, deletion_state
+    FROM runtime_moderation_message_ledger
+    WHERE chat_id = ? AND user_id = ?
+      AND COALESCE(deletion_state, '') NOT IN ('deleted', 'uncertain', 'calling')
+    ORDER BY rowid ASC
+    LIMIT ?`);
   const markWarningDelivered = db.prepare(`UPDATE runtime_moderation_weak_strikes
     SET warning_stage = CASE WHEN warning_stage = 'final' THEN 'final' ELSE ? END,
         warning_delivered_at = ?, last_event_id = ?, updated_at = ?
@@ -349,8 +388,27 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const completeEnforcementReceipt = db.prepare(`UPDATE runtime_moderation_enforcement_receipts
     SET status = ?, receipt_json = ?, error_code = ?, updated_at = ?, completed_at = ?
     WHERE event_id = ? AND claim_id = ? AND claim_generation = ? AND status IN ('planned', 'calling')`);
+  const autoUnpin = db.prepare(`SELECT * FROM runtime_moderation_auto_unpins
+    WHERE chat_id = ? AND message_id = ?`);
+  const createAutoUnpin = db.prepare(`INSERT INTO runtime_moderation_auto_unpins
+    (chat_id, message_id, first_event_id, state, claimed_at)
+    VALUES (?, ?, ?, 'planned', ?)
+    ON CONFLICT(chat_id, message_id) DO NOTHING`);
+  const markAutoUnpinCalling = db.prepare(`UPDATE runtime_moderation_auto_unpins
+    SET state = 'calling', result_json = NULL, error_code = NULL
+    WHERE chat_id = ? AND message_id = ? AND state = 'planned'`);
+  const completeAutoUnpin = db.prepare(`UPDATE runtime_moderation_auto_unpins
+    SET state = ?, result_json = ?, error_code = ?, completed_at = ?
+    WHERE chat_id = ? AND message_id = ? AND state IN ('planned', 'calling')`);
+  const rememberOwnerPin = db.prepare(`INSERT INTO runtime_moderation_owner_pins
+    (chat_id, message_id, source_event_id, remembered_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(chat_id) DO UPDATE SET
+      message_id = excluded.message_id,
+      source_event_id = excluded.source_event_id,
+      remembered_at = excluded.remembered_at`);
+  const ownerPin = db.prepare('SELECT * FROM runtime_moderation_owner_pins WHERE chat_id = ?');
   const reserveWeakStrike = db.transaction((chatId, userId, messageId, revisionIdentity, eventId, at) => {
-    observeModerationMessage.run(chatId, messageId, revisionIdentity);
+    observeModerationMessage.run(chatId, messageId, null, revisionIdentity);
     const before = currentWeakStrikes.get(chatId, userId)?.weak_strikes || 0;
     const claimed = weakMessageClaim.run(eventId, chatId, messageId).changes === 1;
     if (!claimed) return { claimed: false, before, after: before, row: moderationMessage.get(chatId, messageId) };
@@ -371,7 +429,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     const at = now();
     let strike = { claimed: false, before: 0, after: 0, row: null };
     if (isWeak && normalizedUserId) {
-      observeModerationMessage.run(normalizedChatId, normalizedMessageId, String(revisionIdentity));
+      observeModerationMessage.run(normalizedChatId, normalizedMessageId, null, String(revisionIdentity));
       const before = currentWeakStrikes.get(normalizedChatId, normalizedUserId)?.weak_strikes || 0;
       const claimed = weakMessageClaim.run(normalizedEventId, normalizedChatId, normalizedMessageId).changes === 1;
       if (claimed) incrementWeakStrike.run(normalizedChatId, normalizedUserId, normalizedEventId, at);
@@ -382,7 +440,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         row: moderationMessage.get(normalizedChatId, normalizedMessageId),
       };
     } else {
-      observeModerationMessage.run(normalizedChatId, normalizedMessageId, String(revisionIdentity));
+      observeModerationMessage.run(normalizedChatId, normalizedMessageId, null, String(revisionIdentity));
     }
     const policy = derivePolicy(strike.before);
     const claimId = randomUUID();
@@ -502,9 +560,16 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       );
       return disposition.get(String(chatId), String(messageId));
     },
-    observeModerationMessage({ chatId, messageId, revisionIdentity }) {
-      observeModerationMessage.run(String(chatId), String(messageId), String(revisionIdentity));
+    observeModerationMessage({ chatId, messageId, userId = null, revisionIdentity }) {
+      observeModerationMessageWithUser.run(
+        String(chatId), String(messageId), userId == null || String(userId) === '' ? null : String(userId), String(revisionIdentity),
+      );
       return moderationMessage.get(String(chatId), String(messageId));
+    },
+    listKnownUndeletedModerationMessages({ chatId, userId, limit = 100 }) {
+      if (userId == null || String(userId) === '') return [];
+      const boundedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 100));
+      return knownUndeletedMessagesForUser.all(String(chatId), String(userId), boundedLimit);
     },
     getWeakStrikeState({ chatId, userId }) {
       if (userId == null || String(userId) === '') return { weakStrikes: 0, warningStage: 'none' };
@@ -570,6 +635,38 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       return { completed, row: enforcementReceipt.get(enforcementClaim.eventId) || null };
     },
     getModerationEnforcement(eventId) { return enforcementReceipt.get(String(eventId)) || null; },
+    claimAutoUnpin({ chatId, messageId, eventId }) {
+      const normalizedChatId = String(chatId);
+      const normalizedMessageId = String(messageId);
+      const claimed = createAutoUnpin.run(
+        normalizedChatId, normalizedMessageId, String(eventId), now(),
+      ).changes === 1;
+      return {
+        claimed,
+        existing: claimed ? null : autoUnpin.get(normalizedChatId, normalizedMessageId),
+      };
+    },
+    markAutoUnpinCalling({ chatId, messageId }) {
+      const normalizedChatId = String(chatId);
+      const normalizedMessageId = String(messageId);
+      const marked = markAutoUnpinCalling.run(normalizedChatId, normalizedMessageId).changes === 1;
+      return { marked, row: autoUnpin.get(normalizedChatId, normalizedMessageId) || null };
+    },
+    completeAutoUnpin({ chatId, messageId, state, result = null, errorCode = null }) {
+      if (!['completed', 'skipped', 'uncertain'].includes(String(state))) return { completed: false, row: null };
+      const normalizedChatId = String(chatId);
+      const normalizedMessageId = String(messageId);
+      const completed = completeAutoUnpin.run(
+        String(state), JSON.stringify(result), errorCode == null ? null : String(errorCode).slice(0, 120), now(),
+        normalizedChatId, normalizedMessageId,
+      ).changes === 1;
+      return { completed, row: autoUnpin.get(normalizedChatId, normalizedMessageId) || null };
+    },
+    rememberOwnerPin({ chatId, messageId, eventId }) {
+      rememberOwnerPin.run(String(chatId), String(messageId), String(eventId), now());
+      return ownerPin.get(String(chatId)) || null;
+    },
+    getOwnerPin({ chatId }) { return ownerPin.get(String(chatId)) || null; },
     reserveWeakStrike({ chatId, userId }) {
       // Compatibility helper for non-Guard callers. Guard enforcement must use
       // reserveWeakStrikeForMessage so edited revisions cannot create extra strikes.
