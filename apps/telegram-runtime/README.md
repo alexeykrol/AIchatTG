@@ -53,4 +53,49 @@ the configurable TTL and turn cap trim it deterministically. A failed or
 ambiguous Telegram delivery is fenced in the inbound receipt and is never
 auto-replayed.
 
+## Moderator recovery
+
+Immediately before a potentially failing semantic judgement, Moderator stores a
+private, bounded `moderator-comment-v1` snapshot containing only message text
+and the routing/identity signals required to judge that comment. It never stores
+the raw webhook JSON, headers or full Telegram update. The recovery states are:
+
+- `safe_retry`: only a `ProviderUnavailableError` or failed read-only membership
+  preflight proved that no provider request occurred; the bounded worker may try
+  again.
+- `calling`: a provider boundary was crossed; after a stale lease this becomes
+  `manual_review`, never a retry. Startup immediately treats any persisted
+  `calling` record as that manual-review case.
+- `manual_review`: transport/HTTP/malformed-provider outcomes, expired private
+  snapshots and any ambiguous external boundary. No automatic provider or
+  Telegram request is issued.
+- `resolved`: the safety decision is durable before normal Guard enforcement;
+  Guard's existing enforcement receipts remain authoritative and uncertain
+  Telegram actions are not replayed.
+
+The startup/timer worker drains only `safe_retry` jobs. Its lease/generation
+fence makes redelivery, a timer overlap or restart unable to create two active
+provider claims. The runtime's in-process `moderatorRecoveryStatus()` method is
+read-only and returns redacted state/counts without snapshot text. For an
+operator read-back, use `npm run status:moderator-recovery`; it opens the local
+runtime database read-only and never invokes a provider, Telegram or recovery.
+
+## Explicit webhook operations
+
+Webhook and command management is deliberately outside startup. The CLI prints a
+redacted dry-run plan unless `--apply` is supplied; only then does it contact
+Telegram using the private runtime environment:
+
+```bash
+node scripts/aichattg/telegram-ops.mjs --action status --role moderator
+node scripts/aichattg/telegram-ops.mjs --action set-webhook --role assistant --apply
+```
+
+It requires an explicit `moderator` or `assistant` role and cannot loop across
+roles. `set-webhook` uses that role's token/secret and fixed owned endpoint;
+both set/delete webhook requests preserve pending updates. Only Assistant may
+set commands, and its menu is exactly `/ask` and `/help`. See
+[`docs/TELEGRAM_RUNTIME_CUTOVER.md`](../../docs/TELEGRAM_RUNTIME_CUTOVER.md) for
+the approval-gated cutover and rollback boundary.
+
 See [SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md), [the extraction map](../../docs/MODERATOR_ASSISTANT_EXTRACTION.md), and [the provider/knowledge contract](../../docs/PROVIDER_KNOWLEDGE_PORTABILITY.md).
