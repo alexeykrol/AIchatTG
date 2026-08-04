@@ -160,7 +160,10 @@ test('snapshot distinguishes active runtime setting from planned rules', () => {
 
 test('static admin page is complete, read-only and has no live-send control', () => {
   const html = fs.readFileSync(pagePath, 'utf8');
-  assert.match(html, /<title>Привратник · News Digest<\/title>/u);
+  assert.match(html, /<title>Привратник · AIchatTG<\/title>/u);
+  assert.match(html, /<p class="eyebrow">AIchatTG<\/p>/u);
+  assert.match(html, /aria-label="Основные разделы AIchatTG"/u);
+  assert.doesNotMatch(html, /News Digest/u);
   assert.match(html, /href="__GATEKEEPER_CSS_URL__"/u);
   assert.match(html, /data-snapshot-endpoint="__GATEKEEPER_SNAPSHOT_URL__"/u);
   assert.doesNotMatch(html, /(?:href|data-snapshot-endpoint)="\/(?:admin|onboarding)/u);
