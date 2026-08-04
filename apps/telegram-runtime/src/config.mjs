@@ -157,6 +157,15 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     // pin of an auto-forwarded channel post is removed; manual pins are never
     // touched. The action remains behind the Moderator guard-rights check.
     moderationAntichannelPin: boolean(env, 'TELEGRAM_RUNTIME_MODERATION_ANTICHANNELPIN', true),
+    // Recovery owns only a private Moderator comment snapshot and may repeat a
+    // judgement solely after a ProviderUnavailableError proves no request was
+    // issued. Calling/manual-review rows are never eligible for this worker.
+    moderatorRecoveryIntervalSec: integer(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_INTERVAL_SEC', 60, { min: 5, max: 3_600 }),
+    moderatorRecoveryBatchSize: integer(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_BATCH_SIZE', 10, { min: 1, max: 50 }),
+    moderatorRecoveryLeaseSec: integer(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_LEASE_SEC', 90, { min: 5, max: 900 }),
+    moderatorRecoveryMaxSafeRetries: integer(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_MAX_SAFE_RETRIES', 3, { min: 1, max: 10 }),
+    moderatorRecoveryBackoffSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_BACKOFF_SEC', 60, 3_600),
+    moderatorRecoverySnapshotTtlSec: integer(env, 'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_SNAPSHOT_TTL_SEC', 604_800, { min: 60, max: 2_592_000 }),
     assistantModerationWaitMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_WAIT_MS', 30_000),
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     // No course snapshot is admitted during the project split. This explicit

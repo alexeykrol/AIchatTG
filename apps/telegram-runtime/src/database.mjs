@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 
 const SCHEMA = `
@@ -37,6 +37,32 @@ CREATE TABLE IF NOT EXISTS runtime_inbound_update_receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_inbound_update_receipts_recovery
   ON runtime_inbound_update_receipts(status, received_at);
+-- This private queue deliberately stores only the exact Moderator fields needed
+-- to resume a proved-not-called semantic judgement. It is not a second webhook
+-- inbox: raw Telegram JSON, headers and full delivery payloads are prohibited.
+CREATE TABLE IF NOT EXISTS runtime_moderator_judgement_jobs (
+  event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+  receipt_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_update_receipts(receipt_id),
+  state TEXT NOT NULL CHECK(state IN ('safe_retry', 'calling', 'manual_review', 'resolved')),
+  snapshot_json TEXT NOT NULL,
+  snapshot_sha256 TEXT NOT NULL,
+  snapshot_bytes INTEGER NOT NULL CHECK(snapshot_bytes > 0 AND snapshot_bytes <= 12288),
+  snapshot_expires_at INTEGER NOT NULL,
+  provider_boundary TEXT NOT NULL CHECK(provider_boundary IN ('not_started', 'calling', 'returned', 'unknown')),
+  lease_id TEXT,
+  claim_generation INTEGER NOT NULL CHECK(claim_generation >= 0),
+  lease_expires_at INTEGER,
+  safe_retry_count INTEGER NOT NULL DEFAULT 0 CHECK(safe_retry_count >= 0),
+  next_attempt_at INTEGER NOT NULL,
+  decision_json TEXT,
+  result_json TEXT,
+  error_code TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_moderator_judgement_jobs_ready
+  ON runtime_moderator_judgement_jobs(state, next_attempt_at, lease_expires_at);
 CREATE TABLE IF NOT EXISTS runtime_inbound_update_conflicts (
   id TEXT PRIMARY KEY,
   receipt_id TEXT NOT NULL REFERENCES runtime_inbound_update_receipts(receipt_id),
@@ -243,6 +269,46 @@ export function ensureRuntimeMigrationReceiptSchema(db) {
   db.exec(MIGRATION_RECEIPT_SCHEMA);
 }
 
+const MODERATOR_SNAPSHOT_VERSION = 'moderator-comment-v1';
+const MAX_MODERATOR_SNAPSHOT_TEXT = 8_192;
+const MAX_MODERATOR_SNAPSHOT_BYTES = 12_288;
+
+function boundedSnapshotString(value, { max, nullable = false } = {}) {
+  if (value == null && nullable) return null;
+  const normalized = String(value ?? '');
+  if (!normalized || normalized.length > max) throw new Error('moderator snapshot contains an invalid field');
+  return normalized;
+}
+
+/**
+ * The only durable copy of message text used by Moderator recovery. Keep this
+ * allowlist intentionally small: it is sufficient to repeat a provably
+ * pre-provider attempt, but cannot reconstruct a raw Telegram update.
+ */
+function serializeModeratorSnapshot(comment) {
+  const snapshot = {
+    schemaVersion: MODERATOR_SNAPSHOT_VERSION,
+    comment: {
+      chatId: boundedSnapshotString(comment?.chatId, { max: 128 }),
+      messageId: boundedSnapshotString(comment?.messageId, { max: 128 }),
+      platformMessageId: boundedSnapshotString(comment?.platformMessageId, { max: 256 }),
+      userId: boundedSnapshotString(comment?.userId, { max: 128, nullable: true }),
+      senderChatId: boundedSnapshotString(comment?.senderChatId, { max: 128, nullable: true }),
+      isBot: comment?.isBot === true,
+      hasLink: comment?.hasLink === true,
+      text: boundedSnapshotString(comment?.text, { max: MAX_MODERATOR_SNAPSHOT_TEXT }),
+    },
+  };
+  const json = JSON.stringify(snapshot);
+  const bytes = Buffer.byteLength(json);
+  if (bytes > MAX_MODERATOR_SNAPSHOT_BYTES) throw new Error('moderator snapshot exceeds its private byte limit');
+  return {
+    json,
+    bytes,
+    sha256: createHash('sha256').update(json).digest('hex'),
+  };
+}
+
 export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 1000) } = {}) {
   const claim = db.prepare(`INSERT INTO runtime_inbound_events
     (event_id, bot_role, update_id, status, created_at) VALUES (?, ?, ?, 'processing', ?)
@@ -271,6 +337,56 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const recordInboundConflict = db.prepare(`INSERT INTO runtime_inbound_update_conflicts
     (id, receipt_id, revision_identity, payload_fingerprint, observed_at)
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(receipt_id, payload_fingerprint) DO NOTHING`);
+  const moderatorJob = db.prepare('SELECT * FROM runtime_moderator_judgement_jobs WHERE event_id = ?');
+  const createModeratorJob = db.prepare(`INSERT INTO runtime_moderator_judgement_jobs
+    (event_id, receipt_id, state, snapshot_json, snapshot_sha256, snapshot_bytes, snapshot_expires_at,
+     provider_boundary, claim_generation, next_attempt_at, created_at, updated_at)
+    VALUES (?, ?, 'safe_retry', ?, ?, ?, ?, 'not_started', 0, ?, ?, ?)
+    ON CONFLICT(event_id) DO NOTHING`);
+  const claimModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET lease_id = ?, claim_generation = claim_generation + 1, lease_expires_at = ?, updated_at = ?
+    WHERE event_id = ? AND state = 'safe_retry' AND next_attempt_at <= ?
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`);
+  const markModeratorCalling = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'calling', provider_boundary = 'calling', lease_expires_at = ?, updated_at = ?
+    WHERE event_id = ? AND state = 'safe_retry' AND lease_id = ? AND claim_generation = ?`);
+  const deferModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'safe_retry', provider_boundary = 'not_started', lease_id = NULL, lease_expires_at = NULL,
+      safe_retry_count = safe_retry_count + 1, next_attempt_at = ?, error_code = ?, updated_at = ?
+    WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
+  const manualReviewModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'manual_review', provider_boundary = ?, lease_id = NULL, lease_expires_at = NULL,
+      error_code = ?, updated_at = ?
+    WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
+  const resolveModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'resolved', provider_boundary = ?, lease_id = NULL, lease_expires_at = NULL,
+      decision_json = ?, result_json = ?, error_code = NULL, updated_at = ?, resolved_at = ?
+    WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
+  const expireCallingModeratorJobs = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'manual_review', provider_boundary = 'unknown', lease_id = NULL, lease_expires_at = NULL,
+      error_code = 'provider_outcome_unknown', updated_at = ?
+    WHERE state = 'calling' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`);
+  const quarantineAllCallingModeratorJobs = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'manual_review', provider_boundary = 'unknown', lease_id = NULL, lease_expires_at = NULL,
+      error_code = 'provider_outcome_unknown', updated_at = ?
+    WHERE state = 'calling'`);
+  const expireModeratorSnapshots = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET snapshot_json = '{"schemaVersion":"moderator-comment-v1","expired":true}', snapshot_sha256 = 'expired',
+      snapshot_bytes = 1, snapshot_expires_at = ?, updated_at = ?
+    WHERE snapshot_expires_at <= ? AND snapshot_sha256 <> 'expired'`);
+  const listModeratorJobs = db.prepare(`SELECT event_id, receipt_id, state, provider_boundary, claim_generation,
+    safe_retry_count, next_attempt_at, snapshot_expires_at, error_code, created_at, updated_at, resolved_at
+    FROM runtime_moderator_judgement_jobs ORDER BY updated_at DESC, event_id DESC LIMIT ?`);
+  const moderatorJobCounts = db.prepare(`SELECT state, COUNT(*) AS count
+    FROM runtime_moderator_judgement_jobs GROUP BY state ORDER BY state ASC`);
+  const nextRecoverableModeratorJob = db.prepare(`SELECT event_id FROM runtime_moderator_judgement_jobs
+    WHERE state = 'safe_retry' AND next_attempt_at <= ? AND snapshot_expires_at > ?
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+    ORDER BY next_attempt_at ASC, created_at ASC, event_id ASC LIMIT 1`);
+  const quarantineExpiredModeratorRetries = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'manual_review', provider_boundary = 'not_started', lease_id = NULL, lease_expires_at = NULL,
+      error_code = 'snapshot_expired', updated_at = ?
+    WHERE state = 'safe_retry' AND snapshot_expires_at <= ?`);
   const dialogue = db.prepare('SELECT * FROM runtime_assistant_dialogues WHERE chat_id = ? AND user_id = ?');
   const turns = db.prepare(`SELECT question, answer FROM runtime_assistant_turns
     WHERE dialogue_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`);
@@ -459,6 +575,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   });
 
   return {
+    currentTime() { return now(); },
     /**
      * Create the only executable claim for a Telegram delivery. The update
      * payload itself is deliberately not copied into the inbox; its stable
@@ -522,6 +639,101 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       return listInboundRecovery.all(Math.max(1, Math.min(500, Number(limit) || 50)));
     },
     getInboundDelivery(receiptId) { return inboundReceipt.get(String(receiptId)) || null; },
+    /**
+     * Create the private minimal recovery record before any semantic provider
+     * boundary. A duplicate returns the original row and never replaces its
+     * snapshot, so webhook redelivery cannot smuggle a different message into
+     * an already accepted event.
+     */
+    ensureModeratorJudgement({ eventId, receiptId, comment, snapshotTtlSec = 604_800 }) {
+      const snapshot = serializeModeratorSnapshot(comment);
+      const ttl = Math.max(60, Math.min(2_592_000, Number(snapshotTtlSec) || 604_800));
+      const at = now();
+      createModeratorJob.run(
+        String(eventId), String(receiptId), snapshot.json, snapshot.sha256, snapshot.bytes,
+        at + ttl, at, at, at,
+      );
+      return moderatorJob.get(String(eventId)) || null;
+    },
+    getModeratorJudgement(eventId) { return moderatorJob.get(String(eventId)) || null; },
+    /** A lease is held while harmless preflight is read, then fenced again immediately before the provider call. */
+    claimModeratorJudgement({ eventId, leaseSec = 90 }) {
+      const normalizedEventId = String(eventId || '');
+      if (!normalizedEventId) return { claimed: false, row: null, claim: null };
+      const at = now();
+      const duration = Math.max(5, Math.min(900, Number(leaseSec) || 90));
+      const leaseId = randomUUID();
+      const claimed = claimModeratorJob.run(leaseId, at + duration, at, normalizedEventId, at, at).changes === 1;
+      const row = moderatorJob.get(normalizedEventId) || null;
+      return {
+        claimed,
+        row,
+        claim: claimed ? { eventId: normalizedEventId, leaseId, claimGeneration: row?.claim_generation } : null,
+      };
+    },
+    claimNextModeratorJudgement({ leaseSec = 90 } = {}) {
+      const at = now();
+      const candidate = nextRecoverableModeratorJob.get(at, at, at);
+      return candidate ? this.claimModeratorJudgement({ eventId: candidate.event_id, leaseSec }) : { claimed: false, row: null, claim: null };
+    },
+    markModeratorProviderCalling({ claim: judgementClaim, leaseSec = 90 }) {
+      if (!judgementClaim) return { marked: false, row: null };
+      const at = now();
+      const duration = Math.max(5, Math.min(900, Number(leaseSec) || 90));
+      const marked = markModeratorCalling.run(
+        at + duration, at, judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
+      ).changes === 1;
+      return { marked, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    deferModeratorJudgement({ claim: judgementClaim, nextAttemptAt, errorCode = 'provider_unavailable' }) {
+      if (!judgementClaim) return { deferred: false, row: null };
+      const at = now();
+      const deferred = deferModeratorJob.run(
+        Math.max(at, Number(nextAttemptAt) || at), String(errorCode).slice(0, 120), at,
+        judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
+      ).changes === 1;
+      return { deferred, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    manualReviewModeratorJudgement({ claim: judgementClaim, errorCode = 'manual_review', providerBoundary = 'unknown' }) {
+      if (!judgementClaim) return { marked: false, row: null };
+      const boundary = ['not_started', 'calling', 'returned', 'unknown'].includes(providerBoundary)
+        ? providerBoundary : 'unknown';
+      const marked = manualReviewModeratorJob.run(
+        boundary, String(errorCode).slice(0, 120), now(),
+        judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
+      ).changes === 1;
+      return { marked, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    resolveModeratorJudgement({ claim: judgementClaim, decision = null, result = null, providerBoundary = 'returned' }) {
+      if (!judgementClaim) return { resolved: false, row: null };
+      const boundary = ['not_started', 'returned'].includes(providerBoundary) ? providerBoundary : 'returned';
+      const at = now();
+      const resolved = resolveModeratorJob.run(
+        boundary,
+        decision == null ? null : JSON.stringify(decision), result == null ? null : JSON.stringify(result), at, at,
+        judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
+      ).changes === 1;
+      return { resolved, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    /** Calling means an outcome may be externally ambiguous; it is never reclaimed for a provider retry. */
+    quarantineExpiredModeratorCalls({ allCalling = false } = {}) {
+      const at = now();
+      const snapshotsExpired = expireModeratorSnapshots.run(at, at, at).changes;
+      const expiredRetries = quarantineExpiredModeratorRetries.run(at, at).changes;
+      const callingQuarantined = allCalling
+        ? quarantineAllCallingModeratorJobs.run(at).changes
+        : expireCallingModeratorJobs.run(at, at).changes;
+      return { callingQuarantined, expiredRetries, snapshotsExpired };
+    },
+    listModeratorJudgements({ limit = 50 } = {}) {
+      return listModeratorJobs.all(Math.max(1, Math.min(500, Number(limit) || 50)));
+    },
+    moderatorRecoveryStatus() {
+      return {
+        states: Object.fromEntries(moderatorJobCounts.all().map((row) => [row.state, row.count])),
+        jobs: listModeratorJobs.all(20),
+      };
+    },
     claimEvent({ eventId, role, updateId }) {
       const claimed = claim.run(eventId, role, updateId, now()).changes === 1;
       return { claimed, existing: claimed ? null : event.get(eventId) };
