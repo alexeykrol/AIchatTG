@@ -1,7 +1,8 @@
 # AIchatTG active-module registry
 
-Updated: 2026-08-03. This is the target-project registry; it does not confer
-production authority while AIchatTG remains locally prepared.
+Updated: 2026-08-03. Public hostname selected: `aikrol.questtales.com`. This
+is the target-project registry; it does not confer production authority while
+AIchatTG remains locally prepared.
 
 | Module | Classification | Current executor | Controller / result recipient | Current state |
 |---|---|---|---|---|

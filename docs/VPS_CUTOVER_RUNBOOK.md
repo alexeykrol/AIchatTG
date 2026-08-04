@@ -24,7 +24,7 @@ and stop conditions.
 | Data root | `AICHATTG_DATA_ROOT/gatekeeper` and `AICHATTG_DATA_ROOT/telegram-runtime` | Must be a new non-symlink root outside `/srv/news_agent_001`; no Docker volume or SQLite file is shared. |
 | Runtime configuration | lease-scoped, mode-0600 file outside Git | Do not commit, print, or reuse News configuration/secrets. |
 | Shared host network | existing external `root_default` | It is only the Traefik attachment; AIchatTG owns different service and router names. |
-| Public hostname | `AICHATTG_FQDN` | The controller selects it later; this repository intentionally contains no hostname value. |
+| Public hostname | `aikrol.questtales.com` | Approved Product Owner hostname; supplied through `AICHATTG_FQDN` in the private runtime file. |
 
 `infra/aichattg/docker-compose.yml` has no default service profile. A later
 leased operation must explicitly choose `gatekeeper` and/or `telegram-runtime`.
@@ -87,9 +87,9 @@ News SQLite file.
 These steps are intentionally not authorized by this candidate alone.
 
 1. The controller records current production state for both applications,
-   accepts one exact AIchatTG candidate, obtains Product Owner approval, and
-   issues a one-time lease. The approved `AICHATTG_FQDN` and each allowed route
-   must appear in that lease.
+   accepts one exact AIchatTG candidate, and issues a one-time lease. The
+   approved `AICHATTG_FQDN=aikrol.questtales.com` and each allowed route must
+   appear in that lease.
 2. Create a clean detached AIchatTG worktree at the accepted SHA; run
    `verify-release-source.sh` before any build. Do not stage files from an
    existing host checkout.
