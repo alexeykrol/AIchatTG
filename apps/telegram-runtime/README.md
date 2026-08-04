@@ -66,12 +66,14 @@ the raw webhook JSON, headers or full Telegram update. The recovery states are:
 - `calling`: a provider boundary was crossed; after a stale lease this becomes
   `manual_review`, never a retry. Startup immediately treats any persisted
   `calling` record as that manual-review case.
-- `decision_ready`: the provider returned and the redacted decision plus fixed
-  Guard plan are durable, but no terminal enforcement receipt has been
-  recorded yet. Recovery never calls the provider again; it can create an
-  initial receipt or resume only a `planned` receipt. A Guard receipt that is
-  `calling` or `uncertain` is treated as an ambiguous Telegram boundary and is
-  never re-issued.
+- `decision_ready`: one SQLite transaction has persisted the provider result,
+  immutable Guard policy and (for weak abuse) the native message's one strike
+  reservation before any Guard preflight or action. Recovery never calls the
+  provider again and loads that receipt only; it may resume only a `planned`
+  receipt. A Guard receipt that is `calling` or `uncertain` is treated as an
+  ambiguous Telegram boundary and is never re-issued. A legacy weak decision
+  without both receipt and reservation is quarantined for manual review rather
+  than reconstructed from a live strike counter.
 - `manual_review`: transport/HTTP/malformed-provider outcomes, expired private
   snapshots and any ambiguous external boundary. No automatic provider or
   Telegram request is issued.

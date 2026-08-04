@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
+import { planTelegramSafetyAction } from '@aichattg/telegram-core';
 import { ProviderRequestError, ProviderUnavailableError } from '../src/provider-adapter.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createModeratorRecoveryWorker } from '../src/moderator-recovery.mjs';
@@ -60,6 +62,22 @@ function cleanDecision() {
 
 function threatDecision() {
   return { safetyRoute: 'threat', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fixture' };
+}
+
+function weakDecision() {
+  return { safetyRoute: 'abuse', abuseLevel: 'weak', confidence: 1, reason: 'fixture', modelId: 'fixture' };
+}
+
+function assertFirstWeakPolicy(policy) {
+  assert.deepEqual({
+    safetyRoute: policy.safetyRoute, abuseLevel: policy.abuseLevel,
+    strikeBefore: policy.strikeBefore, strikeAfter: policy.strikeAfter,
+    policyVersion: policy.policyVersion, verdict: policy.verdict, action: policy.action,
+  }, {
+    safetyRoute: 'abuse', abuseLevel: 'weak', strikeBefore: 0, strikeAfter: 1,
+    policyVersion: 'telegram-safety-v1', verdict: 'suspect', action: 'delete_warn_1',
+  });
+  assert.equal(typeof policy.warning, 'string');
 }
 
 function withRuntime({ provider, now = 100, runtimeConfig = {}, actions = [], testHooks = null } = {}) {
@@ -201,7 +219,8 @@ test('a persisted decision before enforcement recovers its fixed Guard plan with
     assert.equal(providerCalls, 1);
     assert.deepEqual(context.db.prepare(`SELECT state, provider_boundary FROM runtime_moderator_judgement_jobs
       WHERE event_id = 'moderator:40'`).get(), { state: 'decision_ready', provider_boundary: 'returned' });
-    assert.equal(context.store.getModerationEnforcement('moderator:40'), null);
+    assert.deepEqual(context.db.prepare(`SELECT status FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:40'`).get(), { status: 'planned' });
 
     context.runtime = createTelegramRuntime({
       config: config({ moderationMode: 'live' }), store: context.store,
@@ -258,6 +277,132 @@ test('a planned receipt resumes exactly once after a crash before the first Guar
     assert.equal((await context.runtime.recoverModeratorJudgements({ limit: 2 })).recovered, 0);
     assert.deepEqual(context.actions, ['ban', 'delete']);
   } finally { context.close(); }
+});
+
+test('a weak decision keeps its atomically reserved first-warning policy after an intervening strike', async () => {
+  let providerCalls = 0;
+  const context = withRuntime({
+    runtimeConfig: { moderationMode: 'live' },
+    provider: { async moderate() { providerCalls++; return weakDecision(); } },
+    testHooks: { async afterDecisionReady() { throw new Error('crash_after_atomic_weak_decision'); } },
+  });
+  try {
+    const first = await context.runtime.handleUpdate('moderator', update(44, 54, 'first weak abuse'));
+    assert.equal(first.kind, 'uncertain_delivery');
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.store.getWeakStrikeState({ chatId: '-100', userId: '7' }), {
+      weakStrikes: 1, warningStage: 'none', warningDeliveredAt: null, lastEventId: 'moderator:44',
+    });
+    assertFirstWeakPolicy(JSON.parse(context.store.getModerationEnforcement('moderator:44').policy_json));
+
+    const intervening = context.store.reserveWeakStrikeForMessage({
+      chatId: '-100', userId: '7', messageId: 'intervening', revisionIdentity: '-100:intervening', eventId: 'fixture:intervening',
+    });
+    assert.deepEqual({ claimed: intervening.claimed, before: intervening.before, after: intervening.after }, {
+      claimed: true, before: 1, after: 2,
+    });
+    assert.equal(context.store.getWeakStrikeState({ chatId: '-100', userId: '7' }).weakStrikes, 2);
+
+    context.runtime = createTelegramRuntime({
+      config: config({ moderationMode: 'live' }), store: context.store,
+      provider: { async moderate() { providerCalls++; throw new Error('provider_must_not_be_called'); } },
+      ...adapters(context.actions),
+    });
+    const recovered = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(recovered.recovered, 1);
+    assert.equal(providerCalls, 1);
+    assert.equal(recovered.outcomes[0].action, 'delete_warn_1');
+    assert.deepEqual(context.actions, ['delete', 'warning']);
+    assert.equal(context.store.getWeakStrikeState({ chatId: '-100', userId: '7' }).weakStrikes, 2);
+    assertFirstWeakPolicy(JSON.parse(context.store.getModerationEnforcement('moderator:44').policy_json));
+  } finally { context.close(); }
+});
+
+test('a legacy decision-ready weak plan without its receipt and reservation is quarantined', async () => {
+  let providerCalls = 0;
+  const context = withRuntime({
+    runtimeConfig: { moderationMode: 'live' },
+    provider: { async moderate() { providerCalls++; return weakDecision(); } },
+    testHooks: { async afterDecisionReady() { throw new Error('simulate_d71_decision_ready'); } },
+  });
+  try {
+    await context.runtime.handleUpdate('moderator', update(45, 55, 'legacy weak plan'));
+    assert.equal(providerCalls, 1);
+    context.db.prepare(`DELETE FROM runtime_moderation_enforcement_receipts WHERE event_id = 'moderator:45'`).run();
+    context.db.prepare(`UPDATE runtime_moderation_message_ledger
+      SET weak_strike_event_id = NULL WHERE chat_id = '-100' AND message_id = '55'`).run();
+    context.db.prepare(`DELETE FROM runtime_moderation_weak_strikes WHERE chat_id = '-100' AND user_id = '7'`).run();
+
+    context.runtime = createTelegramRuntime({
+      config: config({ moderationMode: 'live' }), store: context.store,
+      provider: { async moderate() { providerCalls++; throw new Error('provider_must_not_be_called'); } },
+      ...adapters(context.actions),
+    });
+    const recovered = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(recovered.recovered, 1);
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.actions, []);
+    assert.deepEqual(context.db.prepare(`SELECT state, error_code FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:45'`).get(), {
+      state: 'manual_review', error_code: 'legacy_weak_plan_unreserved',
+    });
+    assert.equal(context.store.getModerationEnforcement('moderator:45'), null);
+  } finally { context.close(); }
+});
+
+test('the d71-era SQLite job table migrates a returned weak no-receipt row into a quarantinable decision_ready row', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-legacy-decision-ready-'));
+  const databasePath = join(folder, 'runtime.db');
+  const legacy = new Database(databasePath);
+  try {
+    legacy.exec(`
+      CREATE TABLE runtime_inbound_events (
+        event_id TEXT PRIMARY KEY, bot_role TEXT NOT NULL, update_id INTEGER NOT NULL, status TEXT NOT NULL,
+        result_json TEXT, error_text TEXT, created_at INTEGER NOT NULL, completed_at INTEGER
+      );
+      CREATE TABLE runtime_inbound_update_receipts (
+        receipt_id TEXT PRIMARY KEY, bot_role TEXT NOT NULL, update_id INTEGER NOT NULL,
+        revision_identity TEXT NOT NULL, payload_fingerprint TEXT NOT NULL, claim_id TEXT NOT NULL,
+        claim_generation INTEGER NOT NULL, status TEXT NOT NULL, result_json TEXT, error_code TEXT,
+        recovery_id TEXT, received_at INTEGER NOT NULL, claimed_at INTEGER NOT NULL,
+        completed_at INTEGER, recovered_at INTEGER, UNIQUE(bot_role, update_id)
+      );
+      CREATE TABLE runtime_moderator_judgement_jobs (
+        event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+        receipt_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_update_receipts(receipt_id),
+        state TEXT NOT NULL CHECK(state IN ('safe_retry', 'calling', 'manual_review', 'resolved')),
+        snapshot_json TEXT NOT NULL, snapshot_sha256 TEXT NOT NULL, snapshot_bytes INTEGER NOT NULL,
+        snapshot_expires_at INTEGER NOT NULL, provider_boundary TEXT NOT NULL, lease_id TEXT,
+        claim_generation INTEGER NOT NULL, lease_expires_at INTEGER, safe_retry_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL, decision_json TEXT, result_json TEXT, error_code TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, resolved_at INTEGER
+      );
+    `);
+    const eventId = 'moderator:legacy-weak';
+    const snapshot = JSON.stringify({ schemaVersion: 'moderator-comment-v1', comment: {
+      chatId: '-100', messageId: 'legacy-weak', platformMessageId: '-100:legacy-weak', userId: '7',
+      senderChatId: null, isBot: false, hasLink: false, text: 'legacy weak text',
+    } });
+    const decision = JSON.stringify({
+      safetyRoute: 'abuse', abuseLevel: 'weak', confidence: 1, modelId: 'fixture',
+      plan: planTelegramSafetyAction(weakDecision(), 0),
+    });
+    legacy.prepare(`INSERT INTO runtime_inbound_events
+      VALUES (?, 'moderator', 46, 'completed', NULL, NULL, 1, 1)`).run(eventId);
+    legacy.prepare(`INSERT INTO runtime_inbound_update_receipts
+      VALUES (?, 'moderator', 46, '-100:legacy-weak', ?, 'claim', 1, 'completed', NULL, NULL, NULL, 1, 1, 1, NULL)`)
+      .run(eventId, 'f'.repeat(64));
+    legacy.prepare(`INSERT INTO runtime_moderator_judgement_jobs
+      VALUES (?, ?, 'resolved', ?, 'snapshot', ?, 600, 'returned', NULL, 1, NULL, 0, 1, ?, '{}', NULL, 1, 1, 1)`)
+      .run(eventId, eventId, snapshot, Buffer.byteLength(snapshot), decision);
+  } finally { legacy.close(); }
+  const migrated = openRuntimeDatabase(databasePath);
+  try {
+    assert.deepEqual(migrated.prepare(`SELECT state, resolved_at FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:legacy-weak'`).get(), { state: 'decision_ready', resolved_at: null });
+    assert.equal(migrated.prepare(`SELECT * FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:legacy-weak'`).get(), undefined);
+  } finally { migrated.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
 test('calling and uncertain Guard receipts are terminal recovery boundaries and are never re-issued', async () => {

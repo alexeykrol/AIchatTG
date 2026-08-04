@@ -299,113 +299,72 @@ export function createTelegramRuntime({
     };
   }
 
-  async function enforceSafetyPlan(eventId, comment, decision, previewPlan) {
-    const isWeak = decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak';
-    const derivePreviewPolicy = () => planTelegramSafetyAction(decision, previewPlan.strikeBefore);
-    const deriveLivePolicy = (strikeBefore) => planTelegramSafetyAction(
-      decision, isWeak ? strikeBefore : previewPlan.strikeBefore,
-    );
-
-    // Clean is a terminal Moderator outcome but not enforcement. It gets its
-    // own receipt without probing or depending on destructive Guard rights.
-    if (previewPlan.action === 'none') {
-      const planned = store.claimModerationSafetyEnforcement({
-        eventId, chatId: comment.chatId, messageId: comment.messageId,
-        revisionIdentity: comment.platformMessageId, userId: comment.userId,
-        isWeak: false, derivePolicy: derivePreviewPolicy,
-      });
-      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
-      const receipt = enforcementReceipt(planned.policy);
-      receipt.status = 'clean';
-      await completeEnforcement(planned.claim, 'skipped', receipt, 'clean');
-      return { action: 'none', receipt, actions: [] };
+  async function enforceSafetyPlan(eventId, comment, plan, { initialClaim = null } = {}) {
+    const existing = store.getModerationEnforcement(eventId);
+    if (!existing) return { action: 'enforcement_receipt_missing', actions: [], pending: true };
+    let persistedPlan;
+    try { persistedPlan = JSON.parse(existing.policy_json); } catch { persistedPlan = null; }
+    if (!persistedPlan || canonicalJson(persistedPlan) !== canonicalJson(plan)) {
+      return { action: 'enforcement_plan_invalid', receipt: existing, actions: [], pending: true };
+    }
+    let claim = initialClaim;
+    let resumed = false;
+    if (!claim) {
+      // Only `planned` proves that no Guard action was marked calling. All
+      // other states are terminal or ambiguous and never get a Telegram retry.
+      if (existing.status !== 'planned') {
+        return { action: 'enforcement_already_recorded', receipt: existing, actions: [] };
+      }
+      const resumedClaim = store.resumePlannedModerationEnforcement({ eventId });
+      if (!resumedClaim.claimed) {
+        return { action: 'enforcement_already_recorded', receipt: resumedClaim.row, actions: [] };
+      }
+      claim = resumedClaim.claim;
+      resumed = true;
+    } else if (existing.status !== 'planned') {
+      return { action: 'enforcement_already_recorded', receipt: existing, actions: [] };
     }
 
+    const receipt = enforcementReceipt(plan);
+    if (plan.duplicateNative === true) {
+      receipt.status = 'duplicate_native_revision';
+      await completeEnforcement(claim, 'skipped', receipt, 'duplicate_native_revision');
+      return { action: 'duplicate_native_revision', receipt, actions: [] };
+    }
+    // Clean is terminal Moderator work, but still uses its pre-persisted
+    // receipt so recovery cannot mint a second record.
+    if (plan.action === 'none') {
+      receipt.status = 'clean';
+      await completeEnforcement(claim, 'skipped', receipt, 'clean');
+      return { action: 'none', receipt, actions: [] };
+    }
     if (config.moderationMode !== 'live') {
-      const planned = store.claimModerationSafetyEnforcement({
-        eventId, chatId: comment.chatId, messageId: comment.messageId,
-        revisionIdentity: comment.platformMessageId, userId: comment.userId,
-        isWeak: false, derivePolicy: derivePreviewPolicy,
-      });
-      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
-      const receipt = enforcementReceipt(planned.policy);
       receipt.status = 'shadow';
-      await completeEnforcement(planned.claim, 'skipped', receipt, 'shadow_mode');
+      await completeEnforcement(claim, 'skipped', receipt, 'shadow_mode');
       return { action: 'shadow', receipt, actions: [] };
     }
 
+    // The receipt and (when weak) strike reservation already exist before this
+    // read-only Guard preflight. Recovery consumes that immutable policy only.
     const guardProof = !guardAdapter || typeof guardAdapter.verifyEnforcement !== 'function'
       ? { proven: false, reason: 'guard_adapter_missing' }
       : await guardAdapter.verifyEnforcement({ chatId: comment.chatId });
+    receipt.guard = guardProof == null ? null : {
+      proven: guardProof.proven === true,
+      reason: guardProof.reason || null,
+      status: guardProof.status || null,
+    };
     if (!guardProof?.proven) {
-      const planned = store.claimModerationSafetyEnforcement({
-        eventId, chatId: comment.chatId, messageId: comment.messageId,
-        revisionIdentity: comment.platformMessageId, userId: comment.userId,
-        isWeak: false, guardProof, derivePolicy: derivePreviewPolicy,
-      });
-      if (!planned.claimed) {
-        if (planned.existing?.status === 'planned') {
-          return {
-            action: 'enforcement_planned_guard_unproven', receipt: planned.existing, actions: [], pending: true,
-            reason: guardProof?.reason || 'guard_rights_unproven',
-          };
-        }
-        return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
-      }
-      const receipt = enforcementReceipt(planned.policy, guardProof);
       receipt.status = 'guard_unproven';
-      await completeEnforcement(planned.claim, 'skipped', receipt, guardProof?.reason || 'guard_rights_unproven');
+      await completeEnforcement(claim, 'skipped', receipt, guardProof?.reason || 'guard_rights_unproven');
       return { action: 'guard_unproven', receipt, actions: [], reason: guardProof?.reason || 'guard_rights_unproven' };
     }
 
-    let planned = store.claimModerationSafetyEnforcement({
-      eventId, chatId: comment.chatId, messageId: comment.messageId,
-      revisionIdentity: comment.platformMessageId, userId: comment.userId,
-      isWeak, guardProof, derivePolicy: deriveLivePolicy,
-    });
-    if (!planned.claimed) {
-      // A `planned` receipt proves that no Guard step was marked calling. It is
-      // the only external-action state recovery may reclaim. Anything else is
-      // terminal or ambiguous and must not be sent to Telegram again.
-      if (planned.existing?.status !== 'planned') {
-        return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
-      }
-      let persistedPlan;
-      try { persistedPlan = JSON.parse(planned.existing.policy_json); } catch { persistedPlan = null; }
-      let deterministicPlan;
-      try {
-        deterministicPlan = persistedPlan == null
-          ? null
-          : planTelegramSafetyAction(decision, persistedPlan.strikeBefore);
-      } catch { deterministicPlan = null; }
-      if (!deterministicPlan || canonicalJson(persistedPlan) !== canonicalJson(deterministicPlan)) {
-        return { action: 'enforcement_plan_invalid', receipt: planned.existing, actions: [], pending: true };
-      }
-      const resumed = store.resumePlannedModerationEnforcement({ eventId });
-      if (!resumed.claimed) {
-        return { action: 'enforcement_already_recorded', receipt: resumed.row, actions: [] };
-      }
-      planned = {
-        claimed: true,
-        claim: resumed.claim,
-        existing: null,
-        duplicateNative: false,
-        policy: deterministicPlan,
-        resumed: true,
-      };
-    }
-    const plan = planned.policy;
-    const receipt = enforcementReceipt(plan, guardProof);
-    if (planned.duplicateNative) {
-      receipt.status = 'duplicate_native_revision';
-      await completeEnforcement(planned.claim, 'skipped', receipt, 'duplicate_native_revision');
-      return { action: 'duplicate_native_revision', receipt, actions: [] };
-    }
     const actions = [];
-    await testHooks?.afterEnforcementPlanned?.({ eventId, plan, resumed: planned.resumed === true });
+    await testHooks?.afterEnforcementPlanned?.({ eventId, plan, resumed });
     const callStep = async (name, invoke) => {
       receipt.steps[name] = { status: 'calling' };
-      const calling = store.markModerationEnforcementCalling({ claim: planned.claim, receipt });
+      const calling = store.markModerationEnforcementCalling({ claim, receipt });
       if (!calling.marked) return { ok: false, error: 'enforcement_claim_fenced', uncertain: true };
       const result = redactedActionResult(await invoke(), `${name}_failed`);
       receipt.steps[name] = { status: result.ok ? 'completed' : result.uncertain ? 'uncertain' : 'skipped', ...result };
@@ -418,7 +377,7 @@ export function createTelegramRuntime({
       }));
       if (!deleted.ok) {
         receipt.status = deleted.uncertain ? 'uncertain' : 'guard_unproven';
-        await completeEnforcement(planned.claim, deleted.uncertain ? 'uncertain' : 'skipped', receipt, deleted.error);
+        await completeEnforcement(claim, deleted.uncertain ? 'uncertain' : 'skipped', receipt, deleted.error);
         return { action: 'abuse_delete_unconfirmed', receipt, actions };
       }
       store.recordModerationDeletion({ chatId: comment.chatId, messageId: comment.messageId, state: 'deleted' });
@@ -429,7 +388,7 @@ export function createTelegramRuntime({
       }));
       if (!warned.ok) {
         receipt.status = warned.uncertain ? 'uncertain' : 'guard_unproven';
-        await completeEnforcement(planned.claim, warned.uncertain ? 'uncertain' : 'skipped', receipt, warned.error);
+        await completeEnforcement(claim, warned.uncertain ? 'uncertain' : 'skipped', receipt, warned.error);
         return { action: 'abuse_warning_unconfirmed', receipt, actions };
       }
       store.markWarningDelivered({
@@ -437,7 +396,7 @@ export function createTelegramRuntime({
         stage: plan.action === 'delete_warn_1' ? 'first' : 'final',
       });
       receipt.status = 'completed';
-      await completeEnforcement(planned.claim, 'completed', receipt);
+      await completeEnforcement(claim, 'completed', receipt);
       return { action: plan.action, receipt, actions };
     }
 
@@ -446,7 +405,7 @@ export function createTelegramRuntime({
     }));
     if (!banned.ok && banned.uncertain) {
       receipt.status = 'uncertain';
-      await completeEnforcement(planned.claim, 'uncertain', receipt, banned.error);
+      await completeEnforcement(claim, 'uncertain', receipt, banned.error);
       return { action: 'ban_unconfirmed', receipt, actions };
     }
     receipt.purge.attempted = true;
@@ -475,7 +434,7 @@ export function createTelegramRuntime({
     const uncertain = receipt.purge.items.some((item) => item.uncertain === true);
     receipt.status = uncertain ? 'uncertain' : receipt.purge.failed ? 'guard_unproven' : 'completed';
     await completeEnforcement(
-      planned.claim,
+      claim,
       uncertain ? 'uncertain' : receipt.purge.failed ? 'skipped' : 'completed',
       receipt,
       uncertain ? 'purge_uncertain' : receipt.purge.failed ? 'purge_unconfirmed' : null,
@@ -649,12 +608,12 @@ export function createTelegramRuntime({
       return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
     }
     decision = applyTelegramSafetySignals(config, decision, comment);
-    const plan = planTelegramSafetyAction(decision, strikeState.weakStrikes);
-    // The semantic verdict is final before any Telegram enforcement. A crash
-    // below this line must not cause another provider call. `decision_ready`
-    // is deliberately not terminal until the fixed plan finds a terminal
-    // Guard receipt (or safely completes a previously planned one).
-    const ready = store.markModeratorDecisionReady({
+    // Commit the provider verdict together with the exact policy and any weak
+    // strike reservation before reading Guard rights or taking Telegram action.
+    // No later recovery path may derive this policy from a live counter.
+    const reserveWeakStrike = config.moderationMode === 'live'
+      && decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak';
+    const ready = store.persistModeratorDecisionAndEnforcement({
       claim,
       // This operator-visible durable decision intentionally excludes the
       // model's reason/quote/receipt. The private comment snapshot is the only
@@ -664,18 +623,28 @@ export function createTelegramRuntime({
         abuseLevel: decision.abuseLevel,
         confidence: decision.confidence,
         modelId: decision.modelId || null,
-        plan,
       },
-      result: { verdict: plan.verdict, actionPlan: plan.action },
+      chatId: comment.chatId,
+      messageId: comment.messageId,
+      revisionIdentity: comment.platformMessageId,
+      userId: comment.userId,
+      isWeak: reserveWeakStrike,
+      // Shadow policies retain the observed pre-provider context but do not
+      // mutate weak strikes; live weak policies obtain their count only in the
+      // atomic reservation transaction above.
+      derivePolicy: (reservedStrikeBefore) => planTelegramSafetyAction(
+        decision, reserveWeakStrike ? reservedStrikeBefore : strikeState.weakStrikes,
+      ),
     });
     if (!ready.ready) return jobResult(claim.eventId, ready.row, 'judgement_claim_fenced');
+    const plan = ready.enforcement.policy;
     await testHooks?.afterDecisionReady?.({ eventId, plan });
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({
       chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
       moderationMessageId: comment.platformMessageId, reason: decision.reason, moderationEventId: eventId,
     });
-    const enforcement = await enforceSafetyPlan(eventId, comment, decision, plan);
+    const enforcement = await enforceSafetyPlan(eventId, comment, plan, { initialClaim: ready.enforcement.claim });
     const actions = enforcement.actions || [];
     if (plan.verdict === 'suspect' && ['delete_warn_1', 'delete_warn_2'].includes(enforcement.action)) {
       actions.push(await notifier.notify({ kind: 'moderation_suspect', comment, decision, plan }));
@@ -699,12 +668,14 @@ export function createTelegramRuntime({
       ? snapshot.comment : null;
     const decision = normalizeSafetyClassification(durableDecision);
     const storedPlan = durableDecision?.plan;
-    let plan;
+    const { duplicateNative = false, ...storedPolicy } = storedPlan && typeof storedPlan === 'object' ? storedPlan : {};
+    let expectedPlan;
     try {
-      plan = storedPlan == null ? null : planTelegramSafetyAction(decision, storedPlan.strikeBefore);
-    } catch { plan = null; }
-    if (!comment || !decision || !plan || canonicalJson(storedPlan) !== canonicalJson(plan)) return null;
-    return { comment, decision, plan };
+      expectedPlan = storedPlan == null ? null : planTelegramSafetyAction(decision, storedPolicy.strikeBefore);
+    } catch { expectedPlan = null; }
+    if (!comment || !decision || !expectedPlan || typeof duplicateNative !== 'boolean'
+      || canonicalJson(storedPolicy) !== canonicalJson(expectedPlan)) return null;
+    return { comment, decision, plan: duplicateNative ? { ...expectedPlan, duplicateNative: true } : expectedPlan };
   }
 
   /**
@@ -733,24 +704,57 @@ export function createTelegramRuntime({
       moderationMessageId: comment.platformMessageId,
       reason: 'moderator_decision_recovered', moderationEventId: job.event_id,
     });
-    const enforcement = await enforceSafetyPlan(job.event_id, comment, decision, plan);
-    if (enforcement.pending === true) {
+    let enforcement = store.getModerationEnforcement(job.event_id);
+    if (!enforcement) {
+      // `decision_ready` rows created by the rejected d71 candidate did not
+      // reserve a weak strike or persist a receipt. Their fixed weak plan must
+      // be quarantined rather than reconstructed from the current counter.
+      if (decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak') {
+        const reviewed = store.manualReviewDecisionReadyModeratorJudgement({
+          eventId: job.event_id, errorCode: 'legacy_weak_plan_unreserved',
+        });
+        return jobResult(job.event_id, reviewed.row, 'legacy_weak_plan_unreserved');
+      }
+      const created = store.claimModerationEnforcement({
+        eventId: job.event_id, chatId: comment.chatId, messageId: comment.messageId, policy: plan,
+      });
+      if (!created.claimed && !created.existing) {
+        return { kind: 'moderation_deferred', eventId: job.event_id, reason: 'legacy_enforcement_receipt_missing' };
+      }
+      enforcement = created.claimed ? store.getModerationEnforcement(job.event_id) : created.existing;
+    }
+    if (!enforcement || (
+      enforcement.status === 'planned'
+      && plan.duplicateNative !== true
+      && decision.safetyRoute === 'abuse'
+      && decision.abuseLevel === 'weak'
+      && !store.hasWeakStrikeReservation({
+        eventId: job.event_id, chatId: comment.chatId, messageId: comment.messageId, userId: comment.userId,
+      })
+    )) {
+      const reviewed = store.manualReviewDecisionReadyModeratorJudgement({
+        eventId: job.event_id, errorCode: 'weak_strike_reservation_missing',
+      });
+      return jobResult(job.event_id, reviewed.row, 'weak_strike_reservation_missing');
+    }
+    const enforcementResult = await enforceSafetyPlan(job.event_id, comment, plan);
+    if (enforcementResult.pending === true) {
       return {
         kind: 'moderation_deferred', eventId: job.event_id,
-        reason: enforcement.reason || enforcement.action,
+        reason: enforcementResult.reason || enforcementResult.action,
       };
     }
     // Notifications are deliberately not replayed: unlike the Guard receipt,
     // their prior delivery cannot be proved from this job.
     store.recordModeration({
       eventId: job.event_id, ...comment, ...decision, ...plan,
-      mode: config.moderationMode, actions: enforcement.actions || [],
+      mode: config.moderationMode, actions: enforcementResult.actions || [],
     });
     store.completeModeratorDecision({ eventId: job.event_id });
     return {
       kind: 'moderated', eventId: job.event_id, recovered: true,
-      verdict: plan.verdict, action: enforcement.action,
-      actions: enforcement.actions || [], enforcement: enforcement.receipt || null,
+      verdict: plan.verdict, action: enforcementResult.action,
+      actions: enforcementResult.actions || [], enforcement: enforcementResult.receipt || null,
     };
   }
 

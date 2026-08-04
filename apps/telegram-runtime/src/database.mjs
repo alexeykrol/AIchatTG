@@ -410,6 +410,9 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     SET state = 'decision_ready', provider_boundary = 'returned', lease_id = NULL, lease_expires_at = NULL,
       decision_json = ?, result_json = ?, error_code = NULL, updated_at = ?, resolved_at = NULL
     WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
+  const activeModeratorProviderClaim = db.prepare(`SELECT event_id FROM runtime_moderator_judgement_jobs
+    WHERE event_id = ? AND state = 'calling' AND provider_boundary = 'calling'
+      AND lease_id = ? AND claim_generation = ?`);
   const resolveModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
     SET state = 'resolved', updated_at = ?, resolved_at = ?
     WHERE event_id = ? AND state = 'decision_ready'`);
@@ -595,21 +598,32 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     incrementWeakStrike.run(chatId, userId, eventId, at);
     return { claimed: true, before, after: before + 1, row: moderationMessage.get(chatId, messageId) };
   });
-  const claimModerationSafetyEnforcement = db.transaction(({
-    eventId, chatId, messageId, revisionIdentity, userId = null, isWeak = false,
-    guardProof = null, derivePolicy,
+  /**
+   * The provider result, immutable enforcement policy, and (for weak abuse)
+   * its native message strike reservation share one SQLite transaction. A
+   * `decision_ready` row therefore never relies on a later live strike count.
+   */
+  const persistModeratorDecisionAndEnforcement = db.transaction(({
+    claim: judgementClaim, decision, chatId, messageId, revisionIdentity,
+    userId = null, isWeak = false, derivePolicy,
   }) => {
-    const existing = enforcementReceipt.get(String(eventId));
-    if (existing) return { claimed: false, existing, duplicateNative: false, policy: null };
-
+    if (!judgementClaim || typeof derivePolicy !== 'function') return { ready: false, row: null, enforcement: null };
+    const normalizedEventId = String(judgementClaim.eventId);
     const normalizedChatId = String(chatId);
     const normalizedMessageId = String(messageId);
-    const normalizedEventId = String(eventId);
     const normalizedUserId = userId == null || String(userId) === '' ? null : String(userId);
+    const active = activeModeratorProviderClaim.get(
+      normalizedEventId, String(judgementClaim.leaseId), Number(judgementClaim.claimGeneration),
+    );
+    if (!active) return { ready: false, row: moderatorJob.get(normalizedEventId) || null, enforcement: null };
+    if (enforcementReceipt.get(normalizedEventId)) {
+      return { ready: false, row: moderatorJob.get(normalizedEventId) || null, enforcement: null };
+    }
+
     const at = now();
     let strike = { claimed: false, before: 0, after: 0, row: null };
     if (isWeak && normalizedUserId) {
-      observeModerationMessage.run(normalizedChatId, normalizedMessageId, null, String(revisionIdentity));
+      observeModerationMessageWithUser.run(normalizedChatId, normalizedMessageId, normalizedUserId, String(revisionIdentity));
       const before = currentWeakStrikes.get(normalizedChatId, normalizedUserId)?.weak_strikes || 0;
       const claimed = weakMessageClaim.run(normalizedEventId, normalizedChatId, normalizedMessageId).changes === 1;
       if (claimed) incrementWeakStrike.run(normalizedChatId, normalizedUserId, normalizedEventId, at);
@@ -620,21 +634,33 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         row: moderationMessage.get(normalizedChatId, normalizedMessageId),
       };
     } else {
-      observeModerationMessage.run(normalizedChatId, normalizedMessageId, null, String(revisionIdentity));
+      observeModerationMessageWithUser.run(normalizedChatId, normalizedMessageId, normalizedUserId, String(revisionIdentity));
     }
-    const policy = derivePolicy(strike.before);
+
+    const basePolicy = derivePolicy(strike.before);
+    const policy = isWeak && normalizedUserId != null && !strike.claimed
+      ? { ...basePolicy, duplicateNative: true }
+      : basePolicy;
     const claimId = randomUUID();
     createEnforcementReceipt.run(
       normalizedEventId, normalizedChatId, normalizedMessageId, String(policy.action), JSON.stringify(policy),
-      guardProof == null ? null : JSON.stringify(guardProof), claimId, at, at,
+      null, claimId, at, at,
     );
+    const ready = markModeratorDecisionReady.run(
+      JSON.stringify({ ...decision, plan: policy }),
+      JSON.stringify({ verdict: policy.verdict, actionPlan: policy.action }),
+      at, normalizedEventId, String(judgementClaim.leaseId), Number(judgementClaim.claimGeneration),
+    ).changes === 1;
+    if (!ready) throw new Error('moderator_decision_enforcement_claim_fenced');
     return {
-      claimed: true,
-      claim: { eventId: normalizedEventId, claimId, claimGeneration: 1 },
-      existing: null,
-      duplicateNative: isWeak && normalizedUserId != null && !strike.claimed,
-      strike,
-      policy,
+      ready: true,
+      row: moderatorJob.get(normalizedEventId) || null,
+      enforcement: {
+        claim: { eventId: normalizedEventId, claimId, claimGeneration: 1 },
+        policy,
+        duplicateNative: policy.duplicateNative === true,
+        strike,
+      },
     };
   });
 
@@ -780,18 +806,14 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       ).changes === 1;
       return { resolved, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
     },
-    /**
-     * Persists a provider-returned decision before any Guard effect. This is
-     * deliberately not terminal: recovery may finish only a still-planned
-     * enforcement receipt, never a receipt that reached `calling`/`uncertain`.
-     */
-    markModeratorDecisionReady({ claim: judgementClaim, decision = null, result = null }) {
-      if (!judgementClaim) return { ready: false, row: null };
-      const ready = markModeratorDecisionReady.run(
-        decision == null ? null : JSON.stringify(decision), result == null ? null : JSON.stringify(result), now(),
-        judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
-      ).changes === 1;
-      return { ready, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    persistModeratorDecisionAndEnforcement({
+      claim: judgementClaim, decision = null, chatId, messageId, revisionIdentity,
+      userId = null, isWeak = false, derivePolicy,
+    }) {
+      return persistModeratorDecisionAndEnforcement({
+        claim: judgementClaim, decision: decision || {}, chatId, messageId, revisionIdentity,
+        userId, isWeak, derivePolicy,
+      });
     },
     completeModeratorDecision({ eventId }) {
       const normalizedEventId = String(eventId || '');
@@ -894,6 +916,11 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         String(chatId), String(userId), String(messageId), String(revisionIdentity), String(eventId), now(),
       );
     },
+    hasWeakStrikeReservation({ chatId, userId, messageId, eventId }) {
+      if (userId == null || String(userId) === '') return false;
+      const row = moderationMessage.get(String(chatId), String(messageId));
+      return row?.user_id === String(userId) && row?.weak_strike_event_id === String(eventId);
+    },
     markWarningDelivered({ chatId, userId, eventId, stage }) {
       if (userId == null || !['first', 'final'].includes(String(stage))) return { marked: false };
       const at = now();
@@ -916,15 +943,6 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         claim: claimed ? { eventId: String(eventId), claimId, claimGeneration: 1 } : null,
         existing,
       };
-    },
-    claimModerationSafetyEnforcement({
-      eventId, chatId, messageId, revisionIdentity, userId = null, isWeak = false,
-      guardProof = null, derivePolicy,
-    }) {
-      if (typeof derivePolicy !== 'function') throw new Error('derivePolicy is required');
-      return claimModerationSafetyEnforcement({
-        eventId, chatId, messageId, revisionIdentity, userId, isWeak, guardProof, derivePolicy,
-      });
     },
     markModerationEnforcementCalling({ claim: enforcementClaim, receipt }) {
       if (!enforcementClaim) return { marked: false };
