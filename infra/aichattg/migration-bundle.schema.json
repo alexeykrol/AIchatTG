@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alexeykrol/AIchatTG/infra/aichattg/migration-bundle.schema.json",
+  "title": "AIchatTG approved normalized migration bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "bundleId", "source", "target", "payload", "authorization"],
+  "properties": {
+    "format": { "const": "aichattg-migration-bundle-v1" },
+    "bundleId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,128}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["application", "commit", "exportType", "databaseIncluded"],
+      "properties": {
+        "application": { "const": "news-digest" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "exportType": { "const": "approved-normalized-jsonl" },
+        "databaseIncluded": { "const": false }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["application", "service", "schema"],
+      "properties": {
+        "application": { "const": "aichattg" },
+        "service": { "const": "aichattg-telegram-runtime" },
+        "schema": { "const": "runtime-sqlite-v1" }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256", "recordCount"],
+      "properties": {
+        "file": { "const": "records.jsonl" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "recordCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateSha", "controllerLeaseId", "productOwnerApprovalId"],
+      "properties": {
+        "candidateSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "controllerLeaseId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,128}$" },
+        "productOwnerApprovalId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,128}$" }
+      }
+    }
+  }
+}

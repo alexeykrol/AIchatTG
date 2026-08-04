@@ -1,0 +1,22 @@
+FROM node:20.20.0-bookworm-slim
+
+ARG AICHATTG_SOURCE_SHA
+LABEL org.opencontainers.image.source="https://github.com/alexeykrol/AIchatTG" \
+      org.opencontainers.image.revision="${AICHATTG_SOURCE_SHA}" \
+      org.opencontainers.image.title="aichattg-gatekeeper"
+
+WORKDIR /app/apps/gatekeeper
+ENV NODE_ENV=production
+
+COPY apps/gatekeeper/package.json apps/gatekeeper/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY apps/gatekeeper/src/ ./src/
+COPY apps/gatekeeper/public/ ./public/
+COPY apps/gatekeeper/ONBOARDING_SCENARIO.md ./ONBOARDING_SCENARIO.md
+COPY apps/gatekeeper/SCENARIO_TEXTS.md ./SCENARIO_TEXTS.md
+RUN chown -R node:node /app
+
+USER node
+EXPOSE 8787
+CMD ["node", "src/server.mjs"]

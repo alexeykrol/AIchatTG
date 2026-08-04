@@ -1,0 +1,131 @@
+name: aichattg
+
+x-service-security: &service-security
+  init: true
+  restart: unless-stopped
+  read_only: true
+  user: "1000:1000"
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:mode=1770,uid=1000,gid=1000
+  networks:
+    - aichattg_private
+    - root_default
+
+services:
+  aichattg-gatekeeper:
+    <<: *service-security
+    profiles:
+      - gatekeeper
+    image: "aichattg/gatekeeper:${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    build:
+      context: ../..
+      dockerfile: infra/aichattg/Dockerfile.gatekeeper
+      args:
+        AICHATTG_SOURCE_SHA: "${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    environment:
+      GATEKEEPER_PORT: "8787"
+      GATEKEEPER_DATA_ROOT: /var/lib/aichattg/gatekeeper
+      GATEKEEPER_DATABASE_PATH: gatekeeper.sqlite
+      GATEKEEPER_BOT_TOKEN: "${GATEKEEPER_BOT_TOKEN:?GATEKEEPER_BOT_TOKEN is required}"
+      GATEKEEPER_BOT_USERNAME: "${GATEKEEPER_BOT_USERNAME:?GATEKEEPER_BOT_USERNAME is required}"
+      GATEKEEPER_TARGET_CHAT_ID: "${GATEKEEPER_TARGET_CHAT_ID:?GATEKEEPER_TARGET_CHAT_ID is required}"
+      GATEKEEPER_TELEGRAM_WEBHOOK_SECRET: "${GATEKEEPER_TELEGRAM_WEBHOOK_SECRET:?GATEKEEPER_TELEGRAM_WEBHOOK_SECRET is required}"
+      GATEKEEPER_TRIBUTE_API_KEY: "${GATEKEEPER_TRIBUTE_API_KEY:?GATEKEEPER_TRIBUTE_API_KEY is required}"
+      GATEKEEPER_TRIBUTE_SUBSCRIPTION_IDS: "${GATEKEEPER_TRIBUTE_SUBSCRIPTION_IDS:?GATEKEEPER_TRIBUTE_SUBSCRIPTION_IDS is required}"
+      GATEKEEPER_TRIBUTE_CHANNEL_ID: "${GATEKEEPER_TRIBUTE_CHANNEL_ID:-}"
+      GATEKEEPER_LINK_SIGNING_SECRET: "${GATEKEEPER_LINK_SIGNING_SECRET:?GATEKEEPER_LINK_SIGNING_SECRET is required}"
+      GATEKEEPER_SITE_ENABLED: "${GATEKEEPER_SITE_ENABLED:-false}"
+      GATEKEEPER_SITE_WEBHOOK_SECRET: "${GATEKEEPER_SITE_WEBHOOK_SECRET:-}"
+      GATEKEEPER_PUBLIC_BASE_URL: "${GATEKEEPER_PUBLIC_BASE_URL:-}"
+      GATEKEEPER_ZAPIER_ENABLED: "${GATEKEEPER_ZAPIER_ENABLED:-false}"
+      GATEKEEPER_ZAPIER_SITE_INVITE_URL: "${GATEKEEPER_ZAPIER_SITE_INVITE_URL:-}"
+      GATEKEEPER_ZAPIER_COMPLETION_URL: "${GATEKEEPER_ZAPIER_COMPLETION_URL:-}"
+      GATEKEEPER_ZAPIER_AUTH_TOKEN: "${GATEKEEPER_ZAPIER_AUTH_TOKEN:-}"
+      GATEKEEPER_ADMIN_SETTINGS_TOKEN: "${GATEKEEPER_ADMIN_SETTINGS_TOKEN:-}"
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/gatekeeper"
+        target: /var/lib/aichattg/gatekeeper
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      traefik.enable: "${AICHATTG_GATEKEEPER_ROUTING_ENABLED:-false}"
+      traefik.docker.network: root_default
+      traefik.http.routers.aichattg-gatekeeper.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`) && PathPrefix(`/gatekeeper`)"
+      traefik.http.routers.aichattg-gatekeeper.entrypoints: web,websecure
+      traefik.http.routers.aichattg-gatekeeper.tls: "true"
+      traefik.http.routers.aichattg-gatekeeper.tls.certresolver: mytlschallenge
+      traefik.http.routers.aichattg-gatekeeper.middlewares: aichattg-gatekeeper-strip@docker
+      traefik.http.routers.aichattg-gatekeeper.priority: "200"
+      traefik.http.middlewares.aichattg-gatekeeper-strip.stripprefix.prefixes: /gatekeeper
+      traefik.http.services.aichattg-gatekeeper.loadbalancer.server.port: "8787"
+
+  aichattg-telegram-runtime:
+    <<: *service-security
+    profiles:
+      - telegram-runtime
+    image: "aichattg/telegram-runtime:${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    build:
+      context: ../..
+      dockerfile: infra/aichattg/Dockerfile.telegram-runtime
+      args:
+        AICHATTG_SOURCE_SHA: "${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    environment:
+      TELEGRAM_RUNTIME_PORT: "8788"
+      TELEGRAM_RUNTIME_DATA_ROOT: /var/lib/aichattg/telegram-runtime
+      TELEGRAM_RUNTIME_DATABASE_PATH: /var/lib/aichattg/telegram-runtime/telegram-runtime.sqlite
+      TELEGRAM_RUNTIME_INGRESS_ENABLED: "${TELEGRAM_RUNTIME_INGRESS_ENABLED:-false}"
+      TELEGRAM_RUNTIME_MODERATION_MODE: "${TELEGRAM_RUNTIME_MODERATION_MODE:-shadow}"
+      TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS: "${TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS:-}"
+      TELEGRAM_RUNTIME_MODERATOR_BOT_TOKEN: "${TELEGRAM_RUNTIME_MODERATOR_BOT_TOKEN:-}"
+      TELEGRAM_RUNTIME_MODERATOR_BOT_USERNAME: "${TELEGRAM_RUNTIME_MODERATOR_BOT_USERNAME:-}"
+      TELEGRAM_RUNTIME_MODERATOR_WEBHOOK_SECRET: "${TELEGRAM_RUNTIME_MODERATOR_WEBHOOK_SECRET:-}"
+      TELEGRAM_RUNTIME_MODERATOR_EXEMPT_BOT_IDS: "${TELEGRAM_RUNTIME_MODERATOR_EXEMPT_BOT_IDS:-}"
+      TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS: "${TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS:-}"
+      TELEGRAM_RUNTIME_ASSISTANT_BOT_TOKEN: "${TELEGRAM_RUNTIME_ASSISTANT_BOT_TOKEN:-}"
+      TELEGRAM_RUNTIME_ASSISTANT_BOT_USERNAME: "${TELEGRAM_RUNTIME_ASSISTANT_BOT_USERNAME:-}"
+      TELEGRAM_RUNTIME_ASSISTANT_WEBHOOK_SECRET: "${TELEGRAM_RUNTIME_ASSISTANT_WEBHOOK_SECRET:-}"
+      TELEGRAM_RUNTIME_ASSISTANT_EXEMPT_BOT_IDS: "${TELEGRAM_RUNTIME_ASSISTANT_EXEMPT_BOT_IDS:-}"
+      TELEGRAM_RUNTIME_LLM_ENABLED: "${TELEGRAM_RUNTIME_LLM_ENABLED:-false}"
+      TELEGRAM_RUNTIME_LLM_ENDPOINT: "${TELEGRAM_RUNTIME_LLM_ENDPOINT:-}"
+      TELEGRAM_RUNTIME_LLM_API_KEY: "${TELEGRAM_RUNTIME_LLM_API_KEY:-}"
+      TELEGRAM_RUNTIME_LLM_MODEL: "${TELEGRAM_RUNTIME_LLM_MODEL:-}"
+      TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED: "${TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED:-false}"
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/telegram-runtime"
+        target: /var/lib/aichattg/telegram-runtime
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      traefik.enable: "${AICHATTG_RUNTIME_ROUTING_ENABLED:-false}"
+      traefik.docker.network: root_default
+      traefik.http.routers.aichattg-telegram-runtime.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`) && (Path(`/webhooks/telegram/moderator`) || Path(`/webhooks/telegram/assistant`))"
+      traefik.http.routers.aichattg-telegram-runtime.entrypoints: web,websecure
+      traefik.http.routers.aichattg-telegram-runtime.tls: "true"
+      traefik.http.routers.aichattg-telegram-runtime.tls.certresolver: mytlschallenge
+      traefik.http.routers.aichattg-telegram-runtime.priority: "250"
+      traefik.http.services.aichattg-telegram-runtime.loadbalancer.server.port: "8788"
+
+networks:
+  aichattg_private:
+    internal: true
+  root_default:
+    external: true
+    name: root_default
