@@ -103,6 +103,8 @@ These steps are intentionally not authorized by this candidate alone.
 4. Place a new mode-0600 runtime file outside Git, based on
    `infra/aichattg/runtime.env.example`. Do not inspect or log its values.
    Keep both router flags `false` until their individual ingress approvals.
+   The provider remains disabled until all three explicit tuples (Moderator
+   safety, Assistant router and Assistant answer) are approved and present.
 5. Build only the profiles named by the lease from the clean source. Check each
    container health endpoint from inside its container and record image digest,
    source SHA label, service name, data-root path, and restart count.
