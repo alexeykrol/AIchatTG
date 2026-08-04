@@ -34,7 +34,7 @@ not bypass another bot's ownership by writing its tables directly.
 ## Deployment boundary
 
 AIchatTG runs on the existing VPS as distinct services. Traefik may route the
-three bot endpoints and the optional read-only `/operator` console to it; the
+three bot endpoints and the optional read-only host-root operator console to it; the
 News Digest service remains separately built and deployed. A release must build
 from one AIchatTG commit and preserve its own runtime state. It must not rebuild
 `news-digest`. Course/index content is not part of this extraction and remains

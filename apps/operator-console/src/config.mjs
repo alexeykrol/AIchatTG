@@ -25,6 +25,13 @@ function optionalToken(env) {
   return token;
 }
 
+function nonNegativeInteger(env, name, fallback) {
+  const raw = Object.hasOwn(env, name) && env[name] !== '' ? env[name] : fallback;
+  const value = Number.parseInt(String(raw), 10);
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`);
+  return value;
+}
+
 export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd() } = {}) {
   return Object.freeze({
     port: port(env),
@@ -33,8 +40,9 @@ export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd
     runtimeDatabasePath: resolve(cwd, String(
       env.OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.sqlite',
     )),
-    gatekeeperDatabasePath: resolve(cwd, String(
-      env.OPERATOR_CONSOLE_GATEKEEPER_DATABASE_PATH || 'data/gatekeeper/gatekeeper.sqlite',
+    safetyPromptPath: resolve(cwd, String(
+      env.OPERATOR_CONSOLE_SAFETY_PROMPT_PATH
+        || 'apps/telegram-runtime/src/safety-artifacts/moderation-tg-v3.md',
     )),
     runtimeFlags: Object.freeze({
       ingressEnabled: boolean(env, 'TELEGRAM_RUNTIME_INGRESS_ENABLED', false),
@@ -42,10 +50,20 @@ export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd
       providerEnabled: boolean(env, 'TELEGRAM_RUNTIME_PROVIDER_ENABLED', false),
       notificationsEnabled: boolean(env, 'TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED', false),
     }),
-    gatekeeperFlags: Object.freeze({
-      scenarioReady: boolean(env, 'GATEKEEPER_SCENARIO_READY', false),
-      siteEnabled: boolean(env, 'GATEKEEPER_SITE_ENABLED', false),
-      zapierEnabled: boolean(env, 'GATEKEEPER_ZAPIER_ENABLED', false),
+    runtimeModels: Object.freeze({
+      vendor: String(env.TELEGRAM_RUNTIME_PROVIDER_VENDOR || 'openai'),
+      moderator: String(env.TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MODEL || 'gpt-5.6-terra'),
+      moderatorReasoning: String(env.TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_REASONING_EFFORT || 'medium'),
+      router: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MODEL || ''),
+      answer: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MODEL || ''),
+      routerReasoning: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_REASONING_EFFORT || ''),
+      answerReasoning: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT || ''),
+      answerMaxTokens: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS', 2000),
+    }),
+    assistantPolicy: Object.freeze({
+      cooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20),
+      dailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20),
+      knowledgeEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED', false),
     }),
   });
 }

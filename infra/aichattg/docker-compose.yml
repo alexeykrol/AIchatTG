@@ -148,24 +148,26 @@ services:
       OPERATOR_CONSOLE_CONTAINER_BIND: "true"
       AICHATTG_OPERATOR_TOKEN: "${AICHATTG_OPERATOR_TOKEN:-}"
       OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH: /var/lib/aichattg/telegram-runtime/telegram-runtime.sqlite
-      OPERATOR_CONSOLE_GATEKEEPER_DATABASE_PATH: /var/lib/aichattg/gatekeeper/gatekeeper.sqlite
+      OPERATOR_CONSOLE_SAFETY_PROMPT_PATH: /app/apps/operator-console/safety-artifacts/moderation-tg-v3.md
       TELEGRAM_RUNTIME_INGRESS_ENABLED: "${TELEGRAM_RUNTIME_INGRESS_ENABLED:-false}"
       TELEGRAM_RUNTIME_MODERATION_MODE: "${TELEGRAM_RUNTIME_MODERATION_MODE:-shadow}"
       TELEGRAM_RUNTIME_PROVIDER_ENABLED: "${TELEGRAM_RUNTIME_PROVIDER_ENABLED:-false}"
+      TELEGRAM_RUNTIME_PROVIDER_VENDOR: "${TELEGRAM_RUNTIME_PROVIDER_VENDOR:-}"
+      TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MODEL: "${TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MODEL:-}"
+      TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_REASONING_EFFORT: "${TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_REASONING_EFFORT:-}"
+      TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MODEL: "${TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MODEL:-}"
+      TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_REASONING_EFFORT: "${TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_REASONING_EFFORT:-}"
+      TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MODEL: "${TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MODEL:-}"
+      TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT: "${TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT:-}"
+      TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS: "${TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS:-2000}"
+      TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC: "${TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC:-20}"
+      TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER: "${TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER:-20}"
+      TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED: "${TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED:-false}"
       TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED: "${TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED:-false}"
-      GATEKEEPER_SCENARIO_READY: "${GATEKEEPER_SCENARIO_READY:-false}"
-      GATEKEEPER_SITE_ENABLED: "${GATEKEEPER_SITE_ENABLED:-false}"
-      GATEKEEPER_ZAPIER_ENABLED: "${GATEKEEPER_ZAPIER_ENABLED:-false}"
     volumes:
       - type: bind
         source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/telegram-runtime"
         target: /var/lib/aichattg/telegram-runtime
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/gatekeeper"
-        target: /var/lib/aichattg/gatekeeper
         read_only: true
         bind:
           create_host_path: false
@@ -178,13 +180,11 @@ services:
     labels:
       traefik.enable: "${AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED:-false}"
       traefik.docker.network: root_default
-      traefik.http.routers.aichattg-operator-console.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`) && PathPrefix(`/operator`)"
+      traefik.http.routers.aichattg-operator-console.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`)"
       traefik.http.routers.aichattg-operator-console.entrypoints: web,websecure
       traefik.http.routers.aichattg-operator-console.tls: "true"
       traefik.http.routers.aichattg-operator-console.tls.certresolver: mytlschallenge
-      traefik.http.routers.aichattg-operator-console.middlewares: aichattg-operator-console-strip@docker
-      traefik.http.routers.aichattg-operator-console.priority: "300"
-      traefik.http.middlewares.aichattg-operator-console-strip.stripprefix.prefixes: /operator
+      traefik.http.routers.aichattg-operator-console.priority: "100"
       traefik.http.services.aichattg-operator-console.loadbalancer.server.port: "8790"
 
 networks:

@@ -145,8 +145,9 @@ perform Telegram, provider, or public-routing activity.
 ## Operator console gate
 
 `aichattg-operator-console` is a separate optional service at
-`https://aikrol.questtales.com/operator`. It has no write API and mounts only
-the two AIchatTG SQLite directories read-only. The route remains disabled until
+`https://aikrol.questtales.com/`. It serves the ported Moderator, Assistant and
+Tests pages, has no write API, and mounts only the Telegram runtime SQLite
+directory read-only. The route remains disabled until
 both `AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED=true` and a non-empty
 runtime-only `AICHATTG_OPERATOR_TOKEN` are present. Its Basic-auth user name is
 fixed to `operator`; never reuse a News Digest session, cookie, or token.

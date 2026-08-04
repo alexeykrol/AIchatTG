@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Тесты — AIchatTG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f3ef;
+      color: #2d2a26;
+      padding: 24px;
+      min-height: 100vh;
+      font-size: 15px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+    h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; color: #2d2a26; }
+    .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .version-badge {
+      font-size: 12px; font-weight: 500; color: #8a8580;
+      background: #f0ede8; border: 1px solid #ddd8d0; border-radius: 6px;
+      padding: 3px 10px; letter-spacing: 0.3px; flex-shrink: 0;
+    }
+    .subtitle { color: #8a8580; font-size: 15px; margin-bottom: 20px; }
+
+    /* Auth bar */
+    .auth-bar {
+      display: none; align-items: center; gap: 12px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.28);
+      color: #b45309; border-radius: 10px;
+      padding: 10px 16px; margin-bottom: 18px;
+      font-size: 14px; line-height: 1.5;
+    }
+    body.readonly .auth-bar, body.authed .auth-bar { display: flex; }
+    .auth-ok, .auth-bar .btn-logout { display: none; }
+    body.authed .auth-bar { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.30); color: #047857; }
+    body.authed .auth-ro, body.authed .btn-login { display: none; }
+    body.authed .auth-ok { display: inline; }
+    body.authed .auth-bar .btn-logout { display: inline-block; }
+    .auth-bar .btn-login, .auth-bar .btn-logout {
+      margin-left: auto;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff; border: none; border-radius: 8px;
+      padding: 6px 16px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease; text-decoration: none;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .auth-bar .btn-logout { background: linear-gradient(135deg, #64748b, #475569); }
+    .auth-bar .btn-login:hover, .auth-bar .btn-logout:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); }
+    body.readonly .write { display: none !important; }
+    body.readonly .btn-login, body.readonly .btn-logout { display: none !important; }
+
+    /* Site nav tabs */
+    .tabs { display: flex; gap: 2px; margin: 4px 0 22px; border-bottom: 1px solid #e8e4df; flex-wrap: wrap; }
+    .tabs .tab {
+      padding: 9px 18px; font-size: 15px; font-weight: 500; color: #8a8580;
+      text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color .2s ease, border-color .2s ease; white-space: nowrap;
+    }
+    .tabs .tab:hover { color: #2d2a26; }
+    .tabs .tab.active { color: #7c3aed; border-bottom-color: #7c3aed; font-weight: 600; }
+
+    /* Cards */
+    .card {
+      background: #ffffff; border: 1px solid #e8e4df; border-radius: 14px;
+      padding: 24px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 4px; }
+    .card .card-desc { color: #8a8580; font-size: 13.5px; line-height: 1.6; margin-bottom: 18px; }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: #6b6660; margin-bottom: 6px; }
+    .field .hint { font-size: 12px; color: #b0aaa4; margin-top: 5px; line-height: 1.5; }
+    .hint b { color: #6b6660; }
+
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%; padding: 10px 12px; border: 1px solid #ddd8d0; border-radius: 8px;
+      font-size: 14px; font-family: 'Inter', sans-serif; color: #2d2a26; background: #fff;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.12); }
+    textarea { min-height: 300px; resize: vertical; line-height: 1.6; font-size: 13.5px; }
+    textarea.mono { font-family: 'Inter', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+    /* Buttons */
+    .btn {
+      border: 1px solid #ddd8d0; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+      font-size: 14px; font-weight: 500; font-family: 'Inter', sans-serif; background: #fff;
+      color: #2d2a26; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { border-color: #7c3aed; color: #7c3aed; box-shadow: 0 0 10px rgba(124,58,237,0.1); }
+    .btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+    .btn-primary { background: linear-gradient(135deg, #7c3aed, #3b82f6); color: #fff; border: none; }
+    .btn-primary:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); color: #fff; }
+    .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+    .btn-danger { color: #dc2626; border-color: rgba(239,68,68,0.35); }
+    .btn-danger:hover { border-color: #dc2626; color: #dc2626; box-shadow: 0 0 10px rgba(239,68,68,0.12); }
+    .btn-ok { color: #16a34a; border-color: rgba(34,197,94,0.35); }
+    .btn-ok:hover { border-color: #16a34a; color: #16a34a; box-shadow: 0 0 10px rgba(34,197,94,0.12); }
+    .btn.active-good { background: rgba(34,197,94,0.12); border-color: #16a34a; color: #16a34a; }
+    .btn.active-bad { background: rgba(239,68,68,0.10); border-color: #dc2626; color: #dc2626; }
+
+    .save-bar { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e8e4df; flex-wrap: wrap; }
+    .status { font-size: 13.5px; font-weight: 500; opacity: 0; transition: opacity 0.2s; }
+    .status.show { opacity: 1; }
+    .status.ok { color: #16a34a; }
+    .status.err { color: #ef4444; }
+
+    /* Toggle */
+    .mode-toggle { display: inline-flex; border: 1px solid #ddd8d0; border-radius: 10px; overflow: hidden; }
+    .mode-btn { padding: 9px 20px; font-size: 14px; font-weight: 600; border: none; background: #fff; color: #8a8580; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s ease; }
+    .mode-btn:hover { background: #faf9f7; }
+    .mode-btn.active.on { background: rgba(34,197,94,0.14); color: #16a34a; }
+    .mode-btn.active.off { background: rgba(120,113,108,0.12); color: #78716c; }
+
+    /* Stat grid */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat { background: #faf9f7; border: 1px solid #e8e4df; border-radius: 11px; padding: 14px 16px; }
+    .stat .stat-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #8a8580; margin-bottom: 6px; }
+    .stat .stat-value { font-size: 22px; font-weight: 700; color: #2d2a26; font-variant-numeric: tabular-nums; }
+    .stat .stat-sub { font-size: 12px; color: #b0aaa4; margin-top: 4px; }
+    .stat.cost .stat-value { color: #6d28d9; }
+
+    .group-subtitle {
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+      color: #8a8580; margin: 20px 0 10px;
+    }
+    .group-subtitle:first-of-type { margin-top: 0; }
+
+    .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; letter-spacing: 0.2px; white-space: nowrap; }
+    .badge.err { background: rgba(239,68,68,0.10); color: #dc2626; border: 1px solid rgba(239,68,68,0.28); }
+    .badge.ok { background: rgba(34,197,94,0.12); color: #16a34a; border: 1px solid rgba(34,197,94,0.28); }
+    .badge.route { background: rgba(124,58,237,0.08); color: #6d28d9; border: 1px solid rgba(124,58,237,0.22); }
+
+    .info-note {
+      padding: 12px 14px; background: rgba(124,58,237,0.05); border: 1px solid rgba(124,58,237,0.12);
+      border-radius: 10px; font-size: 13px; color: #6b6660; line-height: 1.6; margin-bottom: 14px;
+    }
+
+    /* Table */
+    table { width: 100%; border-collapse: separate; border-spacing: 0 6px; }
+    thead th {
+      text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; color: #8a8580; letter-spacing: 0.7px; border: none;
+      background: transparent; white-space: nowrap;
+    }
+    tbody tr { background: #fff; transition: background 0.15s ease; }
+    tbody tr:hover { background: #faf9f7; }
+    td { padding: 12px; border: none; font-size: 14px; border-top: 1px solid #e8e4df; border-bottom: 1px solid #e8e4df; vertical-align: top; }
+    td:first-child { border-left: 1px solid #e8e4df; border-radius: 10px 0 0 10px; }
+    td:last-child { border-right: 1px solid #e8e4df; border-radius: 0 10px 10px 0; }
+    .date-main { font-weight: 500; color: #2d2a26; white-space: nowrap; }
+    .date-sub { color: #b0aaa4; font-size: 12.5px; white-space: nowrap; }
+    .qa-text { max-width: 300px; color: #4a453f; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .qa-author { font-weight: 500; color: #2d2a26; }
+    .qa-author .qa-id { font-size: 12px; color: #b0aaa4; display: block; }
+    .cost-cell { font-variant-numeric: tabular-nums; white-space: nowrap; color: #6b6660; }
+    .tok-cell { font-variant-numeric: tabular-nums; white-space: nowrap; color: #6b6660; font-size: 13px; }
+    .row-ctrls { display: flex; flex-direction: column; gap: 6px; min-width: 130px; }
+    .row-ctrls .rate-row { display: flex; gap: 6px; }
+    .row-ctrls .btn-sm { justify-content: center; }
+
+    .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .loading { padding: 40px; text-align: center; color: #b0aaa4; }
+    .empty { text-align: center; color: #8a8580; padding: 28px 14px; }
+
+    /* ── eval-specific ─────────────────────────────────────────────────────── */
+    .run-head { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; margin-bottom: 20px; }
+    .ratio-ring {
+      --pct: 0; --ring: #16a34a;
+      width: 132px; height: 132px; border-radius: 50%; flex-shrink: 0;
+      background: conic-gradient(var(--ring) calc(var(--pct) * 1%), #ece8e2 0);
+      display: flex; align-items: center; justify-content: center; position: relative;
+    }
+    .ratio-ring::before { content: ''; position: absolute; inset: 12px; background: #fff; border-radius: 50%; }
+    .ratio-inner { position: relative; text-align: center; line-height: 1.1; }
+    .ratio-inner .ratio-frac { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; color: #2d2a26; }
+    .ratio-inner .ratio-pct { font-size: 13px; font-weight: 600; color: #8a8580; margin-top: 2px; }
+    .run-head .run-stats { flex: 1; min-width: 240px; }
+
+    .progress-wrap { margin-top: 18px; padding-top: 18px; border-top: 1px solid #e8e4df; }
+    .progress-bar { height: 10px; background: #ece8e2; border-radius: 6px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #3b82f6); width: 0; transition: width 0.3s ease; }
+    .progress-label { font-size: 13px; color: #6b6660; margin-top: 8px; font-variant-numeric: tabular-nums; }
+
+    /* Category bars */
+    .cat-list { display: flex; flex-direction: column; gap: 10px; }
+    .cat-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; align-items: center; }
+    .cat-name { font-size: 14px; color: #2d2a26; }
+    .cat-frac { font-size: 13px; font-weight: 600; color: #6b6660; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .cat-bar { grid-column: 1 / -1; height: 6px; background: #ece8e2; border-radius: 4px; overflow: hidden; }
+    .cat-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+
+    /* Quick probe result */
+    .quick-result { margin-top: 16px; padding: 16px; background: #faf9f7; border: 1px solid #e8e4df; border-radius: 11px; }
+    .quick-result .qr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .quick-answer { font-size: 14px; line-height: 1.6; color: #2d2a26; white-space: pre-wrap; word-wrap: break-word; }
+
+    /* Cases */
+    .case-row { border: 1px solid #e8e4df; border-radius: 11px; padding: 14px 16px; margin-bottom: 10px; background: #fff; }
+    .case-row.fail { border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.02); }
+    .case-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .case-vd { font-size: 15px; font-weight: 700; flex-shrink: 0; width: 20px; text-align: center; }
+    .case-vd.pass { color: #16a34a; }
+    .case-vd.fail { color: #dc2626; }
+    .case-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #b0aaa4; }
+    .case-cat { font-size: 12px; color: #8a8580; }
+    .case-route { font-size: 12px; color: #6b6660; font-variant-numeric: tabular-nums; margin-left: auto; white-space: nowrap; }
+    .case-route .rt-bad { color: #dc2626; font-weight: 600; }
+    .case-q { font-size: 14px; color: #2d2a26; margin-top: 8px; line-height: 1.5; }
+    .case-ans { font-size: 13.5px; color: #4a453f; line-height: 1.55; margin-top: 8px; white-space: pre-wrap; word-wrap: break-word; cursor: pointer; }
+    .case-ans.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .case-ans-hint { font-size: 11px; color: #b0aaa4; margin-top: 3px; }
+    .case-fails { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e8e4df; }
+    .case-fail-item { font-size: 12.5px; color: #dc2626; line-height: 1.5; }
+    .case-fail-item b { font-weight: 600; }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #f5f3ef; }
+    ::-webkit-scrollbar-thumb { background: #ddd8d0; border-radius: 4px; }
+
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      h1 { font-size: 24px; }
+      .row3 { grid-template-columns: 1fr; }
+      .qa-text { max-width: 160px; }
+      td, thead th { padding: 8px; font-size: 12px; }
+      .case-route { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Тесты</h1>
+      <div class="header-right"><span class="version-badge">AIchatTG</span></div>
+    </div>
+    <p class="subtitle">Регрессионные тесты ассистента: фиксированная батарея вопросов гоняется через живой пайплайн (роутер → персона → база → модель) с детерминированными проверками кода. Отправки в группу не происходит.</p>
+    <nav class="tabs">
+      <a class="tab" href="moderation.html">Модерация</a>
+      <a class="tab" href="assistant.html">Ассистент</a>
+      <a class="tab active" href="eval.html">Тесты</a>
+    </nav>
+
+    <div class="auth-bar" id="authbar">
+      <span class="auth-ro">👁 Интерфейс перенесён из News. Сейчас доступен безопасный просмотр данных AIchatTG; тестовые вызовы модели отключены.</span>
+      <span class="auth-ok">✅ Вы авторизованы.</span>
+      <a class="btn-login" href="#" id="btn-login">Войти</a>
+      <a class="btn-logout" href="#" id="btn-logout">Выйти</a>
+    </div>
+
+    <div id="loading" class="loading">Загрузка…</div>
+    <div id="main" style="display:none"></div>
+  </div>
+
+  <script>
+    // ── state ───────────────────────────────────────────────────────────────
+    let RESULT = null;        // last summary object or null
+    let STATE = null;         // run state { status, done, total, currentId, ... }
+    let READONLY = false;
+    let POLL = null;          // polling interval handle
+    let CASE_FILTER = 'all';  // 'all' | 'failed'
+    const EXPANDED = new Set(); // case ids with full answer expanded
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n : (n == null ? d : (isFinite(Number(n)) ? Number(n) : d)); }
+    function fmtCost(c) { const v = num(c, null); return v == null ? '—' : '$' + v.toFixed(4); }
+    function fmtDuration(ms) {
+      const v = num(ms, null);
+      if (v == null) return '—';
+      const s = v / 1000;
+      if (s < 60) return s.toFixed(0) + 'с';
+      const m = Math.floor(s / 60);
+      const rem = Math.round(s % 60);
+      return m + 'м ' + rem + 'с';
+    }
+    function fmtGenerated(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      const p = (n) => String(n).padStart(2, '0');
+      return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function ratioColor(passed, total) {
+      if (!total) return '#8a8580';
+      if (passed === total) return '#16a34a';
+      const r = passed / total;
+      if (r >= 0.75) return '#f59e0b';
+      return '#dc2626';
+    }
+
+    // ── fetch helpers ─────────────────────────────────────────────────────────
+    async function apiGet(url) {
+      const res = await fetch(url);
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+    async function apiPost(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      let data = {};
+      try { data = await res.json(); } catch { /* empty body */ }
+      return { res, data };
+    }
+
+    async function loadStatus() {
+      const d = await apiGet('/api/moderation/assistant/eval/status');
+      STATE = d.state || null;
+      // Keep the last good result: while running, `result` is null.
+      if (d.result) RESULT = d.result;
+      else if (STATE && STATE.status !== 'running') RESULT = d.result;
+      return d;
+    }
+
+    // ── render ─────────────────────────────────────────────────────────────────
+    function render() {
+      document.getElementById('main').innerHTML =
+        renderRunCard() + renderQuickCard() + renderCategoryCard() + renderCasesCard();
+      bindRun();
+      bindQuick();
+      bindCases();
+    }
+
+    function isRunning() { return STATE && STATE.status === 'running'; }
+
+    function renderRunCard() {
+      const R = RESULT;
+      const running = isRunning();
+      const total = R ? num(R.total, 0) : 0;
+      const passed = R ? num(R.passed, 0) : 0;
+      const pct = total ? Math.round((passed / total) * 100) : 0;
+      // Critical health drives the alarm; soft failures are model variance. Fall
+      // back to passed/total for old runs that predate the crit/soft split.
+      const hasCrit = R && R.criticalFailed != null;
+      const crit = hasCrit ? num(R.criticalFailed, 0) : (total - passed);
+      const soft = R && R.softFailed != null ? num(R.softFailed, 0) : 0;
+      const ring = crit === 0 ? '#16a34a' : '#dc2626';
+
+      const ringBlock = R ? `
+        <div class="ratio-ring" style="--pct:${pct};--ring:${ring}">
+          <div class="ratio-inner">
+            <div class="ratio-frac">${passed}/${total}</div>
+            <div class="ratio-pct">${crit === 0 ? '✓ критично' : crit + ' критич.'}</div>
+          </div>
+        </div>` : '';
+
+      const critTile = hasCrit
+        ? `<div class="stat"><div class="stat-label">Критичные провалы</div><div class="stat-value" style="color:${crit === 0 ? '#16a34a' : '#dc2626'}">${crit}</div>${soft ? `<div class="stat-sub">+${soft} софт-вариации</div>` : ''}</div>`
+        : '';
+      const stats = R ? `
+        <div class="run-stats">
+          <div class="stat-grid">
+            ${critTile}
+            <div class="stat"><div class="stat-label">Модель</div><div class="stat-value" style="font-size:15px;word-break:break-all">${esc(R.model || '—')}</div></div>
+            <div class="stat cost"><div class="stat-label">Стоимость прогона</div><div class="stat-value">${fmtCost(R.costUsd)}</div></div>
+            <div class="stat"><div class="stat-label">Прогон от</div><div class="stat-value" style="font-size:16px">${esc(fmtGenerated(R.generated))}</div></div>
+            <div class="stat"><div class="stat-label">Длительность</div><div class="stat-value" style="font-size:18px">${esc(fmtDuration(R.durationMs))}</div></div>
+          </div>
+        </div>` : `
+        <div class="run-stats">
+          <div class="empty" style="text-align:left;padding:6px 0">Тесты ещё не запускались — нажмите «Запустить тесты».</div>
+        </div>`;
+
+      const runBtn = `
+        <div class="save-bar write" style="margin-top:${R ? '20px' : '14px'}">
+          <button class="btn btn-primary" id="btn-run"${running ? ' disabled' : ''}>${running ? 'Идёт прогон…' : 'Запустить тесты'}</button>
+          <span class="status" id="status-run"></span>
+        </div>`;
+
+      let progress = '';
+      if (running && STATE) {
+        const done = num(STATE.done, 0);
+        const tot = num(STATE.total, 0) || 1;
+        const p = Math.min(100, Math.round((done / tot) * 100));
+        const cur = STATE.currentId ? ` · сейчас: <b>${esc(STATE.currentId)}</b>` : '';
+        progress = `
+          <div class="progress-wrap" id="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill" style="width:${p}%"></div></div>
+            <div class="progress-label">${done} / ${num(STATE.total, 0)}${cur}</div>
+          </div>`;
+      } else if (STATE && STATE.status === 'error' && STATE.error) {
+        progress = `<div class="info-note" style="background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.18);color:#b91c1c;margin-top:16px">Ошибка прогона: ${esc(STATE.error)}</div>`;
+      }
+
+      return `
+        <div class="card">
+          <h2>Регрессионный прогон</h2>
+          <p class="card-desc">Фиксированная батарея кейсов проходит через живой пайплайн ассистента; каждый ответ проверяется кодом (роут, наличие/отсутствие ключевых сигналов, длина).</p>
+          <div class="run-head">
+            ${ringBlock}
+            ${stats}
+          </div>
+          <div class="info-note">Прогон делает ~72 вызова модели (роутер + ответ на каждый из 36 кейсов), занимает ~1.5 минуты и стоит около $1 (полная база знаний вкладывается в каждый содержательный вопрос). Точная стоимость — в плитке «Стоимость прогона». Отправки в группу не происходит.</div>
+          ${runBtn}
+          ${progress}
+        </div>`;
+    }
+
+    function renderQuickCard() {
+      return `
+        <div class="card write">
+          <h2>Быстрая проверка</h2>
+          <p class="card-desc">Разовый зонд: задайте один вопрос — увидите выбранный роут, ответ модели и стоимость. В группу ничего не уходит.</p>
+          <div class="field" style="margin-bottom:12px">
+            <label>Вопрос</label>
+            <input type="text" id="quick-input" placeholder="Например: чему учит курс по нейросетям?" autocomplete="off">
+          </div>
+          <div class="save-bar" style="margin-top:0;padding-top:0;border-top:none">
+            <button class="btn btn-primary" id="btn-quick">Проверить</button>
+            <span class="status" id="status-quick"></span>
+          </div>
+          <div id="quick-out"></div>
+        </div>`;
+    }
+
+    function routeBadge(route) {
+      const map = { org: 'организационная', content: 'содержательная', other: 'не по курсу' };
+      const r = route == null ? '' : String(route);
+      const label = map[r] || r || '—';
+      return `<span class="badge route">${esc(label)}</span>`;
+    }
+
+    function renderCategoryCard() {
+      const R = RESULT;
+      const by = R && R.byCategory ? R.byCategory : null;
+      const keys = by ? Object.keys(by) : [];
+      let body;
+      if (!keys.length) {
+        body = '<div class="empty">Нет данных — запустите тесты.</div>';
+      } else {
+        body = '<div class="cat-list">' + keys.map((k) => {
+          const c = by[k] || {};
+          const t = num(c.total, 0), p = num(c.passed, 0);
+          const pct = t ? Math.round((p / t) * 100) : 0;
+          const color = ratioColor(p, t);
+          return `
+            <div class="cat-row">
+              <div class="cat-name">${esc(k)}</div>
+              <div class="cat-frac">${p}/${t}</div>
+              <div class="cat-bar"><div class="cat-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+            </div>`;
+        }).join('') + '</div>';
+      }
+      return `
+        <div class="card">
+          <h2>По категориям</h2>
+          <p class="card-desc">Доля пройденных кейсов в каждой группе проверок.</p>
+          ${body}
+        </div>`;
+    }
+
+    function renderCasesCard() {
+      const R = RESULT;
+      const cases = R && Array.isArray(R.cases) ? R.cases : [];
+      let inner;
+      if (!cases.length) {
+        inner = '<div class="empty">Нет кейсов — запустите тесты.</div>';
+      } else {
+        const shown = CASE_FILTER === 'failed' ? cases.filter((c) => !c.pass) : cases;
+        if (!shown.length) {
+          inner = '<div class="empty">Упавших кейсов нет — все проверки пройдены ✓</div>';
+        } else {
+          inner = shown.map(renderCase).join('');
+        }
+      }
+      const failedCount = cases.filter((c) => !c.pass).length;
+      return `
+        <div class="card">
+          <h2>Кейсы</h2>
+          <p class="card-desc">Каждый вопрос батареи, выбранный роут, ответ и результат проверок.</p>
+          <div class="filter-bar">
+            <div class="mode-toggle">
+              <button class="mode-btn ${CASE_FILTER === 'all' ? 'active on' : ''}" data-filter="all">Все (${cases.length})</button>
+              <button class="mode-btn ${CASE_FILTER === 'failed' ? 'active off' : ''}" data-filter="failed">Только упавшие (${failedCount})</button>
+            </div>
+          </div>
+          ${inner}
+        </div>`;
+    }
+
+    function renderCase(c) {
+      const pass = !!c.pass;
+      const id = c.id == null ? '' : String(c.id);
+      const expected = c.expect == null ? 'любой' : String(c.expect);
+      const got = c.route == null ? '—' : String(c.route);
+      const routeBad = c.expect != null && c.expect !== c.route;
+      const routeStr = `${esc(expected)} → <span class="${routeBad ? 'rt-bad' : ''}">${esc(got)}</span>`;
+      const expanded = EXPANDED.has(id);
+      const ans = c.ans == null ? '' : String(c.ans);
+      const ansBlock = ans ? `
+        <div class="case-ans ${expanded ? '' : 'clamp'}" data-id="${esc(id)}">${esc(ans)}</div>
+        <div class="case-ans-hint">${expanded ? 'нажмите, чтобы свернуть' : 'нажмите, чтобы развернуть'}</div>` : '';
+
+      let fails = '';
+      const failedChecks = Array.isArray(c.checks) ? c.checks.filter((ch) => !ch.pass) : [];
+      if (!pass && failedChecks.length) {
+        fails = `<div class="case-fails">` + failedChecks.map((ch) =>
+          `<div class="case-fail-item"><b>✗ ${esc(ch.name)}</b>${ch.detail ? ' — ' + esc(ch.detail) : ''}</div>`
+        ).join('') + `</div>`;
+      }
+
+      return `
+        <div class="case-row ${pass ? '' : 'fail'}">
+          <div class="case-head">
+            <span class="case-vd ${pass ? 'pass' : 'fail'}">${pass ? '✓' : '✗'}</span>
+            <span class="case-id">${esc(id)}</span>
+            <span class="case-cat">${esc(c.cat || '')}</span>
+            <span class="case-route">${routeStr}</span>
+          </div>
+          <div class="case-q">${esc(c.q || '')}</div>
+          ${ansBlock}
+          ${fails}
+        </div>`;
+    }
+
+    // ── actions ─────────────────────────────────────────────────────────────────
+    function bindRun() {
+      const btn = document.getElementById('btn-run');
+      if (btn) btn.onclick = runTests;
+    }
+
+    async function runTests() {
+      const btn = document.getElementById('btn-run');
+      if (btn) btn.disabled = true;
+      try {
+        const { res, data } = await apiPost('/api/moderation/assistant/eval/run');
+        if (res.status === 429) {
+          // Already running — just attach to the live run.
+          showStatus('run', true, 'Прогон уже идёт — отслеживаем…');
+          startPolling();
+          return;
+        }
+        if (!res.ok) { showStatus('run', false, data.error || ('Ошибка ' + res.status)); if (btn) btn.disabled = false; return; }
+        STATE = { status: 'running', done: 0, total: num(data.total, 0), currentId: null };
+        render();
+        startPolling();
+      } catch (e) {
+        if (e.message !== 'auth') { showStatus('run', false, e.message); if (btn) btn.disabled = false; }
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      POLL = setInterval(async () => {
+        try {
+          await loadStatus();
+        } catch (e) { return; }
+        if (STATE && (STATE.status === 'done' || STATE.status === 'error')) {
+          stopPolling();
+          if (STATE.status === 'done' && !RESULT) {
+            try { const d = await apiGet('/api/moderation/assistant/eval/last'); if (d.result) RESULT = d.result; } catch {}
+          }
+          render();
+          if (STATE.status === 'done') showStatus('run', true, 'Прогон завершён ✓');
+        } else {
+          updateProgress();
+        }
+      }, 2000);
+    }
+    function stopPolling() { if (POLL) { clearInterval(POLL); POLL = null; } }
+
+    function updateProgress() {
+      // In-place progress update to avoid re-rendering the whole page each tick.
+      if (!isRunning() || !STATE) return;
+      const wrap = document.getElementById('progress-wrap');
+      const done = num(STATE.done, 0);
+      const tot = num(STATE.total, 0) || 1;
+      const p = Math.min(100, Math.round((done / tot) * 100));
+      if (wrap) {
+        const fill = wrap.querySelector('.progress-fill');
+        const label = wrap.querySelector('.progress-label');
+        if (fill) fill.style.width = p + '%';
+        if (label) label.innerHTML = `${done} / ${num(STATE.total, 0)}` + (STATE.currentId ? ` · сейчас: <b>${esc(STATE.currentId)}</b>` : '');
+      } else {
+        render();
+      }
+    }
+
+    function bindQuick() {
+      const btn = document.getElementById('btn-quick');
+      const input = document.getElementById('quick-input');
+      if (!btn) return;
+      const run = async () => {
+        const text = input ? input.value.trim() : '';
+        if (!text) { showStatus('quick', false, 'Введите вопрос'); return; }
+        btn.disabled = true;
+        const out = document.getElementById('quick-out');
+        if (out) out.innerHTML = '<div class="quick-result"><span class="date-sub">Спрашиваем модель…</span></div>';
+        try {
+          const { res, data } = await apiPost('/api/moderation/assistant/eval/quick', { text });
+          if (!res.ok) {
+            showStatus('quick', false, data.error || ('Ошибка ' + res.status));
+            if (out) out.innerHTML = `<div class="quick-result"><span class="status show err">${esc(data.error || ('Ошибка ' + res.status))}</span></div>`;
+            return;
+          }
+          showStatus('quick', true, 'Готово ✓');
+          if (out) out.innerHTML = `
+            <div class="quick-result">
+              <div class="qr-head">${routeBadge(data.route)}<span class="cost-cell">${fmtCost(data.costUsd)}</span></div>
+              <div class="quick-answer">${esc(data.answer || '—')}</div>
+            </div>`;
+        } catch (e) {
+          if (e.message !== 'auth') {
+            showStatus('quick', false, e.message);
+            if (out) out.innerHTML = `<div class="quick-result"><span class="status show err">${esc(e.message)}</span></div>`;
+          }
+        } finally { btn.disabled = false; }
+      };
+      btn.onclick = run;
+      if (input) input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } };
+    }
+
+    function bindCases() {
+      document.querySelectorAll('.mode-btn[data-filter]').forEach((b) => {
+        b.onclick = () => { CASE_FILTER = b.dataset.filter; render(); };
+      });
+      document.querySelectorAll('.case-ans[data-id]').forEach((el) => {
+        el.onclick = () => {
+          const id = el.dataset.id;
+          if (EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id);
+          render();
+        };
+      });
+    }
+
+    // ── shared ──────────────────────────────────────────────────────────────────
+    function showStatus(id, ok, msg) {
+      const el = document.getElementById('status-' + id);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.className = 'status'; }, 3500);
+    }
+
+    async function loadAuth() {
+      let required = false, authed = false;
+      try {
+        const res = await fetch('/api/auth/status');
+        const a = await res.json();
+        required = !!a.required;
+        authed = !!a.authenticated;
+        READONLY = !!a.readOnly || !!(a.required && !a.authenticated);
+      } catch (err) { READONLY = false; }
+      document.body.classList.toggle('readonly', READONLY);
+      document.body.classList.toggle('authed', required && authed && !READONLY);
+    }
+
+    document.getElementById('btn-login').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+    });
+    document.getElementById('btn-logout').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/logout?next=' + encodeURIComponent(location.pathname);
+    });
+
+    async function boot() {
+      await loadAuth();
+      try {
+        await loadStatus(); // gives both state + last result in one call
+      } catch (err) {
+        document.getElementById('loading').textContent = 'Не удалось загрузить тесты: ' + err.message;
+        return;
+      }
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('main').style.display = 'block';
+      render();
+      if (isRunning()) startPolling();
+    }
+
+    boot();
+  </script>
+</body>
+</html>

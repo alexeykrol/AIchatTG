@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ассистент — AIchatTG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f3ef;
+      color: #2d2a26;
+      padding: 24px;
+      min-height: 100vh;
+      font-size: 15px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+    h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; color: #2d2a26; }
+    .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .version-badge {
+      font-size: 12px; font-weight: 500; color: #8a8580;
+      background: #f0ede8; border: 1px solid #ddd8d0; border-radius: 6px;
+      padding: 3px 10px; letter-spacing: 0.3px; flex-shrink: 0;
+    }
+    .subtitle { color: #8a8580; font-size: 15px; margin-bottom: 20px; }
+
+    /* Auth bar */
+    .auth-bar {
+      display: none; align-items: center; gap: 12px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.28);
+      color: #b45309; border-radius: 10px;
+      padding: 10px 16px; margin-bottom: 18px;
+      font-size: 14px; line-height: 1.5;
+    }
+    body.readonly .auth-bar, body.authed .auth-bar { display: flex; }
+    .auth-ok, .auth-bar .btn-logout { display: none; }
+    body.authed .auth-bar { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.30); color: #047857; }
+    body.authed .auth-ro, body.authed .btn-login { display: none; }
+    body.authed .auth-ok { display: inline; }
+    body.authed .auth-bar .btn-logout { display: inline-block; }
+    .auth-bar .btn-login, .auth-bar .btn-logout {
+      margin-left: auto;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff; border: none; border-radius: 8px;
+      padding: 6px 16px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease; text-decoration: none;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .auth-bar .btn-logout { background: linear-gradient(135deg, #64748b, #475569); }
+    .auth-bar .btn-login:hover, .auth-bar .btn-logout:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); }
+    body.readonly .write { display: none !important; }
+    body.readonly .btn-login, body.readonly .btn-logout { display: none !important; }
+
+    /* Site nav tabs */
+    .tabs { display: flex; gap: 2px; margin: 4px 0 22px; border-bottom: 1px solid #e8e4df; flex-wrap: wrap; }
+    .tabs .tab {
+      padding: 9px 18px; font-size: 15px; font-weight: 500; color: #8a8580;
+      text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color .2s ease, border-color .2s ease; white-space: nowrap;
+    }
+    .tabs .tab:hover { color: #2d2a26; }
+    .tabs .tab.active { color: #7c3aed; border-bottom-color: #7c3aed; font-weight: 600; }
+
+    /* Cards */
+    .card {
+      background: #ffffff; border: 1px solid #e8e4df; border-radius: 14px;
+      padding: 24px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 4px; }
+    .card .card-desc { color: #8a8580; font-size: 13.5px; line-height: 1.6; margin-bottom: 18px; }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: #6b6660; margin-bottom: 6px; }
+    .field .hint { font-size: 12px; color: #b0aaa4; margin-top: 5px; line-height: 1.5; }
+    .hint b { color: #6b6660; }
+
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%; padding: 10px 12px; border: 1px solid #ddd8d0; border-radius: 8px;
+      font-size: 14px; font-family: 'Inter', sans-serif; color: #2d2a26; background: #fff;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.12); }
+    textarea { min-height: 300px; resize: vertical; line-height: 1.6; font-size: 13.5px; }
+    textarea.mono { font-family: 'Inter', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+    /* Buttons */
+    .btn {
+      border: 1px solid #ddd8d0; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+      font-size: 14px; font-weight: 500; font-family: 'Inter', sans-serif; background: #fff;
+      color: #2d2a26; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { border-color: #7c3aed; color: #7c3aed; box-shadow: 0 0 10px rgba(124,58,237,0.1); }
+    .btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+    .btn-primary { background: linear-gradient(135deg, #7c3aed, #3b82f6); color: #fff; border: none; }
+    .btn-primary:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); color: #fff; }
+    .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+    .btn-danger { color: #dc2626; border-color: rgba(239,68,68,0.35); }
+    .btn-danger:hover { border-color: #dc2626; color: #dc2626; box-shadow: 0 0 10px rgba(239,68,68,0.12); }
+    .btn-ok { color: #16a34a; border-color: rgba(34,197,94,0.35); }
+    .btn-ok:hover { border-color: #16a34a; color: #16a34a; box-shadow: 0 0 10px rgba(34,197,94,0.12); }
+    .btn.active-good { background: rgba(34,197,94,0.12); border-color: #16a34a; color: #16a34a; }
+    .btn.active-bad { background: rgba(239,68,68,0.10); border-color: #dc2626; color: #dc2626; }
+
+    .save-bar { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e8e4df; flex-wrap: wrap; }
+    .status { font-size: 13.5px; font-weight: 500; opacity: 0; transition: opacity 0.2s; }
+    .status.show { opacity: 1; }
+    .status.ok { color: #16a34a; }
+    .status.err { color: #ef4444; }
+
+    /* Toggle */
+    .mode-toggle { display: inline-flex; border: 1px solid #ddd8d0; border-radius: 10px; overflow: hidden; }
+    .mode-btn { padding: 9px 20px; font-size: 14px; font-weight: 600; border: none; background: #fff; color: #8a8580; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s ease; }
+    .mode-btn:hover { background: #faf9f7; }
+    .mode-btn.active.on { background: rgba(34,197,94,0.14); color: #16a34a; }
+    .mode-btn.active.off { background: rgba(120,113,108,0.12); color: #78716c; }
+
+    /* Stat grid */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat { background: #faf9f7; border: 1px solid #e8e4df; border-radius: 11px; padding: 14px 16px; }
+    .stat .stat-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #8a8580; margin-bottom: 6px; }
+    .stat .stat-value { font-size: 22px; font-weight: 700; color: #2d2a26; font-variant-numeric: tabular-nums; }
+    .stat .stat-sub { font-size: 12px; color: #b0aaa4; margin-top: 4px; }
+    .stat.cost .stat-value { color: #6d28d9; }
+
+    .group-subtitle {
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+      color: #8a8580; margin: 20px 0 10px;
+    }
+    .group-subtitle:first-of-type { margin-top: 0; }
+
+    .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; letter-spacing: 0.2px; white-space: nowrap; }
+    .badge.err { background: rgba(239,68,68,0.10); color: #dc2626; border: 1px solid rgba(239,68,68,0.28); }
+
+    .info-note {
+      padding: 12px 14px; background: rgba(124,58,237,0.05); border: 1px solid rgba(124,58,237,0.12);
+      border-radius: 10px; font-size: 13px; color: #6b6660; line-height: 1.6; margin-bottom: 14px;
+    }
+
+    /* Table */
+    table { width: 100%; border-collapse: separate; border-spacing: 0 6px; }
+    thead th {
+      text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; color: #8a8580; letter-spacing: 0.7px; border: none;
+      background: transparent; white-space: nowrap;
+    }
+    tbody tr { background: #fff; transition: background 0.15s ease; }
+    tbody tr:hover { background: #faf9f7; }
+    td { padding: 12px; border: none; font-size: 14px; border-top: 1px solid #e8e4df; border-bottom: 1px solid #e8e4df; vertical-align: top; }
+    td:first-child { border-left: 1px solid #e8e4df; border-radius: 10px 0 0 10px; }
+    td:last-child { border-right: 1px solid #e8e4df; border-radius: 0 10px 10px 0; }
+    .date-main { font-weight: 500; color: #2d2a26; white-space: nowrap; }
+    .date-sub { color: #b0aaa4; font-size: 12.5px; white-space: nowrap; }
+    .qa-text { max-width: 300px; color: #4a453f; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .qa-author { font-weight: 500; color: #2d2a26; }
+    .qa-author .qa-id { font-size: 12px; color: #b0aaa4; display: block; }
+    .cost-cell { font-variant-numeric: tabular-nums; white-space: nowrap; color: #6b6660; }
+    .tok-cell { font-variant-numeric: tabular-nums; white-space: nowrap; color: #6b6660; font-size: 13px; }
+    .row-ctrls { display: flex; flex-direction: column; gap: 6px; min-width: 130px; }
+    .row-ctrls .rate-row { display: flex; gap: 6px; }
+    .row-ctrls .btn-sm { justify-content: center; }
+
+    .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .loading { padding: 40px; text-align: center; color: #b0aaa4; }
+    .empty { text-align: center; color: #8a8580; padding: 28px 14px; }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #f5f3ef; }
+    ::-webkit-scrollbar-thumb { background: #ddd8d0; border-radius: 4px; }
+
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      h1 { font-size: 24px; }
+      .row3 { grid-template-columns: 1fr; }
+      .qa-text { max-width: 160px; }
+      td, thead th { padding: 8px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Ассистент</h1>
+      <div class="header-right"><span class="version-badge">AIchatTG</span></div>
+    </div>
+    <p class="subtitle">Q&amp;A-ассистент модер-бота: конфигурация, стоимость и журнал вопросов-ответов</p>
+    <nav class="tabs">
+      <a class="tab" href="moderation.html">Модерация</a>
+      <a class="tab active" href="assistant.html">Ассистент</a>
+      <a class="tab" href="eval.html">Тесты</a>
+    </nav>
+
+    <div class="auth-bar" id="authbar">
+      <span class="auth-ro">👁 Интерфейс перенесён из News. Сейчас доступен безопасный просмотр данных AIchatTG; управляющие действия будут подключены отдельно.</span>
+      <span class="auth-ok">✅ Вы авторизованы.</span>
+      <a class="btn-login" href="#" id="btn-login">Войти</a>
+      <a class="btn-logout" href="#" id="btn-logout">Выйти</a>
+    </div>
+
+    <div id="loading" class="loading">Загрузка…</div>
+    <div id="main" style="display:none"></div>
+  </div>
+
+  <script>
+    // ── state ───────────────────────────────────────────────────────────────
+    let CONFIG = null;     // GET /assistant/config
+    let ANALYTICS = null;  // GET /assistant/analytics
+    let EVENTS = [];        // GET /assistant/events
+    let READONLY = false;
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n : (n == null ? d : (isFinite(Number(n)) ? Number(n) : d)); }
+    function fmtCost(c) { const v = num(c, null); return v == null ? '—' : '$' + v.toFixed(4); }
+    function fmtDate(dt) {
+      // created_at is unix seconds for the assistant ledger.
+      if (dt == null || dt === '') return { date: '', time: '' };
+      const d = new Date(Number(dt) * 1000);
+      if (isNaN(d.getTime())) return { date: String(dt), time: '' };
+      const p = (n) => String(n).padStart(2, '0');
+      return { date: `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`, time: `${p(d.getHours())}:${p(d.getMinutes())}` };
+    }
+
+    // ── fetch helpers ─────────────────────────────────────────────────────────
+    async function apiGet(url) {
+      const res = await fetch(url);
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+    async function apiPost(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      let data = {};
+      try { data = await res.json(); } catch { /* empty body */ }
+      return { res, data };
+    }
+
+    async function loadConfig()    { CONFIG = await apiGet('/api/moderation/assistant/config'); }
+    async function loadAnalytics() { try { ANALYTICS = await apiGet('/api/moderation/assistant/analytics'); } catch { ANALYTICS = null; } }
+    async function loadEvents()    { try { const d = await apiGet('/api/moderation/assistant/events?limit=100'); EVENTS = Array.isArray(d.events) ? d.events : []; } catch { EVENTS = []; } }
+
+    // ── render ─────────────────────────────────────────────────────────────────
+    function render() {
+      document.getElementById('main').innerHTML =
+        renderConfigCard() + renderAnalyticsCard() + renderLogCard();
+      bindConfig();
+      bindLog();
+      applyReadonly();
+    }
+
+    function renderConfigCard() {
+      const C = CONFIG || {};
+      const enabled = !!C.enabled;
+      return `
+        <div class="card">
+          <h2>Конфигурация ассистента</h2>
+          <p class="card-desc">Тот же бот, что модерирует группу, отвечает только на вопросы, начинающиеся с /ask.</p>
+
+          <div class="info-note">Модель ответа: <b>${esc(C.model || '—')}</b> · вендор: <b>${esc(C.vendor || '—')}</b> — совпадает с моделью модерации. Изменить можно на вкладке «Модерация».<br>Роутер: <b>${esc(C.routerModel || '—')}</b> / <b>${esc(C.routerVendor || '—')}</b> — дешёвый роутер по каждому вопросу выбирает базу: организационную, содержательную или отвечает без базы (не по курсу).</div>
+
+          <div class="field">
+            <label>Ассистент</label>
+            <div class="mode-toggle write">
+              <button class="mode-btn on ${enabled ? 'active' : ''}" data-enabled="1">✅ Включён</button>
+              <button class="mode-btn off ${!enabled ? 'active' : ''}" data-enabled="0">⛔ Выключен</button>
+            </div>
+            <div class="hint" style="margin-top:8px">Когда выключен — бот не отвечает на вопросы (модерация продолжает работать).</div>
+            <span class="status" id="status-toggle" style="display:block;margin-top:8px"></span>
+          </div>
+
+          <div class="group-subtitle">Лимиты (только для чтения)</div>
+          <div class="row3">
+            <div class="field">
+              <label>Пауза между ответами, сек</label>
+              <input type="text" value="${esc(num(C.cooldownSec, 0))}" readonly>
+            </div>
+            <div class="field">
+              <label>Ответов в сутки на пользователя</label>
+              <input type="text" value="${esc(num(C.dailyPerUser, 0))}" readonly>
+            </div>
+            <div class="field">
+              <label>Макс. токенов ответа</label>
+              <input type="text" value="${esc(num(C.maxTokens, 0))}" readonly>
+            </div>
+          </div>
+
+          <div class="group-subtitle">Системный промпт</div>
+          <div class="field">
+            <textarea class="mono write" id="ta-prompt">${esc(C.prompt || '')}</textarea>
+            <div class="hint">Правка сохраняется сразу и применяется без перезапуска бота.</div>
+          </div>
+          <div class="save-bar write">
+            <button class="btn btn-primary" id="save-prompt">Сохранить промпт</button>
+            <span class="status" id="status-prompt"></span>
+          </div>
+
+          <div class="group-subtitle">База знаний — организационная</div>
+          <div class="field">
+            <textarea class="mono write" id="ta-knowledge-org">${esc(C.knowledgeOrg || '')}</textarea>
+            <div class="hint">Организационные вопросы: доступ, оплата, тарифы, подписка, возврат, техподдержка, комьюнити. Лимит: <span class="mono">${esc(num(C.knowledgeMaxChars, 0))}</span> символов. Сейчас: <span id="kb-org-count">${esc((C.knowledgeOrg || '').length)}</span>.</div>
+          </div>
+          <div class="save-bar write">
+            <button class="btn btn-primary" id="save-knowledge-org">Сохранить организационную базу</button>
+            <span class="status" id="status-knowledge-org"></span>
+          </div>
+
+          <div class="group-subtitle">База знаний — содержательная</div>
+          <div class="field">
+            <textarea class="mono write" id="ta-knowledge-content">${esc(C.knowledgeContent || '')}</textarea>
+            <div class="hint">Содержание курсов: чему учат, темы/модули, ключевые концепции, ссылки на уроки. Лимит: <span class="mono">${esc(num(C.knowledgeMaxChars, 0))}</span> символов. Сейчас: <span id="kb-content-count">${esc((C.knowledgeContent || '').length)}</span>.</div>
+          </div>
+          <div class="save-bar write">
+            <button class="btn btn-primary" id="save-knowledge-content">Сохранить содержательную базу</button>
+            <span class="status" id="status-knowledge-content"></span>
+          </div>
+        </div>`;
+    }
+
+    function renderAnalyticsCard() {
+      const A = ANALYTICS || { total: {}, today: {}, week: {} };
+      const t = A.total || {}, d = A.today || {}, w = A.week || {};
+      return `
+        <div class="card">
+          <h2>Аналитика</h2>
+          <p class="card-desc">Объём вопросов-ответов и стоимость вызовов ассистента.</p>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Всего Q&amp;A</div><div class="stat-value">${esc(num(t.count, 0))}</div></div>
+            <div class="stat cost"><div class="stat-label">Всего $</div><div class="stat-value">${fmtCost(t.cost)}</div></div>
+            <div class="stat cost"><div class="stat-label">Сегодня $</div><div class="stat-value">${fmtCost(d.cost)}</div><div class="stat-sub">${esc(num(d.count, 0))} Q&amp;A</div></div>
+            <div class="stat cost"><div class="stat-label">За 7 дней $</div><div class="stat-value">${fmtCost(w.cost)}</div><div class="stat-sub">${esc(num(w.count, 0))} Q&amp;A</div></div>
+          </div>
+        </div>`;
+    }
+
+    function renderLogCard() {
+      return `
+        <div class="card">
+          <h2>Журнал Q&amp;A</h2>
+          <p class="card-desc">Вопросы к боту и его ответы. Оцените ответ (👍/👎) для обучающего сигнала или забаньте автора.</p>
+          <div class="filter-bar">
+            <button class="btn btn-sm" id="refresh-log">↻ Обновить</button>
+            <span class="status" id="status-log"></span>
+          </div>
+          ${eventsTable(EVENTS)}
+        </div>`;
+    }
+
+    function eventsTable(rows) {
+      if (!rows.length) return '<div class="empty">Вопросов пока нет.</div>';
+      const body = rows.map((e) => {
+        const { date, time } = fmtDate(e.created_at);
+        const author = e.author_name || (e.user_id ? ('id:' + e.user_id) : '—');
+        const idSub = e.user_id ? `<span class="qa-id">id:${esc(e.user_id)}</span>` : '';
+        const errBadge = e.error ? ` <span class="badge err" title="${esc(e.error)}">ошибка</span>` : '';
+        return `<tr>
+          <td><span class="date-main">${esc(date)}</span><br><span class="date-sub">${esc(time)}</span></td>
+          <td><span class="qa-author">${esc(author)}</span>${idSub}</td>
+          <td><div class="qa-text" title="${esc(e.question || '')}">${esc(e.question || '—')}</div></td>
+          <td><div class="qa-text" title="${esc(e.answer || '')}">${esc(e.answer || '—')}${errBadge}</div></td>
+          <td>${routeLabel(e.route)}</td>
+          <td class="tok-cell">${esc(num(e.input_tokens, 0))} / ${esc(num(e.output_tokens, 0))}</td>
+          <td class="cost-cell">${fmtCost(e.cost_usd)}</td>
+          <td>${rowControls(e)}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <table>
+          <thead><tr>
+            <th>Время</th><th>Пользователь</th><th>Вопрос</th><th>Ответ</th>
+            <th>База</th><th>Токены<br>вх/исх</th><th>$</th><th>Действия</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>`;
+    }
+
+    function routeLabel(route) {
+      const map = { org: 'организационная', content: 'содержательная', other: 'не по курсу' };
+      const r = route == null ? '' : String(route);
+      if (!r) return '<span class="date-sub">—</span>';
+      return `<span class="date-sub">${esc(map[r] || r)}</span>`;
+    }
+
+    function rowControls(e) {
+      if (READONLY) return '';
+      const id = esc(e.id);
+      const good = e.relevance === 'good' ? ' active-good' : '';
+      const bad = e.relevance === 'bad' ? ' active-bad' : '';
+      let ctrls = '<div class="row-ctrls write">';
+      ctrls += `<div class="rate-row">
+        <button class="btn btn-sm btn-ok${good}" title="Хороший ответ" onclick="rate('${id}','good')">👍</button>
+        <button class="btn btn-sm btn-danger${bad}" title="Плохой ответ" onclick="rate('${id}','bad')">👎</button>
+      </div>`;
+      if (e.user_id) {
+        ctrls += `<button class="btn btn-sm btn-danger" onclick="banUser('${id}')">Забанить</button>`;
+      }
+      ctrls += '</div>';
+      return ctrls;
+    }
+
+    // ── config actions ───────────────────────────────────────────────────────────
+    function bindConfig() {
+      document.querySelectorAll('.mode-btn').forEach((b) => {
+        b.onclick = async () => {
+          const enabled = b.dataset.enabled === '1';
+          if (CONFIG && !!CONFIG.enabled === enabled) return;
+          try {
+            const { res, data } = await apiPost('/api/moderation/assistant/config', { enabled });
+            if (!res.ok) { showStatus('toggle', false, data.error || 'Ошибка'); return; }
+            CONFIG = data;
+            render();
+            showStatus('toggle', true, enabled ? 'Ассистент включён ✓' : 'Ассистент выключен ✓');
+          } catch (e) { if (e.message !== 'auth') showStatus('toggle', false, e.message); }
+        };
+      });
+
+      const savePrompt = document.getElementById('save-prompt');
+      if (savePrompt) savePrompt.onclick = async () => {
+        const prompt = document.getElementById('ta-prompt').value;
+        if (!prompt.trim()) { showStatus('prompt', false, 'Промпт не может быть пустым'); return; }
+        savePrompt.disabled = true;
+        try {
+          const { res, data } = await apiPost('/api/moderation/assistant/config', { prompt });
+          if (!res.ok) { showStatus('prompt', false, data.error || 'Ошибка'); return; }
+          CONFIG = data;
+          render();
+          showStatus('prompt', true, 'Промпт сохранён ✓');
+        } catch (e) { if (e.message !== 'auth') showStatus('prompt', false, e.message); }
+        finally { const b = document.getElementById('save-prompt'); if (b) b.disabled = false; }
+      };
+
+      // Two independent knowledge bases (org / content). Each has a live char
+      // counter (over-limit turns the count red) and its own save button. An
+      // empty string clears the corresponding base on the backend.
+      const kbMax = CONFIG && CONFIG.knowledgeMaxChars ? CONFIG.knowledgeMaxChars : 40000;
+
+      bindKnowledgeBase('org', 'knowledgeOrg', 'организационная база', kbMax);
+      bindKnowledgeBase('content', 'knowledgeContent', 'содержательная база', kbMax);
+    }
+
+    function bindKnowledgeBase(key, field, label, kbMax) {
+      const ta = document.getElementById('ta-knowledge-' + key);
+      const count = document.getElementById('kb-' + key + '-count');
+      const statusKey = 'knowledge-' + key;
+      const saveId = 'save-knowledge-' + key;
+
+      if (ta && count) ta.oninput = () => {
+        count.textContent = ta.value.length;
+        count.style.color = ta.value.length > kbMax ? '#c0392b' : '';
+      };
+
+      const saveBtn = document.getElementById(saveId);
+      if (saveBtn) saveBtn.onclick = async () => {
+        const value = ta.value;
+        if (value.length > kbMax) { showStatus(statusKey, false, `Слишком длинно (макс ${kbMax})`); return; }
+        saveBtn.disabled = true;
+        try {
+          const { res, data } = await apiPost('/api/moderation/assistant/config', { [field]: value });
+          if (!res.ok) { showStatus(statusKey, false, data.error || 'Ошибка'); return; }
+          CONFIG = data;
+          render();
+          const cap = label.charAt(0).toUpperCase() + label.slice(1);
+          showStatus(statusKey, true, value.trim() ? `${cap} сохранена ✓` : `${cap} очищена ✓`);
+        } catch (e) { if (e.message !== 'auth') showStatus(statusKey, false, e.message); }
+        finally { const b = document.getElementById(saveId); if (b) b.disabled = false; }
+      };
+    }
+
+    // ── log actions ──────────────────────────────────────────────────────────────
+    function bindLog() {
+      const rf = document.getElementById('refresh-log');
+      if (rf) rf.onclick = async () => { await Promise.all([loadEvents(), loadAnalytics()]); render(); };
+    }
+
+    async function rate(id, label) {
+      // Toggle off if the same label is clicked again.
+      const ev = EVENTS.find((e) => e.id === id);
+      const next = ev && ev.relevance === label ? null : label;
+      try {
+        const { res, data } = await apiPost(`/api/moderation/assistant/events/${id}/rate`, { label: next });
+        if (!res.ok) { logStatus(false, data.error || ('Ошибка ' + res.status)); return; }
+        if (ev) ev.relevance = next;
+        render();
+        logStatus(true, next === 'good' ? 'Отмечено 👍' : (next === 'bad' ? 'Отмечено 👎' : 'Оценка снята'));
+      } catch (e) { if (e.message !== 'auth') logStatus(false, e.message); }
+    }
+
+    async function banUser(id) {
+      if (!confirm('Забанить этого пользователя в Telegram-группе?')) return;
+      try {
+        const { res, data } = await apiPost(`/api/moderation/assistant/events/${id}/ban`);
+        if (!res.ok) { logStatus(false, data.error || ('Ошибка ' + res.status)); return; }
+        if (data.ok === false) logStatus(false, 'Не удалось забанить: ' + (data.error || 'неизвестно'));
+        else logStatus(true, 'Пользователь забанен ✓');
+      } catch (e) { if (e.message !== 'auth') logStatus(false, e.message); }
+    }
+
+    function logStatus(ok, msg) {
+      const el = document.getElementById('status-log');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.className = 'status'; }, 3500);
+    }
+
+    // ── shared ──────────────────────────────────────────────────────────────────
+    function showStatus(id, ok, msg) {
+      const el = document.getElementById('status-' + id);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.className = 'status'; }, 3500);
+    }
+
+    function applyReadonly() {
+      if (!READONLY) return;
+      document.querySelectorAll('#main textarea').forEach((el) => el.setAttribute('readonly', 'readonly'));
+    }
+
+    async function loadAuth() {
+      let required = false, authed = false;
+      try {
+        const res = await fetch('/api/auth/status');
+        const a = await res.json();
+        required = !!a.required;
+        authed = !!a.authenticated;
+        READONLY = !!a.readOnly || !!(a.required && !a.authenticated);
+      } catch (err) { READONLY = false; }
+      document.body.classList.toggle('readonly', READONLY);
+      document.body.classList.toggle('authed', required && authed && !READONLY);
+    }
+
+    document.getElementById('btn-login').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+    });
+    document.getElementById('btn-logout').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/logout?next=' + encodeURIComponent(location.pathname);
+    });
+
+    async function boot() {
+      await loadAuth();
+      try {
+        await loadConfig(); // the only hard dependency
+      } catch (err) {
+        document.getElementById('loading').textContent = 'Не удалось загрузить ассистента: ' + err.message;
+        return;
+      }
+      await Promise.all([loadAnalytics(), loadEvents()]);
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('main').style.display = 'block';
+      render();
+    }
+
+    boot();
+  </script>
+</body>
+</html>

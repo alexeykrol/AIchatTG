@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Модерация — AIchatTG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f3ef;
+      color: #2d2a26;
+      padding: 24px;
+      min-height: 100vh;
+      font-size: 15px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+    h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; color: #2d2a26; }
+    .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .version-badge {
+      font-size: 12px; font-weight: 500; color: #8a8580;
+      background: #f0ede8; border: 1px solid #ddd8d0; border-radius: 6px;
+      padding: 3px 10px; letter-spacing: 0.3px; flex-shrink: 0;
+    }
+    .subtitle { color: #8a8580; font-size: 15px; margin-bottom: 20px; }
+
+    /* Auth bar */
+    .auth-bar {
+      display: none; align-items: center; gap: 12px;
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.28);
+      color: #b45309; border-radius: 10px;
+      padding: 10px 16px; margin-bottom: 18px;
+      font-size: 14px; line-height: 1.5;
+    }
+    body.readonly .auth-bar, body.authed .auth-bar { display: flex; }
+    .auth-ok, .auth-bar .btn-logout { display: none; }
+    body.authed .auth-bar { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.30); color: #047857; }
+    body.authed .auth-ro, body.authed .btn-login { display: none; }
+    body.authed .auth-ok { display: inline; }
+    body.authed .auth-bar .btn-logout { display: inline-block; }
+    .auth-bar .btn-login, .auth-bar .btn-logout {
+      margin-left: auto;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff; border: none; border-radius: 8px;
+      padding: 6px 16px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s ease; text-decoration: none;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .auth-bar .btn-logout { background: linear-gradient(135deg, #64748b, #475569); }
+    .auth-bar .btn-login:hover, .auth-bar .btn-logout:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); }
+    body.readonly .write { display: none !important; }
+    body.readonly .btn-login, body.readonly .btn-logout { display: none !important; }
+
+    /* Site nav tabs */
+    .tabs { display: flex; gap: 2px; margin: 4px 0 22px; border-bottom: 1px solid #e8e4df; flex-wrap: wrap; }
+    .tabs .tab {
+      padding: 9px 18px; font-size: 15px; font-weight: 500; color: #8a8580;
+      text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color .2s ease, border-color .2s ease; white-space: nowrap;
+    }
+    .tabs .tab:hover { color: #2d2a26; }
+    .tabs .tab.active { color: #7c3aed; border-bottom-color: #7c3aed; font-weight: 600; }
+
+    /* Sub-tabs (Model / Comments) */
+    .subtabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+    .subtab {
+      padding: 9px 18px; font-size: 14.5px; font-weight: 500;
+      border: 1px solid #ddd8d0; border-radius: 9px; background: #fff; color: #6b6660;
+      cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s ease;
+    }
+    .subtab:hover { border-color: #b8a4e8; color: #2d2a26; }
+    .subtab.active { background: rgba(124,58,237,0.08); border-color: #7c3aed; color: #7c3aed; font-weight: 600; }
+
+    /* Cards */
+    .card {
+      background: #ffffff; border: 1px solid #e8e4df; border-radius: 14px;
+      padding: 24px; margin-bottom: 20px;
+    }
+    .card h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 4px; }
+    .card .card-desc { color: #8a8580; font-size: 13.5px; line-height: 1.6; margin-bottom: 18px; }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: #6b6660; margin-bottom: 6px; }
+    .field .hint { font-size: 12px; color: #b0aaa4; margin-top: 5px; line-height: 1.5; }
+    .hint b { color: #6b6660; }
+
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%; padding: 10px 12px; border: 1px solid #ddd8d0; border-radius: 8px;
+      font-size: 14px; font-family: 'Inter', sans-serif; color: #2d2a26; background: #fff;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    select { cursor: pointer; appearance: auto; }
+    input:focus, textarea:focus, select:focus { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.12); }
+    textarea { min-height: 300px; resize: vertical; line-height: 1.6; font-size: 13.5px; }
+    textarea.mono { font-family: 'Inter', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .inline-check { display: flex; align-items: center; gap: 8px; }
+    .inline-check input[type="checkbox"] { width: auto; }
+
+    /* Buttons */
+    .btn {
+      border: 1px solid #ddd8d0; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+      font-size: 14px; font-weight: 500; font-family: 'Inter', sans-serif; background: #fff;
+      color: #2d2a26; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { border-color: #7c3aed; color: #7c3aed; box-shadow: 0 0 10px rgba(124,58,237,0.1); }
+    .btn:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+    .btn-primary { background: linear-gradient(135deg, #7c3aed, #3b82f6); color: #fff; border: none; }
+    .btn-primary:hover { box-shadow: 0 0 16px rgba(124,58,237,0.3); transform: translateY(-1px); color: #fff; }
+    .btn-sm { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+    .btn-danger { color: #dc2626; border-color: rgba(239,68,68,0.35); }
+    .btn-danger:hover { border-color: #dc2626; color: #dc2626; box-shadow: 0 0 10px rgba(239,68,68,0.12); }
+    .btn-ok { color: #16a34a; border-color: rgba(34,197,94,0.35); }
+    .btn-ok:hover { border-color: #16a34a; color: #16a34a; box-shadow: 0 0 10px rgba(34,197,94,0.12); }
+
+    .save-bar { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e8e4df; flex-wrap: wrap; }
+    .status { font-size: 13.5px; font-weight: 500; opacity: 0; transition: opacity 0.2s; }
+    .status.show { opacity: 1; }
+    .status.ok { color: #16a34a; }
+    .status.err { color: #ef4444; }
+
+    /* Mode toggle */
+    .mode-toggle { display: inline-flex; border: 1px solid #ddd8d0; border-radius: 10px; overflow: hidden; }
+    .mode-btn { padding: 9px 20px; font-size: 14px; font-weight: 600; border: none; background: #fff; color: #8a8580; cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s ease; }
+    .mode-btn:hover { background: #faf9f7; }
+    .mode-btn.active.shadow { background: rgba(245,158,11,0.12); color: #d97706; }
+    .mode-btn.active.live { background: rgba(34,197,94,0.14); color: #16a34a; }
+
+    /* Stat grid */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat {
+      background: #faf9f7; border: 1px solid #e8e4df; border-radius: 11px; padding: 14px 16px;
+    }
+    .stat .stat-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #8a8580; margin-bottom: 6px; }
+    .stat .stat-value { font-size: 22px; font-weight: 700; color: #2d2a26; font-variant-numeric: tabular-nums; }
+    .stat .stat-sub { font-size: 12px; color: #b0aaa4; margin-top: 4px; }
+    .stat.cost .stat-value { color: #6d28d9; }
+    .group-subtitle {
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+      color: #8a8580; margin: 20px 0 10px;
+    }
+    .group-subtitle:first-of-type { margin-top: 0; }
+
+    /* Version list */
+    .ver-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 14px; border: 1px solid #e8e4df; border-radius: 9px; margin-bottom: 8px; background: #faf9f7;
+    }
+    .ver-name { font-size: 14px; font-weight: 600; color: #2d2a26; display: flex; align-items: center; gap: 8px; }
+    .ver-meta { font-size: 12px; color: #b0aaa4; margin-left: auto; margin-right: 10px; }
+    .ver-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; letter-spacing: 0.2px; white-space: nowrap; }
+    .badge.on { background: rgba(34,197,94,0.1); color: #16a34a; border: 1px solid rgba(34,197,94,0.25); }
+    .badge.ban { background: rgba(239,68,68,0.10); color: #dc2626; border: 1px solid rgba(239,68,68,0.28); }
+    .badge.suspect { background: rgba(245,158,11,0.10); color: #d97706; border: 1px solid rgba(245,158,11,0.28); }
+    .badge.clean { background: rgba(34,197,94,0.10); color: #16a34a; border: 1px solid rgba(34,197,94,0.25); }
+    .badge.unknown { background: rgba(120,113,108,0.1); color: #78716c; border: 1px solid rgba(120,113,108,0.28); }
+    .badge.shadow { background: rgba(120,113,108,0.10); color: #78716c; border: 1px solid rgba(120,113,108,0.28); }
+    .badge.plat { letter-spacing: 0; }
+    .badge.plat.fb { background: rgba(24,119,242,0.10); color: #1877f2; border: 1px solid rgba(24,119,242,0.28); }
+    .badge.plat.tg { background: rgba(41,171,226,0.10); color: #1d9bd1; border: 1px solid rgba(41,171,226,0.28); }
+    .badge.plat.other { background: rgba(120,113,108,0.10); color: #78716c; border: 1px solid rgba(120,113,108,0.28); }
+    .plat-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .plat-tab { padding: 6px 14px; border: 1px solid #e0d9ee; border-radius: 20px; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; color: #6b6660; display: flex; align-items: center; gap: 5px; }
+    .plat-tab:hover { border-color: #b8a4e8; color: #2d2a26; }
+    .plat-tab.active { background: rgba(124,58,237,0.08); border-color: #7c3aed; color: #7c3aed; }
+
+    .info-note {
+      padding: 12px 14px; background: rgba(124,58,237,0.05); border: 1px solid rgba(124,58,237,0.12);
+      border-radius: 10px; font-size: 13px; color: #6b6660; line-height: 1.6; margin-bottom: 14px;
+    }
+    .warn-note {
+      padding: 12px 14px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.28);
+      border-radius: 10px; font-size: 13px; color: #b45309; line-height: 1.6; margin-bottom: 14px;
+    }
+
+    /* Table */
+    table { width: 100%; border-collapse: separate; border-spacing: 0 6px; }
+    thead th {
+      text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; color: #8a8580; letter-spacing: 0.7px; border: none;
+      background: transparent; white-space: nowrap;
+    }
+    tbody tr { background: #fff; transition: background 0.15s ease; }
+    tbody tr:hover { background: #faf9f7; }
+    td { padding: 12px; border: none; font-size: 14px; border-top: 1px solid #e8e4df; border-bottom: 1px solid #e8e4df; vertical-align: top; }
+    td:first-child { border-left: 1px solid #e8e4df; border-radius: 10px 0 0 10px; }
+    td:last-child { border-right: 1px solid #e8e4df; border-radius: 0 10px 10px 0; }
+    .date-main { font-weight: 500; color: #2d2a26; white-space: nowrap; }
+    .date-sub { color: #b0aaa4; font-size: 12.5px; white-space: nowrap; }
+    .cmt-text { max-width: 320px; color: #4a453f; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .cmt-text.cmt-clickable { cursor: pointer; }
+    .cmt-text.cmt-clickable:hover { color: #7c3aed; }
+    .cmt-read { margin-top: 5px; margin-right: 6px; padding: 3px 10px; font-size: 11.5px; }
+    /* Current owner decision — highlight the matching button */
+    .row-ctrls .btn.cur { font-weight: 700; border-width: 2px; }
+    .row-ctrls .btn-ok.cur { background: rgba(34,197,94,0.12); border-color: #16a34a; }
+    .row-ctrls .btn-danger.cur { background: rgba(239,68,68,0.10); border-color: #dc2626; }
+    .row-ctrls .btn.cur:not(.btn-ok):not(.btn-danger) { background: rgba(124,58,237,0.10); border-color: #7c3aed; color: #7c3aed; }
+    .post-link { display: inline-block; margin-top: 5px; font-size: 11.5px; font-weight: 600; color: #7c3aed; text-decoration: none; border: 1px solid rgba(124,58,237,0.28); border-radius: 20px; padding: 2px 9px; white-space: nowrap; }
+    .post-link:hover { background: rgba(124,58,237,0.08); }
+    .cmt-reason { font-size: 12.5px; color: #8a8580; max-width: 220px; line-height: 1.45; }
+    .cmt-author { font-weight: 500; color: #2d2a26; }
+    .cost-cell { font-variant-numeric: tabular-nums; white-space: nowrap; color: #6b6660; }
+    .row-ctrls { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+    .row-ctrls .btn-sm { justify-content: center; }
+    .row-ctrls select { padding: 5px 8px; font-size: 12.5px; }
+
+    .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .filter-bar label { font-size: 13px; font-weight: 600; color: #6b6660; }
+    .filter-bar select { width: auto; min-width: 200px; }
+
+    .loading { padding: 40px; text-align: center; color: #b0aaa4; }
+    .empty { text-align: center; color: #8a8580; padding: 28px 14px; }
+
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 100; justify-content: center; align-items: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border: 1px solid #e8e4df; border-radius: 16px; box-shadow: 0 16px 64px rgba(0,0,0,0.15); max-width: 640px; width: 92%; max-height: 84vh; display: flex; flex-direction: column; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 22px; border-bottom: 1px solid #e8e4df; }
+    .modal-header h2 { font-size: 16px; font-weight: 600; color: #2d2a26; }
+    .modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #b0aaa4; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+    .modal-close:hover { color: #2d2a26; background: #f0ede8; }
+    .modal-body { padding: 22px; overflow-y: auto; }
+    .modal-body .quoted { background: #faf9f7; border: 1px solid #e8e4df; border-radius: 9px; padding: 12px 14px; font-size: 13.5px; line-height: 1.55; color: #4a453f; margin-bottom: 16px; white-space: pre-wrap; }
+    .fb-list { margin: 6px 0 16px; }
+    .fb-item { padding: 10px 12px; border: 1px solid #e8e4df; border-radius: 9px; margin-bottom: 8px; background: #fcfbf9; }
+    .fb-item .fb-head { font-size: 12.5px; color: #8a8580; margin-bottom: 3px; }
+    .fb-item .fb-note { font-size: 13.5px; color: #2d2a26; line-height: 1.5; white-space: pre-wrap; }
+    .modal-footer { display: flex; gap: 10px; justify-content: flex-end; padding: 16px 22px; border-top: 1px solid #e8e4df; }
+    #note-error { display: none; color: #dc2626; font-size: 13px; margin-top: 8px; }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #f5f3ef; }
+    ::-webkit-scrollbar-thumb { background: #ddd8d0; border-radius: 4px; }
+
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      h1 { font-size: 24px; }
+      .row2, .row3 { grid-template-columns: 1fr; }
+      .cmt-text, .cmt-reason { max-width: 160px; }
+      td, thead th { padding: 8px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Модерация</h1>
+      <div class="header-right"><span class="version-badge">AIchatTG</span></div>
+    </div>
+    <p class="subtitle">Автомодерация Telegram: режим, модель, критерии и журнал решений.</p>
+    <nav class="tabs">
+      <a class="tab active" href="moderation.html">Модерация</a>
+      <a class="tab" href="assistant.html">Ассистент</a>
+      <a class="tab" href="eval.html">Тесты</a>
+    </nav>
+
+    <div class="auth-bar" id="authbar">
+      <span class="auth-ro">👁 Интерфейс перенесён из News. Сейчас доступен безопасный просмотр данных AIchatTG; управляющие действия будут подключены отдельно.</span>
+      <span class="auth-ok">✅ Вы авторизованы.</span>
+      <a class="btn-login" href="#" id="btn-login">Войти</a>
+      <a class="btn-logout" href="#" id="btn-logout">Выйти</a>
+    </div>
+
+    <div id="loading" class="loading">Загрузка…</div>
+
+    <div id="main" style="display:none">
+      <nav class="subtabs">
+        <button class="subtab active" data-tab="model">Модель и промпты</button>
+        <button class="subtab" data-tab="comments">Комментарии</button>
+      </nav>
+      <div id="tab-model"></div>
+      <div id="tab-comments" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Note / correction-history modal -->
+  <div class="modal-overlay" id="note-modal" onclick="if(event.target===this)closeNoteModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>💬 Заметка — почему я поправил решение</h2>
+        <button class="modal-close" onclick="closeNoteModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="quoted" id="note-comment">—</div>
+        <div class="group-subtitle" style="margin-top:0">История корректировок</div>
+        <div class="fb-list" id="note-history"></div>
+        <div class="group-subtitle write">Новая заметка</div>
+        <textarea class="write" id="note-text" style="min-height:120px" placeholder="Например: это не троллинг, а резкая, но по делу критика — модель перестраховалась."></textarea>
+        <div id="note-error"></div>
+      </div>
+      <div class="modal-footer write">
+        <button class="btn" onclick="closeNoteModal()">Отмена</button>
+        <button class="btn btn-primary" id="note-save" onclick="submitNote()">Сохранить заметку</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full-text comment detail modal -->
+  <div class="modal-overlay" id="detail-modal" onclick="if(event.target===this)closeDetailModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Комментарий полностью</h2>
+        <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="detail-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ok write" id="detail-decision-clean" onclick="decideFromModal('clean')">✅ Чисто</button>
+        <button class="btn write" id="detail-decision-suspect" onclick="decideFromModal('suspect')">🙈 Скрыть</button>
+        <button class="btn btn-danger write" id="detail-decision-ban" onclick="decideFromModal('ban')">🚫 Забанить</button>
+        <button class="btn" onclick="closeDetailModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── state ───────────────────────────────────────────────────────────────
+    let MODE = null;      // GET /mode
+    let STATS = null;     // GET /stats
+    let PROMPTS = null;   // GET /prompts
+    let EVENTS = [];      // GET /events (all, filtered client-side)
+    let SUSPECTS = [];    // GET /suspects
+    let curTab = 'model';
+    let statusFilter = 'pending';  // pending|clean|suspect|ban|decided|all — drives the single comments list
+    let commentsPlatform = 'all';  // all|facebook|telegram|… — which social network's comments to show
+    let promptPlatform = 'telegram'; // AIchatTG owns Telegram moderation only
+    let viewingVersion = null;    // which prompt version's text sits in the editor
+    let READONLY = false;
+    let noteEventId = null;
+    let detailEventId = null;     // event shown in the full-text detail modal
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n : (n == null ? d : (isFinite(Number(n)) ? Number(n) : d)); }
+    function fmtCost(c) { const v = num(c, null); return v == null ? '—' : '$' + v.toFixed(4); }
+    function fmtConf(c) { const v = num(c, null); return v == null ? '—' : Math.round(v * 100) + '%'; }
+    function fmtDate(dt) {
+      if (!dt) return { date: '', time: '' };
+      const [d, t] = String(dt).split(/[ T]/);
+      const [y, mo, da] = (d || '').split('-');
+      const [hh, mm] = (t || '').split(':');
+      return { date: (da && mo && y) ? `${da}.${mo}.${y}` : (d || ''), time: (hh && mm) ? `${hh}:${mm}` : '' };
+    }
+
+    const VERDICT_LABEL = { ban: 'Бан', suspect: 'Подозрительный', clean: 'Чистый' };
+    function verdictBadge(v) {
+      const cls = ['ban', 'suspect', 'clean'].includes(v) ? v : 'unknown';
+      return `<span class="badge ${cls}">${esc(VERDICT_LABEL[v] || v || '—')}</span>`;
+    }
+    function safetyBadge(e) {
+      if (!e || !e.safety_route) return '';
+      const routeLabel = e.safety_route === 'threat' ? 'Угроза'
+        : e.safety_route === 'abuse' ? 'Абьюз' : 'Safety clean';
+      const cls = e.safety_route === 'threat' ? 'ban'
+        : e.safety_route === 'abuse' ? 'suspect' : 'clean';
+      const level = e.abuse_level === 'strong' ? ' · сильный'
+        : e.abuse_level === 'weak' ? ' · слабый' : '';
+      const strike = e.strike_count == null ? '' : ` · strike ${esc(e.strike_count)}`;
+      return `<div style="margin-top:5px"><span class="badge ${cls}">${esc(routeLabel + level + strike)}</span></div>`;
+    }
+    function jsonAuditDetails(label, raw) {
+      if (!raw) return '';
+      let value = raw;
+      try { value = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { /* show raw truth */ }
+      const rendered = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      return `<details style="margin-top:10px"><summary>${esc(label)}</summary>` +
+        `<pre style="white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto">${esc(rendered)}</pre></details>`;
+    }
+
+    // ── Social networks ─────────────────────────────────────────────────────────
+    // Moderation is GENERAL — it judges comments/messages across networks, not just
+    // Facebook. Registry-driven so a new network is one entry, not a rewrite.
+    // What's shared across networks: mode (shadow/live) and the judge model.
+    // What's per-network: the prompt/criteria (each platform's audience differs) and,
+    // of course, the comments themselves.
+    const PLATFORM_META = {
+      facebook: { label: 'Facebook', short: 'FB', icon: '📘', cls: 'fb',
+        promptHint: 'Критерии для комментариев под постами Facebook-страницы.' },
+      telegram: { label: 'Telegram', short: 'TG', icon: '✈️', cls: 'tg',
+        promptHint: 'Критерии для сообщений в Telegram-группе (иная аудитория и тон, чем в FB).' },
+    };
+    // Networks offered in the prompt-platform selector. Extend as adapters ship.
+    const PROMPT_PLATFORMS = ['telegram'];
+    function platformMeta(p) {
+      return PLATFORM_META[p] || {
+        label: p || 'другая', short: (p || '?').slice(0, 2).toUpperCase(),
+        icon: '🌐', cls: 'other', promptHint: '',
+      };
+    }
+    function platformBadge(p) {
+      const m = platformMeta(p);
+      return `<span class="badge plat ${m.cls}" title="${esc(m.label)}">${m.icon} ${esc(m.short)}</span>`;
+    }
+
+    // The owner's TRUE decision (owner_verdict), resolving legacy rows that only
+    // carry a human_label: reject → clean (shown), confirm → ban. Null = pending.
+    function ownerVerdictOf(e) {
+      if (e.owner_verdict) return e.owner_verdict;
+      if (e.human_label === 'reject') return 'clean';
+      if (e.human_label === 'confirm') return 'ban';
+      return null;
+    }
+    function isTelegramSafetyEvent(e) {
+      return e.platform === 'telegram'
+        && String(e.policy_version || '').startsWith('telegram-safety-');
+    }
+    // Derived STATUS chip: what the OWNER decided (separate from the model verdict).
+    function statusChip(e) {
+      const ov = ownerVerdictOf(e);
+      if (isTelegramSafetyEvent(e) && ov) {
+        const label = { clean: 'чисто', suspect: 'абьюз', ban: 'опасно' }[ov] || ov;
+        return `<span class="badge ${esc(ov)}">🏷 Метка: ${esc(label)} · санкция без изменений</span>`;
+      }
+      if (ov === 'clean')   return '<span class="badge clean">✅ Оставлен</span>';
+      if (ov === 'suspect') return '<span class="badge suspect">🙈 Скрыт</span>';
+      if (ov === 'ban')     return '<span class="badge ban">🚫 Забанен</span>';
+      return '<span class="badge unknown">⏳ Ожидает</span>';
+    }
+    // Friendly RU messages for enforcement failures surfaced by ok:false responses.
+    function enforceMsg(code) {
+      const map = {
+        token_invalid: 'токен Facebook недействителен',
+        no_author_id: 'нет ID автора — забанить нельзя',
+        not_found: 'объект не найден на платформе',
+        rate_limited: 'платформа ограничила частоту запросов',
+      };
+      return map[code] || ('ошибка: ' + (code || 'неизвестно'));
+    }
+
+    // ── fetch helpers ─────────────────────────────────────────────────────────
+    async function apiGet(url) {
+      const res = await fetch(url);
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+    // POSTs need the auth cookie; on 401 mirror settings.html and send to login.
+    async function apiPost(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 401) {
+        window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('auth');
+      }
+      let data = {};
+      try { data = await res.json(); } catch { /* empty body */ }
+      return { res, data };
+    }
+
+    async function loadMode()     { MODE = await apiGet('/api/moderation/mode'); }
+    async function loadStats()    { try { STATS = await apiGet('/api/moderation/stats'); } catch { STATS = null; } }
+    async function loadPrompts(platform = promptPlatform) { try { PROMPTS = await apiGet('/api/moderation/prompts?platform=' + encodeURIComponent(platform)); } catch { PROMPTS = { versions: [], active: null, activeText: '' }; } }
+    async function loadEvents()   { try { EVENTS = await apiGet('/api/moderation/events?limit=300'); if (!Array.isArray(EVENTS)) EVENTS = []; } catch { EVENTS = []; } }
+    async function loadSuspects() { try { SUSPECTS = await apiGet('/api/moderation/suspects'); if (!Array.isArray(SUSPECTS)) SUSPECTS = []; } catch { SUSPECTS = []; } }
+
+    function eventById(id) {
+      return EVENTS.find((e) => e.id === id) || SUSPECTS.find((e) => e.id === id) || null;
+    }
+
+    // ── tab switching ──────────────────────────────────────────────────────────
+    function switchTab(tab) {
+      curTab = tab;
+      document.querySelectorAll('.subtab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+      document.getElementById('tab-model').style.display = tab === 'model' ? 'block' : 'none';
+      document.getElementById('tab-comments').style.display = tab === 'comments' ? 'block' : 'none';
+      if (tab === 'comments') renderCommentsTab();
+    }
+
+    // ── Tab 1: Модель и промпты ─────────────────────────────────────────────────
+    function renderModelTab() {
+      const M = MODE || {};
+      const catalog = M.modelCatalog || { anthropic: [], openai: [] };
+      const selVendor = M.vendor || 'anthropic';
+      const selModel = M.model || '';
+      const overriding = !!(M.modelOverride);
+      const mode = M.mode || 'shadow';
+
+      const vendorOpts = ['anthropic', 'openai'].map((v) =>
+        `<option value="${v}" ${v === selVendor ? 'selected' : ''}>${v === 'anthropic' ? 'Anthropic' : 'OpenAI'}</option>`
+      ).join('');
+      const list = catalog[selVendor] || [];
+      const inList = list.some((m) => m.id === selModel);
+      const priceHint = (m) => m.pricing ? ` — $${m.pricing.input}/$${m.pricing.output} за 1M` : '';
+      const modelOpts = list.map((m) =>
+        `<option value="${esc(m.id)}" ${m.id === selModel ? 'selected' : ''}>${esc(m.label)}${esc(priceHint(m))}</option>`
+      ).join('') + `<option value="__custom__" ${!inList ? 'selected' : ''}>Другая (ввести вручную)…</option>`;
+
+      const defaultHint = overriding
+        ? `Задана отдельная модель модерации. <b>${esc(selModel)}</b> (${esc(selVendor)}).`
+        : `по умолчанию: как в дайджесте (<b>${esc(M.digestModel || selModel)}</b>). Судья наследует модель дайджеста, пока вы не выберете свою.`;
+      const safety = M.telegramSafety || {};
+      const safetyHint = safety.model
+        ? `<div class="info-note" style="margin-top:10px"><b>Telegram safety:</b> ` +
+          `${esc(safety.model)} / ${esc(safety.vendor)} / reasoning ${esc(safety.reasoningEffort)}. ` +
+          `Контракт ${esc(safety.policyVersion)} жёсткий: селектор общей модели и порог авто-бана ниже к нему не применяются.</div>`
+        : '';
+
+      const modeCard = `
+        <div class="card">
+          <h2>Режим</h2>
+          <p class="card-desc">Shadow — судит, но не действует (для обкатки на реальной ленте). Live — выполняет бан/скрытие автоматически.</p>
+          <div class="mode-toggle write">
+            <button class="mode-btn shadow ${mode === 'shadow' ? 'active' : ''}" data-mode="shadow">🕶 Shadow (тест)</button>
+            <button class="mode-btn live ${mode === 'live' ? 'active' : ''}" data-mode="live">⚡ Live (боевой)</button>
+          </div>
+          <div class="hint" style="margin-top:8px">Текущий режим: <b>${esc(mode)}</b>. ${mode === 'shadow' ? 'Действия только логируются как «сделал бы».' : 'Действия применяются к реальным комментариям.'}</div>
+          <span class="status" id="status-mode" style="display:block;margin-top:8px"></span>
+        </div>`;
+
+      const modelCard = `
+        <div class="card">
+          <h2>Модель судьи</h2>
+          <p class="card-desc">Дешёвая модель, которая классифицирует каждый комментарий (бан / подозрительный / чистый). Не выполняет действий — только выносит вердикт.</p>
+          <div class="info-note">${defaultHint}</div>
+          ${safetyHint}
+          <div class="field write">
+            <label>Вендор</label>
+            <select id="f-vendor">${vendorOpts}</select>
+          </div>
+          <div class="field write">
+            <label>Модель</label>
+            <select id="f-model">${modelOpts}</select>
+            <input type="text" id="f-modelCustom" style="margin-top:8px;display:${inList ? 'none' : 'block'}" placeholder="Введите id модели вручную" value="${inList ? '' : esc(selModel)}">
+            <div class="hint">Список — подсказка, не исчерпывающий. Можно ввести любой id через «Другая». Пусто → используется модель дайджеста.</div>
+          </div>
+
+          <div class="group-subtitle write">Дополнительно</div>
+          <div class="row3 write">
+            <div class="field">
+              <label>Модель-улучшатель</label>
+              <input type="text" id="f-improver" value="${esc(M.improverModelOverride || '')}" placeholder="по умолчанию: ${esc(M.improverModel || '')}">
+              <div class="hint">Сильная модель для предложений по промпту. Пусто → модель дайджеста.</div>
+            </div>
+            <div class="field">
+              <label>Порог авто-бана (0..1)</label>
+              <input type="number" id="f-banThreshold" min="0" max="1" step="0.01" value="${esc(M.banThreshold)}">
+              <div class="hint">Мин. уверенность для автоматического бана.</div>
+            </div>
+            <div class="field">
+              <label>Жёсткое удаление</label>
+              <div class="inline-check" style="margin-top:8px">
+                <input type="checkbox" id="f-hardDelete" ${M.hardDelete ? 'checked' : ''}>
+                <span class="hint" style="margin-top:0">Удалять комментарий вместо скрытия (необратимо).</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="save-bar write">
+            <button class="btn btn-primary" id="save-model">Сохранить</button>
+            <button class="btn" id="reset-model">Сбросить к модели дайджеста</button>
+            <span class="status" id="status-model"></span>
+          </div>
+        </div>`;
+
+      const costCard = renderCostCard();
+      const promptCard = renderPromptCard();
+
+      document.getElementById('tab-model').innerHTML = modeCard + modelCard + costCard + promptCard;
+      bindModelTab();
+      applyReadonly();
+    }
+
+    function renderCostCard() {
+      const s = STATS || {};
+      const byV = s.byVerdict || {};
+      const cost = s.cost || {};
+      const byMode = cost.byMode || {};
+      const tokens = s.tokens || {};
+      return `
+        <div class="card">
+          <h2>Стоимость модерации</h2>
+          <p class="card-desc">Во что обходится автомодерация: объём вердиктов и суммарная цена вызовов судьи.</p>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-label">Всего событий</div><div class="stat-value">${esc(num(s.totalEvents, 0))}</div></div>
+            <div class="stat"><div class="stat-label">Бан</div><div class="stat-value">${esc(num(byV.ban, 0))}</div></div>
+            <div class="stat"><div class="stat-label">Подозрительные</div><div class="stat-value">${esc(num(byV.suspect, 0))}</div></div>
+            <div class="stat"><div class="stat-label">Чистые</div><div class="stat-value">${esc(num(byV.clean, 0))}</div></div>
+            <div class="stat cost"><div class="stat-label">Итого $</div><div class="stat-value">${fmtCost(cost.total)}</div><div class="stat-sub">shadow ${fmtCost(byMode.shadow)} · live ${fmtCost(byMode.live)}</div></div>
+            <div class="stat"><div class="stat-label">Токены</div><div class="stat-value" style="font-size:16px">${esc(num(tokens.input, 0))} / ${esc(num(tokens.output, 0))}</div><div class="stat-sub">вход / выход</div></div>
+          </div>
+        </div>`;
+    }
+
+    function renderPromptCard() {
+      const P = PROMPTS || { versions: [], active: null, activeText: '' };
+      const versions = Array.isArray(P.versions) ? P.versions : [];
+      const editorLabel = viewingVersion
+        ? `Просмотр версии <b>${esc(viewingVersion)}</b>${viewingVersion === P.active ? ' (активна)' : ''}`
+        : `Активная версия${P.active ? `: <b>${esc(P.active)}</b>` : ' (нет)'}`;
+      const editorText = viewingVersion ? (window.__viewText != null ? window.__viewText : (P.activeText || '')) : (P.activeText || '');
+
+      const verList = versions.length
+        ? versions.map((v) => {
+            const active = v.version === P.active;
+            const { date, time } = fmtDate(v.created_at);
+            return `<div class="ver-row">
+              <span class="ver-name">${esc(v.version)} ${active ? '<span class="badge on">активна</span>' : ''}</span>
+              <span class="ver-meta">${esc(date)} ${esc(time)}</span>
+              <span class="ver-actions">
+                <button class="btn btn-sm" onclick="viewVersion('${esc(v.version)}')">Посмотреть</button>
+                ${active ? '' : `<button class="btn btn-sm write" onclick="activateVersion('${esc(v.version)}')">Активировать</button>`}
+              </span>
+            </div>`;
+          }).join('')
+        : '<div class="empty">Версий пока нет.</div>';
+
+      const platTabs = PROMPT_PLATFORMS.map((p) => {
+        const m = platformMeta(p);
+        return `<button class="plat-tab ${p === promptPlatform ? 'active' : ''}" data-plat="${esc(p)}">${m.icon} ${esc(m.label)}</button>`;
+      }).join('');
+      const curHint = platformMeta(promptPlatform).promptHint;
+
+      return `
+        <div class="card">
+          <h2>Промпт модерации</h2>
+          <p class="card-desc">У каждой соцсети свой промпт-критерии судьи — аудитория и тон различаются. Выберите сеть, промпт версионируется отдельно. Правка сохраняется как новая версия и <b>не</b> становится активной, пока вы её не активируете.</p>
+          <div class="plat-tabs">${platTabs}</div>
+          ${curHint ? `<div class="hint" style="margin:-4px 0 10px">${esc(curHint)}</div>` : ''}
+          <div class="info-note">${platformMeta(promptPlatform).icon} <b>${esc(platformMeta(promptPlatform).label)}</b> · ${editorLabel}</div>
+          <div class="field">
+            <textarea class="mono" id="ta-prompt">${esc(editorText)}</textarea>
+          </div>
+          <div class="save-bar write">
+            <button class="btn btn-primary" id="save-prompt">Сохранить как новую версию</button>
+            <button class="btn" id="improve-prompt">✨ Предложить улучшение</button>
+            ${viewingVersion ? '<button class="btn" id="back-active">Вернуть активную</button>' : ''}
+            <span class="status" id="status-prompt"></span>
+          </div>
+          <div class="group-subtitle">Версии</div>
+          ${verList}
+        </div>`;
+    }
+
+    function bindModelTab() {
+      // mode toggle
+      document.querySelectorAll('.mode-btn').forEach((b) => {
+        b.onclick = async () => {
+          const m = b.dataset.mode;
+          if (MODE && MODE.mode === m) return;
+          try {
+            const { res, data } = await apiPost('/api/moderation/mode', { mode: m });
+            if (!res.ok) { showStatus('mode', false, data.error || 'Ошибка'); return; }
+            await loadMode();
+            renderModelTab();
+            showStatus('mode', true, 'Режим: ' + (data.mode || m));
+          } catch (e) { if (e.message !== 'auth') showStatus('mode', false, e.message); }
+        };
+      });
+
+      // model vendor/model dynamic swap
+      const vendorSel = document.getElementById('f-vendor');
+      const modelSel = document.getElementById('f-model');
+      const customInp = document.getElementById('f-modelCustom');
+      if (vendorSel && modelSel && customInp) {
+        const catalog = (MODE && MODE.modelCatalog) || { anthropic: [], openai: [] };
+        const refresh = () => { customInp.style.display = modelSel.value === '__custom__' ? 'block' : 'none'; };
+        vendorSel.onchange = () => {
+          const list = catalog[vendorSel.value] || [];
+          const priceHint = (m) => m.pricing ? ` — $${m.pricing.input}/$${m.pricing.output} за 1M` : '';
+          modelSel.innerHTML = list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}${esc(priceHint(m))}</option>`).join('') +
+            '<option value="__custom__">Другая (ввести вручную)…</option>';
+          modelSel.value = list.length ? list[0].id : '__custom__';
+          customInp.value = '';
+          refresh();
+        };
+        modelSel.onchange = refresh;
+      }
+
+      const saveBtn = document.getElementById('save-model');
+      if (saveBtn) saveBtn.onclick = saveModel;
+      const resetBtn = document.getElementById('reset-model');
+      if (resetBtn) resetBtn.onclick = resetModel;
+
+      const savePrompt = document.getElementById('save-prompt');
+      if (savePrompt) savePrompt.onclick = saveNewVersion;
+      const improve = document.getElementById('improve-prompt');
+      if (improve) improve.onclick = improvePrompt;
+      const back = document.getElementById('back-active');
+      if (back) back.onclick = () => { viewingVersion = null; window.__viewText = null; renderModelTab(); };
+
+      // Prompt platform switch: reload that network's prompt versions, reset viewer.
+      document.querySelectorAll('.plat-tab').forEach((b) => {
+        b.onclick = async () => {
+          const p = b.dataset.plat;
+          if (p === promptPlatform) return;
+          promptPlatform = p;
+          viewingVersion = null; window.__viewText = null;
+          await loadPrompts();
+          renderModelTab();
+        };
+      });
+    }
+
+    async function saveModel() {
+      const modelSel = document.getElementById('f-model');
+      const customInp = document.getElementById('f-modelCustom');
+      const model = modelSel.value === '__custom__' ? (customInp.value || '').trim() : modelSel.value;
+      const body = {
+        model,
+        vendor: document.getElementById('f-vendor').value,
+        improverModel: (document.getElementById('f-improver').value || '').trim(),
+        banThreshold: Number(document.getElementById('f-banThreshold').value),
+        hardDelete: document.getElementById('f-hardDelete').checked,
+      };
+      const btn = document.getElementById('save-model');
+      btn.disabled = true;
+      try {
+        const { res, data } = await apiPost('/api/moderation/model', body);
+        if (!res.ok) { showStatus('model', false, data.error || 'Ошибка'); return; }
+        await Promise.all([loadMode(), loadStats()]);
+        renderModelTab();
+        showStatus('model', true, 'Сохранено ✓');
+      } catch (e) { if (e.message !== 'auth') showStatus('model', false, e.message); }
+      finally { const b = document.getElementById('save-model'); if (b) b.disabled = false; }
+    }
+
+    async function resetModel() {
+      try {
+        const { res, data } = await apiPost('/api/moderation/model', { model: '', vendor: '' });
+        if (!res.ok) { showStatus('model', false, data.error || 'Ошибка'); return; }
+        await loadMode();
+        renderModelTab();
+        showStatus('model', true, 'Сброшено к модели дайджеста ✓');
+      } catch (e) { if (e.message !== 'auth') showStatus('model', false, e.message); }
+    }
+
+    async function saveNewVersion() {
+      const text = document.getElementById('ta-prompt').value;
+      if (!text.trim()) { showStatus('prompt', false, 'Промпт не может быть пустым'); return; }
+      try {
+        const { res, data } = await apiPost('/api/moderation/prompts?platform=' + encodeURIComponent(promptPlatform), { text });
+        if (!res.ok) { showStatus('prompt', false, data.error || 'Ошибка'); return; }
+        viewingVersion = null; window.__viewText = null;
+        await loadPrompts();
+        renderModelTab();
+        showStatus('prompt', true, `Сохранено как ${data.version || 'новая версия'} — активируйте, чтобы применить`);
+      } catch (e) { if (e.message !== 'auth') showStatus('prompt', false, e.message); }
+    }
+
+    async function improvePrompt() {
+      try {
+        const { res, data } = await apiPost('/api/moderation/prompts/improve?platform=' + encodeURIComponent(promptPlatform));
+        if (res.status === 501) { showStatus('prompt', true, 'Ассистированное улучшение появится позже'); return; }
+        if (!res.ok) { showStatus('prompt', false, data.error || 'Ошибка'); return; }
+        await loadPrompts();
+        renderModelTab();
+        showStatus('prompt', true, 'Предложение сохранено как новая версия');
+      } catch (e) { if (e.message !== 'auth') showStatus('prompt', false, e.message); }
+    }
+
+    async function viewVersion(version) {
+      try {
+        const data = await apiGet('/api/moderation/prompts/' + encodeURIComponent(version) + '?platform=' + encodeURIComponent(promptPlatform));
+        viewingVersion = version;
+        window.__viewText = data.text || '';
+        renderModelTab();
+      } catch (e) { showStatus('prompt', false, 'Не удалось загрузить версию: ' + e.message); }
+    }
+
+    async function activateVersion(version) {
+      try {
+        const { res, data } = await apiPost('/api/moderation/prompts/' + encodeURIComponent(version) + '/activate?platform=' + encodeURIComponent(promptPlatform));
+        if (!res.ok) { showStatus('prompt', false, data.error || 'Ошибка'); return; }
+        viewingVersion = null; window.__viewText = null;
+        await loadPrompts();
+        renderModelTab();
+        showStatus('prompt', true, `Активирована ${data.active || version} ✓`);
+      } catch (e) { if (e.message !== 'auth') showStatus('prompt', false, e.message); }
+    }
+
+    // ── Tab 2: Комментарии ─────────────────────────────────────────────────────
+
+    // Judge-outage banner: comments the judge could not evaluate are PARKED (not
+    // fake suspects) — show how many wait, since when, and why the judge fails.
+    function pendingBannerHtml() {
+      const pend = (STATS && STATS.pending) || [];
+      const outages = (STATS && STATS.outages) || [];
+      // Show for parked comments AND for a recorded outage with nothing parked
+      // (e.g. only stuck corpus rows are failing) — an outage must be visible.
+      const platforms = [...new Set([...pend.map((p) => p.platform), ...outages.map((o) => o.platform)])];
+      if (!platforms.length) return '';
+      const rows = platforms.map((platform) => {
+        const platformRows = pend.filter((x) => x.platform === platform);
+        const out = outages.find((o) => o.platform === platform);
+        const statusRows = platformRows.map((p) => {
+          const since = p.oldest_failed_at ? fmtDate(new Date(p.oldest_failed_at * 1000).toISOString()) : null;
+          const quarantined = p.status === 'quarantined';
+          const tokenCount = Number(p.failed_input_tokens || 0) + Number(p.failed_output_tokens || 0);
+          const countTxt = quarantined
+            ? `${p.count} изолировано после лимита ошибок — автоматического retry не будет`
+            : `${p.count} ждут автоматической повторной оценки`;
+          return `<div style="margin:5px 0 0 12px">
+            <b>${quarantined ? 'quarantined' : 'pending'}</b>: ${countTxt}
+            ${since ? ` (с ${esc(since.date)} ${esc(since.time)})` : ''}
+            ${tokenCount ? `; failed tokens: ${tokenCount}` : ''}
+            ${p.last_error ? `<div class="cmt-reason" style="max-width:none" title="${esc(p.last_error)}">Последняя ошибка: ${esc(p.last_error)}</div>` : ''}
+          </div>`;
+        }).join('');
+        const cause = out && out.lastError;
+        return `<div style="margin-top:6px">
+          <b>${esc(platform)}</b>${platformRows.length ? '' : ': сбой при переоценке журнала'}
+          ${statusRows}
+          ${cause ? `<div class="cmt-reason" style="max-width:none" title="${esc(cause)}">Сбой модели: ${esc(cause)}</div>` : ''}
+        </div>`;
+      }).join('');
+      return `
+        <div class="card" style="border-color:rgba(245,158,11,0.45);background:rgba(245,158,11,0.06)">
+          <h2>⏳ Очередь ошибок классификатора</h2>
+          <p class="card-desc" style="margin-bottom:6px"><b>pending</b> повторяется автоматически.
+            <b>quarantined</b> достиг лимита платных попыток, остаётся заблокированным и требует ручного расследования.
+            Если это конфиг (ключ/модель/квота) — исправьте его до retry.</p>
+          ${rows}
+        </div>`;
+    }
+
+    function renderCommentsTab() {
+      const el = document.getElementById('tab-comments');
+      const pendingCount = commentsPlatform === 'all'
+        ? SUSPECTS.length
+        : SUSPECTS.filter((e) => e.platform === commentsPlatform).length;
+
+      // Mode hint: what a decision actually does right now.
+      const mode = (MODE && MODE.mode) || 'shadow';
+      const modeHint = mode === 'shadow'
+        ? 'Режим <b>shadow</b>: ваши решения записываются как обучающие метки и <b>не</b> выполняют действий на платформе.'
+        : 'Режим <b>live</b>: ваши решения применяются на платформе (бан / скрытие / показ + разбан).';
+
+      // ONE list, driven by the status filter. Pending = the review queue from
+      // /suspects (already exactly the unlabeled suspect + ban-below-threshold band).
+      // Everything else filters EVENTS by the owner's decision.
+      let rows;
+      if (statusFilter === 'pending') rows = SUSPECTS.slice();
+      else if (statusFilter === 'all') rows = EVENTS.slice();
+      else if (statusFilter === 'decided') rows = EVENTS.filter((e) => ownerVerdictOf(e) != null);
+      else rows = EVENTS.filter((e) => ownerVerdictOf(e) === statusFilter);
+
+      // Network filter (client-side). Options: every known network + any that
+      // actually appears in the data, so a new adapter's traffic shows up at once.
+      const present = [...new Set([...EVENTS, ...SUSPECTS].map((e) => e.platform).filter(Boolean))];
+      const platOptions = [...new Set([...PROMPT_PLATFORMS, ...present])];
+      if (commentsPlatform !== 'all' && !present.includes(commentsPlatform)) {
+        // keep the chosen network selectable even when currently empty
+      }
+      if (commentsPlatform !== 'all') rows = rows.filter((e) => e.platform === commentsPlatform);
+
+      const opt = (val, label) =>
+        `<option value="${val}" ${statusFilter === val ? 'selected' : ''}>${label}</option>`;
+      const popt = (val, label) =>
+        `<option value="${val}" ${commentsPlatform === val ? 'selected' : ''}>${label}</option>`;
+      const filterHtml = `
+        <div class="filter-bar">
+          <label for="f-platform">Сеть:</label>
+          <select id="f-platform">
+            ${popt('all', '🌐 Все сети')}
+            ${platOptions.map((p) => { const m = platformMeta(p); return popt(p, m.icon + ' ' + m.label); }).join('')}
+          </select>
+          <label for="f-status">Показывать:</label>
+          <select id="f-status">
+            ${opt('pending', '⏳ Ожидают решения' + (pendingCount ? ` (${pendingCount})` : ''))}
+            ${opt('clean', '✅ Оставленные')}
+            ${opt('suspect', '🙈 Скрытые')}
+            ${opt('ban', '🚫 Забаненные')}
+            ${opt('decided', 'Все решённые')}
+            ${opt('all', 'Все')}
+          </select>
+          <button class="btn btn-sm" id="refresh-comments">↻ Обновить</button>
+        </div>`;
+
+      const badge = statusFilter === 'pending' && pendingCount
+        ? ` <span class="badge suspect">${pendingCount}</span>` : '';
+      const tableHtml = `
+        <div class="card">
+          <h2>Комментарии${badge}</h2>
+          <p class="card-desc">${modeHint} Ваша правка всегда пишется в корпус как обучающий сигнал.</p>
+          <span class="status" id="status-comments" style="display:block;margin-bottom:10px"></span>
+          ${filterHtml}
+          ${eventsTable(rows)}
+        </div>`;
+
+      el.innerHTML = pendingBannerHtml() + tableHtml;
+
+      const fs = document.getElementById('f-status');
+      if (fs) fs.onchange = () => { statusFilter = fs.value; renderCommentsTab(); };
+      const fp = document.getElementById('f-platform');
+      if (fp) fp.onchange = () => { commentsPlatform = fp.value; renderCommentsTab(); };
+      const rf = document.getElementById('refresh-comments');
+      if (rf) rf.onclick = async () => { await Promise.all([loadEvents(), loadSuspects(), loadStats()]); renderCommentsTab(); };
+      applyReadonly();
+    }
+
+    // Deep link to the post the comment sits under (and to the comment itself
+    // where the platform supports an anchor). Null when no stable URL exists.
+    function postUrl(e) {
+      const ref = e.post_ref || '';
+      const cid = e.platform_comment_id || '';
+      if (e.platform === 'facebook' && ref) {
+        // post_ref = {pageId}_{postId}; comment id's tail focuses the comment.
+        const tail = cid.includes('_') ? cid.split('_').pop() : '';
+        return 'https://www.facebook.com/' + encodeURIComponent(ref) + (tail ? '?comment_id=' + encodeURIComponent(tail) : '');
+      }
+      if (e.platform === 'telegram' && ref) {
+        // Supergroup -100XXXX + message id → t.me/c/ link (works for members).
+        const m = ref.match(/^-100(\d+)$/);
+        const msgId = cid.includes(':') ? cid.split(':').pop() : '';
+        if (m && msgId) return 'https://t.me/c/' + m[1] + '/' + msgId;
+      }
+      return null;
+    }
+
+    function postLinkHtml(e) {
+      const url = postUrl(e);
+      if (!url) return '';
+      return `<a class="post-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="Открыть пост с этим комментарием">↗ пост</a>`;
+    }
+
+    function eventsTable(rows) {
+      if (!rows.length) {
+        const msg = statusFilter === 'pending' ? 'Очередь пуста — всё разобрано.' : 'Комментариев нет.';
+        return `<div class="empty">${msg}</div>`;
+      }
+      const body = rows.map((e) => {
+        const { date, time } = fmtDate(e.created_at);
+        const text = e.comment_text || '(без текста)';
+        const author = e.author_name || (e.platform_author_id ? ('id:' + e.platform_author_id) : '—');
+        const shadowBadge = e.mode === 'shadow' ? ' <span class="badge shadow">shadow</span>' : '';
+        const id = esc(e.id);
+        return `<tr>
+          <td><span class="date-main">${esc(date)}</span><br><span class="date-sub">${esc(time)}</span></td>
+          <td>${platformBadge(e.platform)}</td>
+          <td><span class="cmt-author">${esc(author)}</span></td>
+          <td>
+            <div class="cmt-text cmt-clickable" title="Читать полностью" onclick="openDetailModal('${id}')">${esc(text)}</div>
+            <button class="btn btn-sm cmt-read" onclick="openDetailModal('${id}')">Читать</button>${postLinkHtml(e)}
+          </td>
+          <td>${verdictBadge(e.verdict)}${shadowBadge}${safetyBadge(e)}</td>
+          <td>${esc(fmtConf(e.confidence))}</td>
+          <td><div class="cmt-reason" title="${esc(e.reason || '')}">${esc(e.reason || '—')}</div></td>
+          <td>${statusChip(e)}</td>
+          <td class="cost-cell">${fmtCost(e.cost_usd)}</td>
+          <td>${rowControls(e)}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <table>
+          <thead><tr>
+            <th>Время</th><th>Сеть</th><th>Автор</th><th>Текст</th><th>Вердикт модели</th><th>Увер.</th>
+            <th>Причина</th><th>Статус</th><th>$</th><th>Решение</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>`;
+    }
+
+    function rowControls(e) {
+      const id = esc(e.id);
+      // Read-only visitors still get the full-text / history view.
+      if (READONLY) {
+        return `<div class="row-ctrls"><button class="btn btn-sm" onclick="openDetailModal('${id}')">Подробнее</button></div>`;
+      }
+      // ONE decision: the owner picks the TRUE verdict. Highlight the current one (✓)
+      // so a re-decision is obvious. All three call POST /events/:id/decide.
+      const ov = ownerVerdictOf(e);
+      const cur = (v) => (ov === v ? ' cur' : '');
+      const tick = (v) => (ov === v ? ' ✓' : '');
+      let ctrls = '<div class="row-ctrls write">';
+      if (isTelegramSafetyEvent(e)) {
+        ctrls += `<button class="btn btn-sm btn-ok${cur('clean')}" title="Сохранить только обучающую метку; санкцию не менять" onclick="decide('${id}','clean')">🏷 Чисто${tick('clean')}</button>`;
+        ctrls += `<button class="btn btn-sm${cur('suspect')}" title="Сохранить только обучающую метку; санкцию не менять" onclick="decide('${id}','suspect')">🏷 Абьюз${tick('suspect')}</button>`;
+        ctrls += `<button class="btn btn-sm btn-danger${cur('ban')}" title="Сохранить только обучающую метку; санкцию не менять" onclick="decide('${id}','ban')">🏷 Опасно${tick('ban')}</button>`;
+      } else {
+        ctrls += `<button class="btn btn-sm btn-ok${cur('clean')}" title="Показать и снять бан" onclick="decide('${id}','clean')">✅ Чисто${tick('clean')}</button>`;
+        ctrls += `<button class="btn btn-sm${cur('suspect')}" title="Скрыть комментарий" onclick="decide('${id}','suspect')">🙈 Скрыть${tick('suspect')}</button>`;
+        ctrls += `<button class="btn btn-sm btn-danger${cur('ban')}" title="Забанить автора" onclick="decide('${id}','ban')">🚫 Забанить${tick('ban')}</button>`;
+      }
+      ctrls += `<button class="btn btn-sm" onclick="openNoteModal('${id}')">💬 Заметка</button>`;
+      ctrls += `<button class="btn btn-sm btn-danger" onclick="act('${id}','delete',null,'Удалено ✓')">🗑 Удалить</button>`;
+      ctrls += '</div>';
+      return ctrls;
+    }
+
+    // Generic per-row action → endpoint, then refresh.
+    async function act(id, endpoint, body, okMsg) {
+      try {
+        const { res, data } = await apiPost(`/api/moderation/events/${id}/${endpoint}`, body);
+        if (!res.ok) { commentsStatus(false, data.error || ('Ошибка ' + res.status)); return; }
+        if (data.ok === false) commentsStatus(false, 'Не удалось: ' + enforceMsg(data.error));
+        else commentsStatus(true, okMsg);
+        await Promise.all([loadEvents(), loadSuspects(), loadStats()]);
+        renderCommentsTab();
+      } catch (e) { if (e.message !== 'auth') commentsStatus(false, e.message); }
+    }
+
+    // The unified owner decision → POST /events/:id/decide {verdict}. Reuses act()'s
+    // fetch+error+refresh path (reloads events AND suspects, re-renders, toasts).
+    const DECIDE_MSG = { clean: 'Оставлен — показан ✓', suspect: 'Скрыт ✓', ban: 'Забанен ✓' };
+    async function decide(id, verdict) {
+      const event = EVENTS.find((row) => row.id === id);
+      const message = isTelegramSafetyEvent(event || {})
+        ? 'Обучающая метка сохранена; Telegram-санкция не изменена ✓'
+        : (DECIDE_MSG[verdict] || 'Решение сохранено ✓');
+      await act(id, 'decide', { verdict }, message);
+    }
+    // Decide straight from the full-text modal, then close it.
+    async function decideFromModal(verdict) {
+      if (READONLY) return;
+      const id = detailEventId;
+      if (!id) return;
+      closeDetailModal();
+      await decide(id, verdict);
+    }
+
+    function commentsStatus(ok, msg) {
+      const el = document.getElementById('status-comments');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.className = 'status'; }, 3500);
+    }
+
+    // ── Note modal ─────────────────────────────────────────────────────────────
+    function openNoteModal(id) {
+      noteEventId = id;
+      const e = eventById(id);
+      const cmt = document.getElementById('note-comment');
+      const hist = document.getElementById('note-history');
+      const err = document.getElementById('note-error');
+      const ta = document.getElementById('note-text');
+      err.style.display = 'none';
+      if (ta) ta.value = '';
+      if (e) {
+        cmt.innerHTML = `${verdictBadge(e.verdict)} · <b>${esc(e.author_name || '—')}</b><br>${esc(e.comment_text || '(без текста)')}`;
+        const fb = Array.isArray(e.feedback) ? e.feedback : [];
+        hist.innerHTML = fb.length ? fb.map((f) => {
+          const { date, time } = fmtDate(f.created_at);
+          const reclass = (f.from_verdict || f.to_verdict) ? ` (${esc(f.from_verdict || '?')} → ${esc(f.to_verdict || '?')})` : '';
+          return `<div class="fb-item">
+            <div class="fb-head">${esc(f.action || '')}${reclass} · ${esc(date)} ${esc(time)}</div>
+            ${f.note ? `<div class="fb-note">${esc(f.note)}</div>` : ''}
+          </div>`;
+        }).join('') : '<div class="empty" style="padding:12px">Корректировок пока нет.</div>';
+      } else {
+        cmt.textContent = '—';
+        hist.innerHTML = '';
+      }
+      document.getElementById('note-modal').classList.add('open');
+      setTimeout(() => { if (!READONLY && ta) ta.focus(); }, 50);
+    }
+    function closeNoteModal() { document.getElementById('note-modal').classList.remove('open'); noteEventId = null; }
+
+    // ── Full-text detail modal ──────────────────────────────────────────────────
+    function syncDetailDecisionControls(e) {
+      const safety = isTelegramSafetyEvent(e || {});
+      const controls = safety ? {
+        clean: ['🏷 Чисто', 'Сохранить только обучающую метку; санкцию не менять'],
+        suspect: ['🏷 Абьюз', 'Сохранить только обучающую метку; санкцию не менять'],
+        ban: ['🏷 Опасно', 'Сохранить только обучающую метку; санкцию не менять'],
+      } : {
+        clean: ['✅ Чисто', 'Показать и снять бан'],
+        suspect: ['🙈 Скрыть', 'Скрыть комментарий'],
+        ban: ['🚫 Забанить', 'Забанить автора'],
+      };
+      for (const [verdict, [label, title]] of Object.entries(controls)) {
+        const button = document.getElementById(`detail-decision-${verdict}`);
+        if (!button) continue;
+        button.textContent = label;
+        button.title = title;
+      }
+    }
+    // Full comment text + author + model verdict/confidence/reason/quote + post link
+    // + correction history. All user text escaped via esc().
+    function openDetailModal(id) {
+      detailEventId = id;
+      const e = eventById(id);
+      syncDetailDecisionControls(e);
+      const body = document.getElementById('detail-body');
+      if (!e) { body.innerHTML = '<div class="empty">Комментарий не найден.</div>'; }
+      else {
+        const author = e.author_name || (e.platform_author_id ? ('id:' + e.platform_author_id) : '—');
+        const link = postUrl(e);
+        const fb = Array.isArray(e.feedback) ? e.feedback : [];
+        const history = fb.length ? fb.map((f) => {
+          const { date, time } = fmtDate(f.created_at);
+          const reclass = (f.from_verdict || f.to_verdict) ? ` (${esc(f.from_verdict || '?')} → ${esc(f.to_verdict || '?')})` : '';
+          return `<div class="fb-item">
+            <div class="fb-head">${esc(f.action || '')}${reclass} · ${esc(date)} ${esc(time)}</div>
+            ${f.note ? `<div class="fb-note">${esc(f.note)}</div>` : ''}
+          </div>`;
+        }).join('') : '<div class="empty" style="padding:12px">Корректировок пока нет.</div>';
+
+        body.innerHTML = `
+          <div style="margin-bottom:14px;line-height:1.9">
+            ${platformBadge(e.platform)} · <span class="cmt-author">${esc(author)}</span> · ${statusChip(e)}
+            ${e.mode === 'shadow' ? ' · <span class="badge shadow">shadow</span>' : ''}
+            ${link ? ` · <a class="post-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Открыть пост с этим комментарием">↗ пост</a>` : ''}
+          </div>
+          <div class="group-subtitle" style="margin-top:0">Текст комментария</div>
+          <div class="quoted">${esc(e.comment_text || '(без текста)')}</div>
+          <div class="group-subtitle">Вердикт модели</div>
+          <div style="margin-bottom:16px;line-height:1.7">
+            ${verdictBadge(e.verdict)} · уверенность <b>${esc(fmtConf(e.confidence))}</b>
+            ${safetyBadge(e)}
+            ${e.policy_version ? `<div class="cmt-reason" style="max-width:none;margin-top:6px">Safety policy: <b>${esc(e.policy_version)}</b></div>` : ''}
+            ${e.action_taken ? `<div class="cmt-reason" style="max-width:none;margin-top:6px">Действие на платформе: <b>${esc(e.action_taken)}</b></div>` : ''}
+            ${e.post_ref ? `<div class="cmt-reason" style="max-width:none;margin-top:6px">Chat/source: <b>${esc(e.post_ref)}</b></div>` : ''}
+            ${e.reason ? `<div class="cmt-reason" style="max-width:none;margin-top:6px">Причина: ${esc(e.reason)}</div>` : ''}
+            ${jsonAuditDetails('Classifier trace', e.classifier_json)}
+            ${jsonAuditDetails('Enforcement receipt / errors', e.enforcement_receipt_json)}
+          </div>
+          ${e.quote ? `<div class="group-subtitle">Цитата, на которую сослалась модель</div><div class="quoted">${esc(e.quote)}</div>` : ''}
+          <div class="group-subtitle">История корректировок</div>
+          <div class="fb-list">${history}</div>`;
+      }
+      document.getElementById('detail-modal').classList.add('open');
+    }
+    function closeDetailModal() { document.getElementById('detail-modal').classList.remove('open'); detailEventId = null; }
+
+    async function submitNote() {
+      const ta = document.getElementById('note-text');
+      const err = document.getElementById('note-error');
+      const note = (ta.value || '').trim();
+      err.style.display = 'none';
+      if (!note) { err.textContent = 'Заметка не может быть пустой.'; err.style.display = 'block'; return; }
+      const btn = document.getElementById('note-save');
+      btn.disabled = true;
+      try {
+        const { res, data } = await apiPost(`/api/moderation/events/${noteEventId}/note`, { note });
+        if (!res.ok) { err.textContent = data.error || ('Ошибка ' + res.status); err.style.display = 'block'; return; }
+        await Promise.all([loadEvents(), loadSuspects()]);
+        closeNoteModal();
+        renderCommentsTab();
+        commentsStatus(true, 'Заметка сохранена ✓');
+      } catch (e) {
+        if (e.message !== 'auth') { err.textContent = e.message; err.style.display = 'block'; }
+      } finally { const b = document.getElementById('note-save'); if (b) b.disabled = false; }
+    }
+
+    // ── shared ──────────────────────────────────────────────────────────────────
+    function showStatus(id, ok, msg) {
+      const el = document.getElementById('status-' + id);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'status show ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.className = 'status'; }, 3500);
+    }
+
+    function applyReadonly() {
+      if (!READONLY) return;
+      document.querySelectorAll('#main select, #main input, #main textarea').forEach((el) => {
+        if (el.id === 'f-status') return; // the view filter stays usable
+        if (el.tagName === 'SELECT') el.setAttribute('disabled', 'disabled');
+        else el.setAttribute('readonly', 'readonly');
+      });
+    }
+
+    async function loadAuth() {
+      let required = false, authed = false;
+      try {
+        const res = await fetch('/api/auth/status');
+        const a = await res.json();
+        required = !!a.required;
+        authed = !!a.authenticated;
+        READONLY = !!a.readOnly || !!(a.required && !a.authenticated);
+      } catch (err) { READONLY = false; }
+      document.body.classList.toggle('readonly', READONLY);
+      document.body.classList.toggle('authed', required && authed && !READONLY);
+    }
+
+    document.getElementById('btn-login').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/login?next=' + encodeURIComponent(location.pathname);
+    });
+    document.getElementById('btn-logout').addEventListener('click', (e) => {
+      e.preventDefault();
+      window.location.href = '/api/auth/logout?next=' + encodeURIComponent(location.pathname);
+    });
+    document.querySelectorAll('.subtab').forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeNoteModal(); closeDetailModal(); } });
+
+    async function boot() {
+      await loadAuth();
+      try {
+        await loadMode(); // the only hard dependency (drives the model tab)
+      } catch (err) {
+        document.getElementById('loading').textContent = 'Не удалось загрузить модерацию: ' + err.message;
+        return;
+      }
+      await Promise.all([loadStats(), loadPrompts(), loadEvents(), loadSuspects()]);
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('main').style.display = 'block';
+      renderModelTab();
+    }
+
+    boot();
+  </script>
+</body>
+</html>
