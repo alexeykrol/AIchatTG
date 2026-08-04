@@ -18,6 +18,14 @@ function integer(env, name, fallback, { min = 1, max = 65_535 } = {}) {
   return value;
 }
 
+function nonNegativeInteger(env, name, fallback, max = 30_000) {
+  const value = Number.parseInt(String(env[name] ?? fallback), 10);
+  if (!Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new Error(`${name} must be an integer between 0 and ${max}`);
+  }
+  return value;
+}
+
 function csv(env, name) {
   return String(env[name] || '').split(',').map((value) => value.trim()).filter(Boolean);
 }
@@ -68,8 +76,14 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     port: integer(env, 'TELEGRAM_RUNTIME_PORT', 8788),
     dataRoot: resolve(cwd, String(env.TELEGRAM_RUNTIME_DATA_ROOT || 'data/telegram-runtime')),
     databasePath: resolve(cwd, String(env.TELEGRAM_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.db')),
+    knowledge: {
+      root: resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge')),
+      manifestPath: resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_MANIFEST_PATH || 'data/knowledge/manifest.json')),
+    },
     ingressEnabled,
     moderationMode: String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow',
+    assistantModerationWaitMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_WAIT_MS', 30_000),
+    assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     moderator,
     assistant,
     llm: {

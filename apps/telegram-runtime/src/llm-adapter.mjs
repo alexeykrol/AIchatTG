@@ -6,7 +6,11 @@ export class LlmDisabledError extends Error {
 }
 
 function disabled() {
-  return { async moderate() { throw new LlmDisabledError(); }, async answer() { throw new LlmDisabledError(); } };
+  return {
+    async moderate() { throw new LlmDisabledError(); },
+    async routeAssistant() { throw new LlmDisabledError(); },
+    async answer() { throw new LlmDisabledError(); },
+  };
 }
 
 /** A narrow provider-neutral JSON seam. It never performs startup work. */
@@ -23,5 +27,9 @@ export function createLlmAdapter(config, { fetchFn = globalThis.fetch } = {}) {
     if (!response.ok || !result || typeof result !== 'object') throw new Error(`LLM adapter failed with HTTP ${response.status}`);
     return result;
   }
-  return { moderate: (payload) => invoke('moderate', payload), answer: (payload) => invoke('answer', payload) };
+  return {
+    moderate: (payload) => invoke('moderate', payload),
+    routeAssistant: (payload) => invoke('assistant_route', payload),
+    answer: (payload) => invoke('answer', payload),
+  };
 }

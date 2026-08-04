@@ -44,6 +44,36 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_turns (
   receipt_json TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS runtime_assistant_question_claims (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('processing', 'completed')),
+  outcome TEXT,
+  claimed_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  PRIMARY KEY (chat_id, message_id)
+);
+CREATE TABLE IF NOT EXISTS runtime_assistant_moderation_dispositions (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'allowed', 'blocked', 'error')),
+  moderation_message_id TEXT,
+  verdict TEXT,
+  reason TEXT,
+  moderation_event_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_moderation_status
+  ON runtime_assistant_moderation_dispositions(status, updated_at);
+CREATE TABLE IF NOT EXISTS runtime_moderation_weak_strikes (
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  weak_strikes INTEGER NOT NULL CHECK(weak_strikes >= 0),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, user_id)
+);
 `;
 
 export function openRuntimeDatabase(databasePath) {
@@ -74,6 +104,60 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const insertModeration = db.prepare(`INSERT INTO runtime_moderation_records
     (id, event_id, chat_id, message_id, user_id, verdict, confidence, reason, mode, action_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const questionClaim = db.prepare(`INSERT INTO runtime_assistant_question_claims
+    (chat_id, message_id, status, claimed_at) VALUES (?, ?, 'processing', ?)
+    ON CONFLICT(chat_id, message_id) DO NOTHING`);
+  const question = db.prepare('SELECT * FROM runtime_assistant_question_claims WHERE chat_id = ? AND message_id = ?');
+  const completeQuestion = db.prepare(`UPDATE runtime_assistant_question_claims
+    SET status = 'completed', outcome = ?, completed_at = ? WHERE chat_id = ? AND message_id = ?`);
+  const disposition = db.prepare(`SELECT * FROM runtime_assistant_moderation_dispositions
+    WHERE chat_id = ? AND message_id = ?`);
+  const writeDisposition = db.prepare(`INSERT INTO runtime_assistant_moderation_dispositions
+    (chat_id, message_id, status, moderation_message_id, verdict, reason, moderation_event_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(chat_id, message_id) DO UPDATE SET
+      status = CASE
+        WHEN runtime_assistant_moderation_dispositions.status IN ('allowed', 'blocked')
+          AND runtime_assistant_moderation_dispositions.moderation_message_id IS excluded.moderation_message_id
+          AND excluded.status = 'pending'
+        THEN runtime_assistant_moderation_dispositions.status
+        ELSE excluded.status
+      END,
+      verdict = CASE
+        WHEN runtime_assistant_moderation_dispositions.status IN ('allowed', 'blocked')
+          AND runtime_assistant_moderation_dispositions.moderation_message_id IS excluded.moderation_message_id
+          AND excluded.status = 'pending'
+        THEN runtime_assistant_moderation_dispositions.verdict
+        ELSE excluded.verdict
+      END,
+      reason = CASE
+        WHEN runtime_assistant_moderation_dispositions.status IN ('allowed', 'blocked')
+          AND runtime_assistant_moderation_dispositions.moderation_message_id IS excluded.moderation_message_id
+          AND excluded.status = 'pending'
+        THEN runtime_assistant_moderation_dispositions.reason
+        ELSE excluded.reason
+      END,
+      moderation_event_id = CASE
+        WHEN runtime_assistant_moderation_dispositions.status IN ('allowed', 'blocked')
+          AND runtime_assistant_moderation_dispositions.moderation_message_id IS excluded.moderation_message_id
+          AND excluded.status = 'pending'
+        THEN runtime_assistant_moderation_dispositions.moderation_event_id
+        ELSE excluded.moderation_event_id
+      END,
+      moderation_message_id = excluded.moderation_message_id,
+      updated_at = excluded.updated_at`);
+  const currentWeakStrikes = db.prepare(`SELECT weak_strikes FROM runtime_moderation_weak_strikes
+    WHERE chat_id = ? AND user_id = ?`);
+  const incrementWeakStrike = db.prepare(`INSERT INTO runtime_moderation_weak_strikes
+    (chat_id, user_id, weak_strikes, updated_at) VALUES (?, ?, 1, ?)
+    ON CONFLICT(chat_id, user_id) DO UPDATE SET
+      weak_strikes = runtime_moderation_weak_strikes.weak_strikes + 1,
+      updated_at = excluded.updated_at`);
+  const reserveWeakStrike = db.transaction((chatId, userId, at) => {
+    const before = currentWeakStrikes.get(chatId, userId)?.weak_strikes || 0;
+    incrementWeakStrike.run(chatId, userId, at);
+    return { before, after: before + 1 };
+  });
 
   return {
     claimEvent({ eventId, role, updateId }) {
@@ -89,6 +173,34 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         record.verdict, record.confidence, record.reason, record.mode,
         JSON.stringify(record.actions || []), now(),
       );
+    },
+    claimAssistantQuestion({ chatId, messageId }) {
+      const claimed = questionClaim.run(String(chatId), String(messageId), now()).changes === 1;
+      return { claimed, existing: claimed ? null : question.get(String(chatId), String(messageId)) };
+    },
+    completeAssistantQuestion({ chatId, messageId, outcome }) {
+      const result = completeQuestion.run(String(outcome), now(), String(chatId), String(messageId));
+      return { completed: result.changes === 1 };
+    },
+    getAssistantDisposition({ chatId, messageId }) {
+      return disposition.get(String(chatId), String(messageId));
+    },
+    upsertAssistantDisposition({
+      chatId, messageId, status, moderationMessageId = null, verdict = null,
+      reason = null, moderationEventId = null,
+    }) {
+      const at = now();
+      writeDisposition.run(
+        String(chatId), String(messageId), String(status),
+        moderationMessageId == null ? null : String(moderationMessageId),
+        verdict == null ? null : String(verdict), reason == null ? null : String(reason),
+        moderationEventId == null ? null : String(moderationEventId), at, at,
+      );
+      return disposition.get(String(chatId), String(messageId));
+    },
+    reserveWeakStrike({ chatId, userId }) {
+      if (userId == null || String(userId) === '') return { before: 0, after: 0 };
+      return reserveWeakStrike(String(chatId), String(userId), now());
     },
     recentDialogue(chatId, userId, limit = 3) {
       const current = dialogue.get(chatId, userId);
