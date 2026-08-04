@@ -68,6 +68,7 @@ test('legacy moderation projection exposes Telegram runtime truth without News s
   const stats = legacyModerationStats(config);
   assert.equal(stats.totalEvents, 1);
   assert.equal(stats.byVerdict.suspect, 1);
+  assert.deepEqual(stats.pending, []);
   const [event] = legacyModerationEvents(config);
   assert.equal(event.platform, 'telegram');
   assert.equal(event.platform_author_id, '42');

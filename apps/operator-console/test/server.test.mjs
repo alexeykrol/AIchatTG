@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { createOperatorConsoleServer, validOperatorAuthorization } from '../src/server.mjs';
+
+const fixtureRoot = mkdtempSync(join(tmpdir(), 'aichattg-operator-server-'));
+const safetyPromptPath = join(fixtureRoot, 'moderation-tg-v3.md');
+writeFileSync(safetyPromptPath, 'Telegram safety prompt v3', { mode: 0o600 });
 
 const config = {
   token: 'operator-test-token',
   runtimeDatabasePath: '/tmp/aichattg-operator-console-test-absent.sqlite',
-  safetyPromptPath: '/tmp/aichattg-prompt-test-absent.md',
+  safetyPromptPath,
   runtimeFlags: { ingressEnabled: false, moderationMode: 'shadow', providerEnabled: false, notificationsEnabled: false },
   runtimeModels: {
     vendor: 'openai', moderator: 'gpt-5.6-terra', moderatorReasoning: 'medium',
@@ -53,6 +60,12 @@ test('operator routes require app-owned authentication while health stays public
     assert.equal((await mode.json()).mode, 'shadow');
     const events = await fetch(`${url}/api/moderation/events?limit=300`, { headers: { authorization: auth() } });
     assert.deepEqual(await events.json(), []);
+    const stats = await fetch(`${url}/api/moderation/stats`, { headers: { authorization: auth() } });
+    assert.deepEqual((await stats.json()).pending, []);
+    const prompt = await fetch(`${url}/api/moderation/prompts/tg-v3?platform=telegram`, { headers: { authorization: auth() } });
+    assert.deepEqual(await prompt.json(), {
+      version: 'tg-v3', text: 'Telegram safety prompt v3', active: true, readOnly: true,
+    });
     assert.equal((await fetch(`${url}/api/moderation/mode`, { method: 'POST', headers: { authorization: auth() } })).status, 409);
   });
 });

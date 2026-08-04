@@ -79,9 +79,16 @@ function apiResponse(config, path, searchParams) {
   if (path === '/api/moderation/suspects') {
     return legacyModerationEvents(config, { limit: 100, suspectsOnly: true });
   }
-  if (path === '/api/moderation/prompts' || /^\/api\/moderation\/prompts\/[^/]+$/u.test(path)) {
+  if (path === '/api/moderation/prompts') {
     if ((searchParams.get('platform') || 'telegram') !== 'telegram') return { error: 'platform_not_owned' };
     return legacyPrompts(config);
+  }
+  if (/^\/api\/moderation\/prompts\/[^/]+$/u.test(path)) {
+    if ((searchParams.get('platform') || 'telegram') !== 'telegram') return { error: 'platform_not_owned' };
+    const prompts = legacyPrompts(config);
+    const version = decodeURIComponent(path.slice('/api/moderation/prompts/'.length));
+    if (!prompts.versions.some((entry) => entry.version === version)) return { error: 'prompt_not_found' };
+    return { version, text: prompts.activeText, active: version === prompts.active, readOnly: true };
   }
   if (path === '/api/moderation/assistant/config') return legacyAssistantConfig(config);
   if (path === '/api/moderation/assistant/analytics') return legacyAssistantAnalytics(config);

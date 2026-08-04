@@ -137,12 +137,12 @@ export function legacyModerationStats(config) {
       byVerdict,
       cost: { total: null, byMode: { shadow: null, live: null } },
       tokens: { input: 0, output: 0 },
-      pending: { count: 0 },
+      pending: [],
       outages: [],
       readOnly: true,
     };
   } catch {
-    return { totalEvents: 0, byVerdict: {}, cost: { total: null, byMode: {} }, tokens: {}, pending: { count: 0 }, outages: [], readOnly: true };
+    return { totalEvents: 0, byVerdict: {}, cost: { total: null, byMode: {} }, tokens: {}, pending: [], outages: [], readOnly: true };
   } finally { db?.close(); }
 }
 
