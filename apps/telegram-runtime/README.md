@@ -66,19 +66,27 @@ the raw webhook JSON, headers or full Telegram update. The recovery states are:
 - `calling`: a provider boundary was crossed; after a stale lease this becomes
   `manual_review`, never a retry. Startup immediately treats any persisted
   `calling` record as that manual-review case.
+- `decision_ready`: the provider returned and the redacted decision plus fixed
+  Guard plan are durable, but no terminal enforcement receipt has been
+  recorded yet. Recovery never calls the provider again; it can create an
+  initial receipt or resume only a `planned` receipt. A Guard receipt that is
+  `calling` or `uncertain` is treated as an ambiguous Telegram boundary and is
+  never re-issued.
 - `manual_review`: transport/HTTP/malformed-provider outcomes, expired private
   snapshots and any ambiguous external boundary. No automatic provider or
   Telegram request is issued.
-- `resolved`: the safety decision is durable before normal Guard enforcement;
-  Guard's existing enforcement receipts remain authoritative and uncertain
-  Telegram actions are not replayed.
+- `resolved`: the durable decision has a terminal enforcement outcome (or was
+  an exempt pre-provider result). Guard's enforcement receipt remains
+  authoritative and uncertain Telegram actions are not replayed.
 
-The startup/timer worker drains only `safe_retry` jobs. Its lease/generation
-fence makes redelivery, a timer overlap or restart unable to create two active
-provider claims. The runtime's in-process `moderatorRecoveryStatus()` method is
-read-only and returns redacted state/counts without snapshot text. For an
-operator read-back, use `npm run status:moderator-recovery`; it opens the local
-runtime database read-only and never invokes a provider, Telegram or recovery.
+The startup/timer worker drains `safe_retry` jobs and durable `decision_ready`
+plans. Its lease/generation fence makes redelivery, a timer overlap or restart
+unable to create two active provider claims; the enforcement receipt is the
+separate fence for the first and only Guard action. The runtime's in-process
+`moderatorRecoveryStatus()` method is read-only and returns redacted
+state/counts without snapshot text. For an operator read-back, use `npm run
+status:moderator-recovery`; it opens the local runtime database read-only and
+never invokes a provider, Telegram or recovery.
 
 ## Explicit webhook operations
 

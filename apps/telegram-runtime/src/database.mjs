@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_runtime_inbound_update_receipts_recovery
 CREATE TABLE IF NOT EXISTS runtime_moderator_judgement_jobs (
   event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
   receipt_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_update_receipts(receipt_id),
-  state TEXT NOT NULL CHECK(state IN ('safe_retry', 'calling', 'manual_review', 'resolved')),
+  state TEXT NOT NULL CHECK(state IN ('safe_retry', 'calling', 'decision_ready', 'manual_review', 'resolved')),
   snapshot_json TEXT NOT NULL,
   snapshot_sha256 TEXT NOT NULL,
   snapshot_bytes INTEGER NOT NULL CHECK(snapshot_bytes > 0 AND snapshot_bytes <= 12288),
@@ -235,6 +235,54 @@ export function ensureRuntimeDatabaseSchema(db) {
   db.pragma('foreign_keys = ON');
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  // SQLite cannot extend a CHECK constraint in place. The immediately prior
+  // standalone schema lacked `decision_ready`; rebuild only that private queue
+  // while preserving every row and its inbound foreign keys. Its historical
+  // returned/no-receipt rows are precisely the old crash window: no Guard
+  // receipt exists, so no Guard call could have started and they can safely be
+  // resumed from the durable provider result.
+  const moderatorJobSql = db.prepare(`SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'runtime_moderator_judgement_jobs'`).get()?.sql || '';
+  if (!moderatorJobSql.includes("'decision_ready'")) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE runtime_moderator_judgement_jobs_recovery (
+          event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+          receipt_id TEXT NOT NULL UNIQUE REFERENCES runtime_inbound_update_receipts(receipt_id),
+          state TEXT NOT NULL CHECK(state IN ('safe_retry', 'calling', 'decision_ready', 'manual_review', 'resolved')),
+          snapshot_json TEXT NOT NULL,
+          snapshot_sha256 TEXT NOT NULL,
+          snapshot_bytes INTEGER NOT NULL CHECK(snapshot_bytes > 0 AND snapshot_bytes <= 12288),
+          snapshot_expires_at INTEGER NOT NULL,
+          provider_boundary TEXT NOT NULL CHECK(provider_boundary IN ('not_started', 'calling', 'returned', 'unknown')),
+          lease_id TEXT,
+          claim_generation INTEGER NOT NULL CHECK(claim_generation >= 0),
+          lease_expires_at INTEGER,
+          safe_retry_count INTEGER NOT NULL DEFAULT 0 CHECK(safe_retry_count >= 0),
+          next_attempt_at INTEGER NOT NULL,
+          decision_json TEXT,
+          result_json TEXT,
+          error_code TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          resolved_at INTEGER
+        );
+        INSERT INTO runtime_moderator_judgement_jobs_recovery
+          SELECT * FROM runtime_moderator_judgement_jobs;
+        DROP TABLE runtime_moderator_judgement_jobs;
+        ALTER TABLE runtime_moderator_judgement_jobs_recovery RENAME TO runtime_moderator_judgement_jobs;
+        CREATE INDEX idx_runtime_moderator_judgement_jobs_ready
+          ON runtime_moderator_judgement_jobs(state, next_attempt_at, lease_expires_at);
+      `);
+      db.prepare(`UPDATE runtime_moderator_judgement_jobs
+        SET state = 'decision_ready', resolved_at = NULL
+        WHERE state = 'resolved' AND provider_boundary = 'returned' AND decision_json IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM runtime_moderation_enforcement_receipts enforcement
+            WHERE enforcement.event_id = runtime_moderator_judgement_jobs.event_id
+          )`).run();
+    })();
+  }
   // The pre-Guard standalone runtime created this table without warning state.
   // Keep the expansion guarded and additive so an existing isolated runtime DB
   // opens safely without a destructive table rebuild.
@@ -358,7 +406,17 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     SET state = 'manual_review', provider_boundary = ?, lease_id = NULL, lease_expires_at = NULL,
       error_code = ?, updated_at = ?
     WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
+  const markModeratorDecisionReady = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'decision_ready', provider_boundary = 'returned', lease_id = NULL, lease_expires_at = NULL,
+      decision_json = ?, result_json = ?, error_code = NULL, updated_at = ?, resolved_at = NULL
+    WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
   const resolveModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'resolved', updated_at = ?, resolved_at = ?
+    WHERE event_id = ? AND state = 'decision_ready'`);
+  const manualReviewDecisionReadyModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
+    SET state = 'manual_review', error_code = ?, updated_at = ?
+    WHERE event_id = ? AND state = 'decision_ready'`);
+  const resolvePreProviderModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
     SET state = 'resolved', provider_boundary = ?, lease_id = NULL, lease_expires_at = NULL,
       decision_json = ?, result_json = ?, error_code = NULL, updated_at = ?, resolved_at = ?
     WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
@@ -383,6 +441,8 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     WHERE state = 'safe_retry' AND next_attempt_at <= ? AND snapshot_expires_at > ?
       AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
     ORDER BY next_attempt_at ASC, created_at ASC, event_id ASC LIMIT 1`);
+  const nextDecisionReadyModeratorJob = db.prepare(`SELECT event_id FROM runtime_moderator_judgement_jobs
+    WHERE state = 'decision_ready' ORDER BY updated_at ASC, created_at ASC, event_id ASC LIMIT 1`);
   const quarantineExpiredModeratorRetries = db.prepare(`UPDATE runtime_moderator_judgement_jobs
     SET state = 'manual_review', provider_boundary = 'not_started', lease_id = NULL, lease_expires_at = NULL,
       error_code = 'snapshot_expired', updated_at = ?
@@ -398,7 +458,8 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const insertModeration = db.prepare(`INSERT INTO runtime_moderation_records
     (id, event_id, chat_id, message_id, user_id, verdict, confidence, reason, mode, action_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id) DO NOTHING`);
   const questionClaim = db.prepare(`INSERT INTO runtime_assistant_question_claims
     (chat_id, message_id, status, claimed_at) VALUES (?, ?, 'processing', ?)
     ON CONFLICT(chat_id, message_id) DO NOTHING`);
@@ -504,6 +565,9 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const completeEnforcementReceipt = db.prepare(`UPDATE runtime_moderation_enforcement_receipts
     SET status = ?, receipt_json = ?, error_code = ?, updated_at = ?, completed_at = ?
     WHERE event_id = ? AND claim_id = ? AND claim_generation = ? AND status IN ('planned', 'calling')`);
+  const resumePlannedEnforcement = db.prepare(`UPDATE runtime_moderation_enforcement_receipts
+    SET claim_id = ?, claim_generation = claim_generation + 1, updated_at = ?
+    WHERE event_id = ? AND status = 'planned'`);
   const autoUnpin = db.prepare(`SELECT * FROM runtime_moderation_auto_unpins
     WHERE chat_id = ? AND message_id = ?`);
   const createAutoUnpin = db.prepare(`INSERT INTO runtime_moderation_auto_unpins
@@ -704,16 +768,49 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       ).changes === 1;
       return { marked, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
     },
+    /** Completes a pre-provider terminal outcome such as an exempt sender. */
     resolveModeratorJudgement({ claim: judgementClaim, decision = null, result = null, providerBoundary = 'returned' }) {
       if (!judgementClaim) return { resolved: false, row: null };
       const boundary = ['not_started', 'returned'].includes(providerBoundary) ? providerBoundary : 'returned';
       const at = now();
-      const resolved = resolveModeratorJob.run(
+      const resolved = resolvePreProviderModeratorJob.run(
         boundary,
         decision == null ? null : JSON.stringify(decision), result == null ? null : JSON.stringify(result), at, at,
         judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
       ).changes === 1;
       return { resolved, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    /**
+     * Persists a provider-returned decision before any Guard effect. This is
+     * deliberately not terminal: recovery may finish only a still-planned
+     * enforcement receipt, never a receipt that reached `calling`/`uncertain`.
+     */
+    markModeratorDecisionReady({ claim: judgementClaim, decision = null, result = null }) {
+      if (!judgementClaim) return { ready: false, row: null };
+      const ready = markModeratorDecisionReady.run(
+        decision == null ? null : JSON.stringify(decision), result == null ? null : JSON.stringify(result), now(),
+        judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
+      ).changes === 1;
+      return { ready, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
+    },
+    completeModeratorDecision({ eventId }) {
+      const normalizedEventId = String(eventId || '');
+      if (!normalizedEventId) return { resolved: false, row: null };
+      const at = now();
+      const resolved = resolveModeratorJob.run(at, at, normalizedEventId).changes === 1;
+      return { resolved, row: moderatorJob.get(normalizedEventId) || null };
+    },
+    manualReviewDecisionReadyModeratorJudgement({ eventId, errorCode = 'durable_decision_invalid' }) {
+      const normalizedEventId = String(eventId || '');
+      if (!normalizedEventId) return { marked: false, row: null };
+      const marked = manualReviewDecisionReadyModeratorJob.run(
+        String(errorCode).slice(0, 120), now(), normalizedEventId,
+      ).changes === 1;
+      return { marked, row: moderatorJob.get(normalizedEventId) || null };
+    },
+    nextDecisionReadyModeratorJudgement() {
+      const candidate = nextDecisionReadyModeratorJob.get();
+      return candidate ? moderatorJob.get(String(candidate.event_id)) || null : null;
     },
     /** Calling means an outcome may be externally ambiguous; it is never reclaimed for a provider retry. */
     quarantineExpiredModeratorCalls({ allCalling = false } = {}) {
@@ -845,6 +942,19 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         enforcementClaim.eventId, enforcementClaim.claimId, enforcementClaim.claimGeneration,
       ).changes === 1;
       return { completed, row: enforcementReceipt.get(enforcementClaim.eventId) || null };
+    },
+    /** A planned receipt has not crossed a Telegram boundary and may be reclaimed. */
+    resumePlannedModerationEnforcement({ eventId }) {
+      const normalizedEventId = String(eventId || '');
+      if (!normalizedEventId) return { claimed: false, claim: null, row: null };
+      const claimId = randomUUID();
+      const claimed = resumePlannedEnforcement.run(claimId, now(), normalizedEventId).changes === 1;
+      const row = enforcementReceipt.get(normalizedEventId) || null;
+      return {
+        claimed,
+        claim: claimed ? { eventId: normalizedEventId, claimId, claimGeneration: row?.claim_generation } : null,
+        row,
+      };
     },
     getModerationEnforcement(eventId) { return enforcementReceipt.get(String(eventId)) || null; },
     claimAutoUnpin({ chatId, messageId, eventId }) {
