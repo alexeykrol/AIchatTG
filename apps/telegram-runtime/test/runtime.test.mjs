@@ -99,6 +99,9 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /provider requires/);
+  assert.throws(() => loadRuntimeConfig({
+    TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH: '/tmp/unreviewed-course-content.manifest.json',
+  }, { cwd: '/tmp/aichattg-test' }), /must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT/);
 });
 
 test('disabled or invalid provider adapters cannot call fetch', async () => {

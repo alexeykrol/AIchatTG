@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { ASSISTANT_SOURCE_PACKAGES } from '@aichattg/telegram-core';
 import { validateProviderRuntimeConfig } from './provider-adapter.mjs';
 
@@ -44,9 +44,18 @@ function configuredDigest(env, name) {
   return String(env[name] || '').trim().toLowerCase();
 }
 
-function knowledgeAdmission(env, cwd, { sourceId, pathName, digestName, defaultPath }) {
+function pathWithin(root, candidate, name) {
+  const resolved = resolve(candidate);
+  const pathRelative = relative(root, resolved);
+  if (pathRelative === '..' || pathRelative.startsWith(`..${sep}`) || pathRelative === '') {
+    throw new Error(`${name} must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT`);
+  }
+  return resolved;
+}
+
+function knowledgeAdmission(env, cwd, root, { sourceId, pathName, digestName, defaultPath }) {
   return {
-    manifestPath: resolve(cwd, String(env[pathName] || defaultPath)),
+    manifestPath: pathWithin(root, resolve(cwd, String(env[pathName] || defaultPath)), pathName),
     expectedIdentity: {
       sourceId,
       manifestDigest: configuredDigest(env, digestName),
@@ -74,6 +83,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     throw new Error('webhook registration and command setup are separate cutover actions, never startup behavior');
   }
   const ingressEnabled = boolean(env, 'TELEGRAM_RUNTIME_INGRESS_ENABLED', false);
+  const knowledgeRoot = resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge'));
   const moderator = roleConfig(env, 'MODERATOR');
   const assistant = roleConfig(env, 'ASSISTANT');
   if (ingressEnabled) {
@@ -96,15 +106,15 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     dataRoot: resolve(cwd, String(env.TELEGRAM_RUNTIME_DATA_ROOT || 'data/telegram-runtime')),
     databasePath: resolve(cwd, String(env.TELEGRAM_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.db')),
     knowledge: {
-      root: resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge')),
+      root: knowledgeRoot,
       admissions: {
-        [ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT]: knowledgeAdmission(env, cwd, {
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT]: knowledgeAdmission(env, cwd, knowledgeRoot, {
           sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT,
           pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH',
           digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_SHA256',
           defaultPath: 'data/knowledge/course-content.manifest.json',
         }),
-        [ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS]: knowledgeAdmission(env, cwd, {
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS]: knowledgeAdmission(env, cwd, knowledgeRoot, {
           sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS,
           pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_PATH',
           digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_SHA256',
