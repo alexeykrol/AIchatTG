@@ -1,6 +1,6 @@
 import { resolveGatekeeperDataPaths } from './data-paths.mjs';
 import {
-  validateApprovedPublicBaseUrl,
+  validateConfiguredPublicOrigin,
   validateApprovedZapierUrl,
 } from './network-policy.mjs';
 import { DEFAULT_SCENARIO_PATH } from './scenario.mjs';
@@ -17,6 +17,8 @@ const RETIRED_EXTERNAL_WEBHOOK_ENV = [
 ];
 
 const RETIRED_DRAFT_SERVER_ENV = 'GATEKEEPER_ALLOW_DRAFT_SCENARIO';
+const RETIRED_PUBLIC_BASE_URL_ENV = 'GATEKEEPER_PUBLIC_BASE_URL';
+const GATEKEEPER_PUBLIC_BASE_PATH = '/gatekeeper';
 
 function required(env, name) {
   const value = String(env[name] || '').trim();
@@ -63,18 +65,22 @@ function zapierUrl(env, name, { enabled }) {
   }
 }
 
-function sitePublicBaseUrl(env, { enabled }) {
-  const name = 'GATEKEEPER_PUBLIC_BASE_URL';
-  const raw = String(env[name] || '').replace(/\/$/u, '');
+function sitePublicOrigin(env, { enabled }) {
+  const name = 'GATEKEEPER_PUBLIC_ORIGIN';
+  const raw = String(env[name] || '');
   if (!raw) {
     if (enabled) throw new Error(`${name} is required when GATEKEEPER_SITE_ENABLED=true`);
     return '';
   }
   try {
-    return validateApprovedPublicBaseUrl(raw, name);
+    return validateConfiguredPublicOrigin(raw, name);
   } catch (error) {
-    throw new Error(`${name} must be the approved public HTTPS origin: ${error.message}`);
+    throw new Error(`${name} must be a canonical public HTTPS origin: ${error.message}`);
   }
+}
+
+function gatekeeperBindHost(env) {
+  return parseBoolean(env, 'GATEKEEPER_CONTAINER_BIND', false) ? '0.0.0.0' : '127.0.0.1';
 }
 
 function parsePositiveIntegerId(value, name) {
@@ -104,6 +110,9 @@ export function loadConfig(env = process.env) {
   }
   if (Object.hasOwn(env, RETIRED_DRAFT_SERVER_ENV)) {
     throw new Error(`${RETIRED_DRAFT_SERVER_ENV} is retired; draft scenarios are offline-simulator only`);
+  }
+  if (Object.hasOwn(env, RETIRED_PUBLIC_BASE_URL_ENV)) {
+    throw new Error(`${RETIRED_PUBLIC_BASE_URL_ENV} is retired; configure GATEKEEPER_PUBLIC_ORIGIN through AIchatTG Compose instead`);
   }
   const { dataRoot, databasePath } = resolveGatekeeperDataPaths(env);
   const botUsername = required(env, 'GATEKEEPER_BOT_USERNAME').replace(/^@/, '');
@@ -135,7 +144,7 @@ export function loadConfig(env = process.env) {
   if (siteEnabled && !siteWebhookSecret) {
     throw new Error('GATEKEEPER_SITE_WEBHOOK_SECRET is required when GATEKEEPER_SITE_ENABLED=true');
   }
-  const publicBaseUrl = sitePublicBaseUrl(env, { enabled: siteEnabled });
+  const publicOrigin = sitePublicOrigin(env, { enabled: siteEnabled });
   const zapierEnabled = parseBoolean(env, 'GATEKEEPER_ZAPIER_ENABLED');
   const zapierSiteInviteUrl = zapierUrl(env, 'GATEKEEPER_ZAPIER_SITE_INVITE_URL', {
     enabled: zapierEnabled,
@@ -158,11 +167,13 @@ export function loadConfig(env = process.env) {
     tributeChannelId: normalizedTributeChannelId,
     linkSigningSecret,
     port: parseInteger(env, 'GATEKEEPER_PORT', 8787, { max: 65_535 }),
+    bindHost: gatekeeperBindHost(env),
     dataRoot,
     databasePath,
     scenarioPath: DEFAULT_SCENARIO_PATH,
     startTokenTtlSeconds: parseInteger(env, 'GATEKEEPER_START_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60),
-    publicBaseUrl,
+    publicOrigin,
+    publicBaseUrl: publicOrigin ? `${publicOrigin}${GATEKEEPER_PUBLIC_BASE_PATH}` : '',
     siteEnabled,
     siteWebhookSecret,
     siteTokenTtlSeconds: parseInteger(env, 'GATEKEEPER_SITE_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60, {

@@ -11,7 +11,7 @@ function env(overrides = {}) {
     GATEKEEPER_TRIBUTE_API_KEY: 'tribute-runtime-api-key',
     GATEKEEPER_TRIBUTE_SUBSCRIPTION_IDS: '1644',
     GATEKEEPER_LINK_SIGNING_SECRET: 'link-signing-secret-at-least-32-chars',
-    GATEKEEPER_PUBLIC_BASE_URL: 'https://news.questtales.com',
+    GATEKEEPER_PUBLIC_ORIGIN: 'https://gatekeeper.example.test',
     ...overrides,
   };
 }
@@ -70,7 +70,7 @@ describe('webhook registration preflight', () => {
     assert.equal(providerOptions.allowDraftScenario, false);
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], {
-      url: 'https://news.questtales.com/webhooks/telegram',
+      url: 'https://gatekeeper.example.test/gatekeeper/webhooks/telegram',
       secret_token: 'telegram_secret',
       allowed_updates: ['message', 'chat_member', 'callback_query'],
       drop_pending_updates: false,

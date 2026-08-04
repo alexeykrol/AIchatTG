@@ -3,7 +3,6 @@ import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 
 export const APPROVED_ZAPIER_HOSTS = Object.freeze(['hooks.zapier.com']);
-export const APPROVED_PUBLIC_BASE_HOSTS = Object.freeze(['news.questtales.com']);
 
 const blockedAddresses = new BlockList();
 const blockedMappedIpv6Addresses = new BlockList();
@@ -88,16 +87,32 @@ export function validateApprovedZapierUrl(raw, name = 'Zapier URL') {
   return url.toString();
 }
 
-export function validateApprovedPublicBaseUrl(raw, name = 'public base URL') {
+export function validateConfiguredPublicOrigin(raw, name = 'public origin') {
   const url = parseBoundedUrl(raw, name);
   assertHttpsAuthority(url, name);
-  if (!APPROVED_PUBLIC_BASE_HOSTS.includes(url.hostname.toLowerCase())) {
-    throw policyError(`${name} hostname is not approved`);
-  }
   if (url.pathname !== '/' || url.search) {
     throw policyError(`${name} must be an origin without a path or query`);
   }
-  return url.toString().replace(/\/$/u, '');
+  const hostname = url.hostname.toLowerCase();
+  const literalHostname = hostname.replace(/^\[|\]$/gu, '');
+  if (isIP(literalHostname)) {
+    throw policyError(`${name} must use a DNS hostname, not an IP literal`);
+  }
+  if (!isCanonicalDnsHostname(hostname)) {
+    throw policyError(`${name} must use a canonical fully-qualified DNS hostname`);
+  }
+  const canonicalOrigin = url.origin;
+  if (raw !== canonicalOrigin && raw !== `${canonicalOrigin}/`) {
+    throw policyError(`${name} must be canonical HTTPS origin ${canonicalOrigin}`);
+  }
+  return canonicalOrigin;
+}
+
+function isCanonicalDnsHostname(hostname) {
+  if (hostname.length > 253 || !hostname.includes('.')) return false;
+  return hostname.split('.').every((label) => (
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label)
+  ));
 }
 
 export function isPublicNetworkAddress(address) {

@@ -112,21 +112,21 @@ These steps are intentionally not authorized by this candidate alone.
    News host/path rules. Register or switch a Telegram webhook only under its
    own explicit lease.
 
-## Known blockers before route activation
+## Gatekeeper configuration gate before route activation
 
-Two code-level conditions are intentionally not papered over by this Compose
-file:
+Gatekeeper keeps its direct local-process default on `127.0.0.1`. Only the
+dedicated AIchatTG Compose service sets `GATEKEEPER_CONTAINER_BIND=true`, which
+selects the reviewed `0.0.0.0` container listener on the attached Docker
+networks; no arbitrary bind address is configurable. Compose also derives the
+canonical `GATEKEEPER_PUBLIC_ORIGIN` from the same controller-selected
+`AICHATTG_FQDN` used in the Gatekeeper Traefik rule. Gatekeeper rejects IP
+literals, non-FQDN names, ports, credentials, paths, queries, and
+non-canonical spellings, then appends its fixed `/gatekeeper` public path.
 
-1. `apps/gatekeeper/src/server.mjs` binds its HTTP server to `127.0.0.1`.
-   A separate Traefik container cannot reach that listener through
-   `root_default`. Keep `AICHATTG_GATEKEEPER_ROUTING_ENABLED=false` until an
-   accepted Gatekeeper runtime change supplies a reviewed non-loopback ingress
-   boundary and tests it.
-2. `apps/gatekeeper/src/config.mjs` currently accepts
-   `GATEKEEPER_PUBLIC_BASE_URL` only as `https://news.questtales.com` when the
-   site flow is enabled. Do not enable Gatekeeper site routing for a new
-   `AICHATTG_FQDN` until the owning application workstream changes that policy
-   and the controller accepts it.
+These code-level corrections do not enable routing: keep
+`AICHATTG_GATEKEEPER_ROUTING_ENABLED=false` until the controller accepts an
+exact candidate, the Product Owner approves the FQDN and route, and a
+one-time deployment lease authorizes activation.
 
 The Telegram runtime can start with ingress disabled, but enabling
 `AICHATTG_RUNTIME_ROUTING_ENABLED` still requires its own approved FQDN,

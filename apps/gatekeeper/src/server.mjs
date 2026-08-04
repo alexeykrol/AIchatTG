@@ -29,8 +29,8 @@ const telegram = new TelegramApi({ botToken: config.botToken });
 const service = new GatekeeperService({ config, store, telegram, scenarioProvider });
 const server = createGatekeeperHttpServer({ config, service, store });
 
-server.listen(config.port, '127.0.0.1', () => {
-  console.log(`[gatekeeper] listening on http://127.0.0.1:${config.port}`);
+server.listen(config.port, config.bindHost, () => {
+  console.log(`[gatekeeper] listening on http://${config.bindHost}:${config.port}`);
 });
 
 function shutdown(signal) {

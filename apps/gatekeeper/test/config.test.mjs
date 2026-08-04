@@ -32,6 +32,9 @@ describe('loadConfig', () => {
     assert.equal(value.zapierAuthToken, '');
     assert.equal(value.adminSettingsToken, '');
     assert.equal(value.zapierTimeoutMs, 10000);
+    assert.equal(value.bindHost, '127.0.0.1');
+    assert.equal(value.publicOrigin, '');
+    assert.equal(value.publicBaseUrl, '');
     assert.match(value.scenarioPath, /ONBOARDING_SCENARIO\.md$/u);
     assert.equal(Object.hasOwn(value, 'allowDraftScenario'), false);
   });
@@ -75,12 +78,13 @@ describe('loadConfig', () => {
       GATEKEEPER_SITE_ENABLED: 'true',
       GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
       GATEKEEPER_SITE_TOKEN_TTL_SECONDS: '86400',
-      GATEKEEPER_PUBLIC_BASE_URL: 'https://news.questtales.com/',
+      GATEKEEPER_PUBLIC_ORIGIN: 'https://gatekeeper.example.test/',
     }));
     assert.equal(value.siteEnabled, true);
     assert.equal(value.siteWebhookSecret, 'site-secret-that-is-at-least-32-characters');
     assert.equal(value.siteTokenTtlSeconds, 86400);
-    assert.equal(value.publicBaseUrl, 'https://news.questtales.com');
+    assert.equal(value.publicOrigin, 'https://gatekeeper.example.test');
+    assert.equal(value.publicBaseUrl, 'https://gatekeeper.example.test/gatekeeper');
     assert.throws(
       () => loadConfig(env({ GATEKEEPER_SITE_ENABLED: 'true' })),
       /SITE_WEBHOOK_SECRET is required/u,
@@ -101,23 +105,27 @@ describe('loadConfig', () => {
         GATEKEEPER_SITE_ENABLED: 'true',
         GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
       })),
-      /PUBLIC_BASE_URL is required/u,
+      /PUBLIC_ORIGIN is required/u,
     );
     assert.throws(
       () => loadConfig(env({
         GATEKEEPER_SITE_ENABLED: 'true',
         GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
-        GATEKEEPER_PUBLIC_BASE_URL: 'http://localhost:8787',
+        GATEKEEPER_PUBLIC_ORIGIN: 'http://localhost:8787',
       })),
-      /PUBLIC_BASE_URL must be the approved public HTTPS origin/u,
+      /PUBLIC_ORIGIN must be a canonical public HTTPS origin/u,
     );
     assert.throws(
       () => loadConfig(env({
         GATEKEEPER_SITE_ENABLED: 'true',
         GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
-        GATEKEEPER_PUBLIC_BASE_URL: 'https://news.questtales.com/prefix',
+        GATEKEEPER_PUBLIC_ORIGIN: 'https://gatekeeper.example.test/prefix',
       })),
       /without a path or query/u,
+    );
+    assert.throws(
+      () => loadConfig(env({ GATEKEEPER_PUBLIC_BASE_URL: 'https://legacy.example.test' })),
+      /PUBLIC_BASE_URL is retired/u,
     );
     assert.throws(
       () => loadConfig(env({ GATEKEEPER_SITE_TOKEN_TTL_SECONDS: '2592001' })),
@@ -190,7 +198,7 @@ describe('loadConfig', () => {
     }
   });
 
-  test('allows only the canonical public base origin and rejects special-use literals', () => {
+  test('accepts a canonical configured public origin and rejects unsafe values', () => {
     const site = {
       GATEKEEPER_SITE_ENABLED: 'true',
       GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
@@ -203,14 +211,23 @@ describe('loadConfig', () => {
       'https://[::1]',
       'https://[fd00::1]',
       'https://[fe80::1]',
-      'https://news.questtales.com.evil.example',
-      'https://news.questtales.com:444',
+      'https://localhost',
+      'https://gatekeeper.example.test.evil.example/prefix',
+      'https://gatekeeper.example.test:444',
     ]) {
       assert.throws(
-        () => loadConfig(env({ ...site, GATEKEEPER_PUBLIC_BASE_URL: destination })),
-        /approved public HTTPS origin/u,
+        () => loadConfig(env({ ...site, GATEKEEPER_PUBLIC_ORIGIN: destination })),
+        /canonical public HTTPS origin/u,
         destination,
       );
     }
+  });
+
+  test('allows only the Compose-reviewed container bind override', () => {
+    assert.equal(loadConfig(env({ GATEKEEPER_CONTAINER_BIND: 'true' })).bindHost, '0.0.0.0');
+    assert.throws(
+      () => loadConfig(env({ GATEKEEPER_CONTAINER_BIND: 'yes' })),
+      /GATEKEEPER_CONTAINER_BIND must be true or false/u,
+    );
   });
 });

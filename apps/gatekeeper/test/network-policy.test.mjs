@@ -5,7 +5,7 @@ import {
   isPublicNetworkAddress,
   postApprovedJson,
   resolveHostAddresses,
-  validateApprovedPublicBaseUrl,
+  validateConfiguredPublicOrigin,
   validateApprovedZapierUrl,
 } from '../src/network-policy.mjs';
 
@@ -16,8 +16,8 @@ describe('outbound network policy', () => {
       'https://hooks.zapier.com/hooks/catch/123/opaque',
     );
     assert.equal(
-      validateApprovedPublicBaseUrl('https://news.questtales.com/'),
-      'https://news.questtales.com',
+      validateConfiguredPublicOrigin('https://gatekeeper.example.test/'),
+      'https://gatekeeper.example.test',
     );
     for (const destination of [
       'http://hooks.zapier.com/hook',
@@ -30,9 +30,17 @@ describe('outbound network policy', () => {
       assert.throws(() => validateApprovedZapierUrl(destination), /network policy rejected/u);
     }
     assert.throws(
-      () => validateApprovedPublicBaseUrl('https://news.questtales.com/private'),
+      () => validateConfiguredPublicOrigin('https://gatekeeper.example.test/private'),
       /origin without a path or query/u,
     );
+    for (const destination of [
+      'https://GATEKEEPER.example.test',
+      'https://localhost',
+      'https://127.0.0.1',
+      'https://[::1]',
+    ]) {
+      assert.throws(() => validateConfiguredPublicOrigin(destination), /network policy rejected/u);
+    }
   });
 
   test('rejects private, metadata, carrier, documentation and special-use addresses', () => {

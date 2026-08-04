@@ -123,7 +123,7 @@ HTTP-ошибки) принадлежит версии приложения и �
 | `GATEKEEPER_SITE_ENABLED` | Включает отдельный Site ingress | реализовано, default `false` |
 | `GATEKEEPER_SITE_WEBHOOK_SECRET` | Отдельная HMAC-подпись Site raw body | реализовано, runtime secret |
 | `GATEKEEPER_SITE_TOKEN_TTL_SECONDS` | Срок персональной email-ссылки | реализовано, default `604800` |
-| `GATEKEEPER_PUBLIC_BASE_URL` | Публичная HTTPS-база персональной ссылки | реализовано, только `https://news.questtales.com` |
+| `GATEKEEPER_PUBLIC_ORIGIN` | Канонический HTTPS origin персональной ссылки | реализовано, Compose получает его из `AICHATTG_FQDN`; путь `/gatekeeper` фиксирован в коде |
 | `coinbase_webhook_contract` | Подпись, схема, идемпотентность и правила RUB/crypto-ветки | `[ЗАГЛУШКА]` |
 | `GATEKEEPER_ZAPIER_SITE_INVITE_URL` | Письмо site-ветки с персональной ссылкой | реализовано, только HTTPS `hooks.zapier.com` |
 | `GATEKEEPER_ZAPIER_COMPLETION_URL` | Завершение обеих активных веток | реализовано, только HTTPS `hooks.zapier.com` |

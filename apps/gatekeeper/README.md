@@ -64,16 +64,13 @@ restart. Missing or invalid content fails closed and never falls back to a
 cached version. A single immutable snapshot is used for all actions caused by
 one input.
 
-The reserved production canonical URL for Tribute is:
+The later approved public URLs use the controller-selected `AICHATTG_FQDN` and
+the fixed `/gatekeeper` Compose route. This repository deliberately does not
+select a hostname:
 
 ```text
-https://news.questtales.com/webhooks/tribute
-```
-
-The separate reserved production URL for the site is:
-
-```text
-https://news.questtales.com/webhooks/site-registration
+https://<AICHATTG_FQDN>/gatekeeper/webhooks/tribute
+https://<AICHATTG_FQDN>/gatekeeper/webhooks/site-registration
 ```
 
 These endpoints deliberately do not share a payload or a signing secret.
@@ -123,8 +120,9 @@ special-use address. The HTTPS connection is pinned to a validated answer while
 retaining `hooks.zapier.com` for TLS SNI/certificate validation, so the
 transport cannot silently re-resolve to a different address. Redirect following
 is disabled. There is no `NODE_ENV` or local-test bypass in runtime
-configuration. The personal-link origin is independently restricted to exact
-`https://news.questtales.com`.
+configuration. The personal-link origin is a canonical HTTPS FQDN supplied
+only by AIchatTG Compose from the same `AICHATTG_FQDN` used in its Traefik
+router; Gatekeeper appends the fixed `/gatekeeper` public base path.
 
 The handler follows Tribute's official webhook contract. It verifies the exact
 raw request bytes with `HMAC-SHA256(GATEKEEPER_TRIBUTE_API_KEY, raw-body)` and
@@ -158,12 +156,15 @@ GATEKEEPER_LINK_SIGNING_SECRET         required, at least 32 characters
 GATEKEEPER_DATA_ROOT                   default <this-module>/data
 GATEKEEPER_DATABASE_PATH               default gatekeeper.sqlite below data root
 GATEKEEPER_PORT                        default 8787
+GATEKEEPER_CONTAINER_BIND              default false (loopback); only the AIchatTG
+                                       Compose service sets its reviewed true value
 GATEKEEPER_START_TOKEN_TTL_SECONDS     default 604800
 GATEKEEPER_SITE_ENABLED                default false
 GATEKEEPER_SITE_WEBHOOK_SECRET         required when Site is enabled, at least 32 characters
 GATEKEEPER_SITE_TOKEN_TTL_SECONDS      default 604800, range 300..2592000
-GATEKEEPER_PUBLIC_BASE_URL             exact https://news.questtales.com,
-                                       required when Site is enabled
+GATEKEEPER_PUBLIC_ORIGIN               canonical HTTPS FQDN origin, required when
+                                       Site is enabled; Compose derives it from
+                                       AICHATTG_FQDN and Gatekeeper fixes /gatekeeper
 GATEKEEPER_ZAPIER_ENABLED              default false
 GATEKEEPER_ZAPIER_SITE_INVITE_URL      required when Zapier is enabled,
                                        HTTPS hooks.zapier.com only

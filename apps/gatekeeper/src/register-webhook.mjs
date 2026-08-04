@@ -17,7 +17,7 @@ export async function registerWebhook({
   const scenario = scenarioProvider.load();
   if (scenario.status !== 'ready') throw new Error('webhook registration requires a ready Gatekeeper scenario');
   if (!config.publicBaseUrl.startsWith('https://')) {
-    throw new Error('GATEKEEPER_PUBLIC_BASE_URL must be an HTTPS URL');
+    throw new Error('GATEKEEPER_PUBLIC_ORIGIN must be a configured HTTPS origin');
   }
 
   const telegram = telegramFactory({ botToken: config.botToken });
