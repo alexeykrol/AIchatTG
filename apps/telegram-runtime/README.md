@@ -29,6 +29,15 @@ Source-grounded routes are also disabled until each source package has an
 AIchatTG-owned, checked knowledge admission. The checked-in
 [`data/knowledge/manifest.json`](../../data/knowledge/manifest.json) contains
 no course material; it documents the one-way import contract. It cannot read a
-News path or database.
+News path or database. `TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED` defaults
+to `false`: until a separately reviewed source snapshot is admitted, `/ask`
+uses only code-owned help, public self-profile and safe boundary replies and
+does not call the Assistant provider or read knowledge.
+
+Assistant dialogue is scoped to one chat and Telegram user. Successful final
+delivery is the only point at which a turn enters the local SQLite dialogue;
+the configurable TTL and turn cap trim it deterministically. A failed or
+ambiguous Telegram delivery is fenced in the inbound receipt and is never
+auto-replayed.
 
 See [SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md), [the extraction map](../../docs/MODERATOR_ASSISTANT_EXTRACTION.md), and [the provider/knowledge contract](../../docs/PROVIDER_KNOWLEDGE_PORTABILITY.md).

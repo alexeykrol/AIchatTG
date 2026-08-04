@@ -13,9 +13,12 @@ import {
 } from '@aichattg/telegram-core';
 import { createHash } from 'node:crypto';
 import { createProviderAdapter, isProviderUnavailableError } from './provider-adapter.mjs';
+import {
+  ASSISTANT_EMPTY_ASK_TEXT,
+  ASSISTANT_HELP_TEXT,
+  assistantDeterministicReply,
+} from './assistant-policy.mjs';
 
-const HELP_TEXT = 'Используйте /ask <вопрос>, чтобы обратиться к ассистенту.';
-const EMPTY_ASK_TEXT = 'После /ask напишите ваш вопрос.';
 const WARNING_FIRST = 'Сообщение удалено за нарушение правил общения. Решения модератора не обсуждаются и не обжалуются. Повторное нарушение или попытка продолжить спор приведёт к последнему предупреждению.';
 const WARNING_FINAL = 'Это второе и последнее предупреждение. Следующее нарушение или продолжение спора приведёт к немедленной блокировке.';
 
@@ -80,6 +83,32 @@ function redactedActionResult(result, fallback) {
     error: String(result?.error || result?.skipped || fallback).slice(0, 120),
     uncertain: result?.uncertain === true,
   };
+}
+
+function assistantDeliveryReceipt(result) {
+  if (!result?.ok) throw new Error(`assistant_delivery_failed:${String(result?.error || result?.skipped || 'unknown').slice(0, 80)}`);
+  const messageId = result?.data?.message_id ?? result?.messageId ?? null;
+  return {
+    ok: true,
+    ...(messageId == null ? {} : { messageId: String(messageId) }),
+  };
+}
+
+// These exits are entirely local: they reach neither the answer model nor the
+// Telegram delivery adapter. A malformed/forbidden route or absent admitted
+// snapshot must not consume a user's cooldown or daily quota. Provider transport
+// errors deliberately stay outside this set because a remote call can be paid or
+// otherwise ambiguous even when no Telegram message was attempted.
+function isDefinitiveAssistantRoutingExit(errorCode) {
+  const code = String(errorCode || '');
+  return code === 'assistant_route_invalid'
+    || code === 'course_operations_route_required'
+    || code === 'knowledge_unavailable'
+    || code === 'knowledge_adapter_missing'
+    || code === 'knowledge_source_invalid'
+    || code === 'knowledge_source_unavailable'
+    || code === 'knowledge_identity_missing'
+    || code === 'knowledge_identity_mismatch';
 }
 
 function applyTelegramSafetySignals(config, decision, comment) {
@@ -412,12 +441,16 @@ export function createTelegramRuntime({
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
-    const receipt = await assistantTelegram.sendMessage({
+    const transport = await assistantTelegram.sendMessage({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
     });
-    store.recordAssistantTurn({
+    const receipt = assistantDeliveryReceipt(transport);
+    store.recordBoundedAssistantTurn({
       ...question, eventId, question: question.text, answer: answer.text.trim(),
       modelId: answer.modelId, receipt, route,
+    }, {
+      maxTurns: config.assistantDialogueTurnLimit,
+      ttlSeconds: config.assistantDialogueTtlSec,
     });
     return { kind: 'answered', receipt, route };
   }
@@ -435,17 +468,40 @@ export function createTelegramRuntime({
     if (!questionClaim.claimed) return { kind: 'duplicate_question', status: questionClaim.existing?.status || 'unknown' };
     try {
       if (question.command === 'help') {
-        const result = await sendAssistantTurn(eventId, question, { text: HELP_TEXT }, 'command:help');
+        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_HELP_TEXT }, 'command:help');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'help' };
       }
       if (!question.text) {
-        const result = await sendAssistantTurn(eventId, question, { text: EMPTY_ASK_TEXT }, 'command:ask_empty');
+        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_EMPTY_ASK_TEXT }, 'command:ask_empty');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'ask_empty' };
       }
+      const request = store.reserveAssistantRequest({
+        eventId,
+        chatId: question.chatId,
+        userId: question.userId,
+        cooldownSec: config.assistantCooldownSec,
+        dailyCap: config.assistantDailyPerUser,
+      });
+      if (!request.allowed) {
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: request.reason });
+        return { kind: 'skipped', reason: request.reason };
+      }
+      // During extraction no course/index source package is admitted. Public
+      // identity and boundary replies remain useful without allowing a provider
+      // to fill the missing corpus from general knowledge.
+      if (config.assistantKnowledgeEnabled !== true) {
+        const deterministic = assistantDeterministicReply(question.text);
+        const result = await sendAssistantTurn(eventId, question, { text: deterministic.text }, deterministic.route);
+        store.completeAssistantRequest(eventId);
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        return result;
+      }
       const routing = await routeAssistantQuestion(question);
       if (routing.error) {
+        if (isDefinitiveAssistantRoutingExit(routing.error)) store.releaseAssistantRequest(eventId);
+        else store.markAssistantRequestUncertain(eventId);
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
         return { kind: 'skipped', reason: routing.error };
       }
@@ -455,21 +511,30 @@ export function createTelegramRuntime({
           text: question.text,
           chatId: question.chatId,
           userId: question.userId,
-          dialogue: store.recentDialogue(question.chatId, question.userId),
+          dialogue: store.recentDialogue(question.chatId, question.userId, {
+            limit: config.assistantDialogueTurnLimit,
+            ttlSeconds: config.assistantDialogueTtlSec,
+          }),
           route: routing.route,
           knowledge: routing.knowledge,
         });
       } catch (error) {
         if (isProviderUnavailableError(error)) {
+          // The answer transport may have reached a paid provider before it
+          // reported failure. Keep the reservation fenced rather than treating
+          // this as a proven zero-call rejection.
+          store.markAssistantRequestUncertain(eventId);
           store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
           return { kind: 'skipped', reason: error.code };
         }
         throw error;
       }
       const result = await sendAssistantTurn(eventId, question, answer, routing.route);
+      store.completeAssistantRequest(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
       return result;
     } catch (error) {
+      store.markAssistantRequestUncertain(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'error' });
       throw error;
     }

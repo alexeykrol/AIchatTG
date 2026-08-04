@@ -155,6 +155,14 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     moderationBanLinks: boolean(env, 'TELEGRAM_RUNTIME_MODERATION_BAN_LINKS', true),
     assistantModerationWaitMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_WAIT_MS', 30_000),
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
+    // No course snapshot is admitted during the project split. This explicit
+    // opt-in prevents a configured provider from treating an absent/unreviewed
+    // source as permission to answer from general knowledge.
+    assistantKnowledgeEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED', false),
+    assistantCooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20, 86_400),
+    assistantDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20, 10_000),
+    assistantDialogueTtlSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TTL_SEC', 604_800, 31_536_000),
+    assistantDialogueTurnLimit: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT', 3, { min: 1, max: 100 }),
     moderator,
     assistant,
     provider: provider.enabled ? validatedProvider.config : provider,

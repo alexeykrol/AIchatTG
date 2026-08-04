@@ -21,8 +21,10 @@ receipt. It must never read the News Digest database directly.
 The current migration is documented in
 [docs/MIGRATION_FROM_NEWS.md](docs/MIGRATION_FROM_NEWS.md). Gatekeeper has
 been ported with an isolated persistence boundary and a host-portable container
-contract. Moderator and Assistant have their own runtime, safety disposition
-barrier, idempotent event state, and verified local knowledge-manifest seam.
+contract. Moderator and Assistant are now ported into their own runtime with a
+safety disposition barrier, fenced inbound receipts, bounded per-user dialogue
+state and code-owned public fallback replies. Course knowledge is deliberately
+disabled and unimported until a separately reviewed snapshot is admitted.
 The separate Compose release defines independent images, data roots and disabled
 Traefik routes. Approved knowledge content, provider configuration, historical
 state import, public hostname selection, and the live webhook cutover remain
@@ -53,6 +55,6 @@ packages/
 docs/
 ```
 
-The first port is Gatekeeper because it already has an isolated implementation
-and database boundary. Moderator and Assistant move together after their shared
-contracts are extracted from the News runtime.
+Gatekeeper, Moderator and Assistant now each have an AIchatTG-owned code and
+database boundary. Their live credentials, webhooks, historical state and
+course knowledge remain separate cutover stages.

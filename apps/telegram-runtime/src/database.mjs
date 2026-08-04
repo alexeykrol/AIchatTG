@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_question_claims (
   completed_at INTEGER,
   PRIMARY KEY (chat_id, message_id)
 );
+-- A reservation starts before model/delivery work and is released only for a
+-- definitely-unsent reply. The uncertain state is intentionally retained: the inbound
+-- delivery receipt will not blindly replay a Telegram action with an unknown
+-- outcome.
+CREATE TABLE IF NOT EXISTS runtime_assistant_request_reservations (
+  event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('reserved', 'completed', 'uncertain')),
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_request_rate
+  ON runtime_assistant_request_reservations(chat_id, user_id, status, created_at);
 CREATE TABLE IF NOT EXISTS runtime_assistant_moderation_dispositions (
   chat_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
@@ -247,6 +261,25 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const question = db.prepare('SELECT * FROM runtime_assistant_question_claims WHERE chat_id = ? AND message_id = ?');
   const completeQuestion = db.prepare(`UPDATE runtime_assistant_question_claims
     SET status = 'completed', outcome = ?, completed_at = ? WHERE chat_id = ? AND message_id = ?`);
+  const assistantRequest = db.prepare('SELECT * FROM runtime_assistant_request_reservations WHERE event_id = ?');
+  const countAssistantRequests = db.prepare(`SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations
+    WHERE chat_id = ? AND user_id = ? AND status IN ('reserved', 'completed', 'uncertain') AND created_at > ?`);
+  const insertAssistantRequest = db.prepare(`INSERT INTO runtime_assistant_request_reservations
+    (event_id, chat_id, user_id, status, created_at) VALUES (?, ?, ?, 'reserved', ?)`);
+  const completeAssistantRequest = db.prepare(`UPDATE runtime_assistant_request_reservations
+    SET status = 'completed', completed_at = ? WHERE event_id = ? AND status = 'reserved'`);
+  const uncertainAssistantRequest = db.prepare(`UPDATE runtime_assistant_request_reservations
+    SET status = 'uncertain', completed_at = ? WHERE event_id = ? AND status = 'reserved'`);
+  const releaseAssistantRequest = db.prepare(`DELETE FROM runtime_assistant_request_reservations
+    WHERE event_id = ? AND status = 'reserved'`);
+  const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
+    WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
+  const deleteExpiredDialogues = db.prepare('DELETE FROM runtime_assistant_dialogues WHERE last_activity_at <= ?');
+  const trimDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
+    WHERE dialogue_id = ? AND id NOT IN (
+      SELECT id FROM runtime_assistant_turns WHERE dialogue_id = ?
+      ORDER BY created_at DESC, id DESC LIMIT ?
+    )`);
   const disposition = db.prepare(`SELECT * FROM runtime_assistant_moderation_dispositions
     WHERE chat_id = ? AND message_id = ?`);
   const writeDisposition = db.prepare(`INSERT INTO runtime_assistant_moderation_dispositions
@@ -544,24 +577,65 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       const syntheticMessageId = `compat:${randomUUID()}`;
       return reserveWeakStrike(String(chatId), String(userId), syntheticMessageId, syntheticMessageId, syntheticMessageId, now());
     },
-    recentDialogue(chatId, userId, limit = 3) {
-      const current = dialogue.get(chatId, userId);
-      if (!current) return [];
-      return turns.all(current.id, limit).reverse().map((row) => ({ question: row.question, answer: row.answer }));
-    },
-    recordAssistantTurn(turn) {
+    reserveAssistantRequest({ eventId, chatId, userId, cooldownSec = 0, dailyCap = 0 }) {
+      if (!eventId || userId == null || String(userId) === '') return { allowed: false, reason: 'missing_user' };
       const at = now();
-      let current = dialogue.get(turn.chatId, turn.userId);
+      const normalizedChatId = String(chatId);
+      const normalizedUserId = String(userId);
+      const existing = assistantRequest.get(String(eventId));
+      if (existing) return { allowed: false, reason: 'already_reserved', existing };
+      const cooldown = Math.max(0, Number.parseInt(cooldownSec, 10) || 0);
+      const daily = Math.max(0, Number.parseInt(dailyCap, 10) || 0);
+      if (cooldown > 0 && countAssistantRequests.get(normalizedChatId, normalizedUserId, at - cooldown).count > 0) {
+        return { allowed: false, reason: 'cooldown' };
+      }
+      if (daily > 0 && countAssistantRequests.get(normalizedChatId, normalizedUserId, at - 86_400).count >= daily) {
+        return { allowed: false, reason: 'daily_cap' };
+      }
+      insertAssistantRequest.run(String(eventId), normalizedChatId, normalizedUserId, at);
+      return { allowed: true };
+    },
+    completeAssistantRequest(eventId) {
+      return { completed: completeAssistantRequest.run(now(), String(eventId)).changes === 1 };
+    },
+    markAssistantRequestUncertain(eventId) {
+      return { marked: uncertainAssistantRequest.run(now(), String(eventId)).changes === 1 };
+    },
+    releaseAssistantRequest(eventId) {
+      return { released: releaseAssistantRequest.run(String(eventId)).changes === 1 };
+    },
+    recentDialogue(chatId, userId, { limit = 3, ttlSeconds = 604_800 } = {}) {
+      const at = now();
+      const ttl = Math.max(0, Number.parseInt(ttlSeconds, 10) || 0);
+      if (ttl > 0) {
+        deleteExpiredDialogueTurns.run(at - ttl);
+        deleteExpiredDialogues.run(at - ttl);
+      }
+      const current = dialogue.get(String(chatId), String(userId));
+      if (!current) return [];
+      const boundedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 3));
+      return turns.all(current.id, boundedLimit).reverse().map((row) => ({ question: row.question, answer: row.answer }));
+    },
+    recordBoundedAssistantTurn(turn, { maxTurns = 3, ttlSeconds = 604_800 } = {}) {
+      const at = now();
+      const ttl = Math.max(0, Number.parseInt(ttlSeconds, 10) || 0);
+      if (ttl > 0) {
+        deleteExpiredDialogueTurns.run(at - ttl);
+        deleteExpiredDialogues.run(at - ttl);
+      }
+      let current = dialogue.get(String(turn.chatId), String(turn.userId));
       if (!current) {
         current = { id: randomUUID() };
-        insertDialogue.run(current.id, turn.chatId, turn.userId, at);
+        insertDialogue.run(current.id, String(turn.chatId), String(turn.userId), at);
       } else {
         touchDialogue.run(at, current.id);
       }
       insertTurn.run(
-        randomUUID(), current.id, turn.eventId, turn.question, turn.answer,
+        randomUUID(), current.id, String(turn.eventId), String(turn.question), String(turn.answer),
         turn.modelId || null, JSON.stringify(turn.receipt || null), at,
       );
+      const boundedLimit = Math.max(1, Math.min(100, Number.parseInt(maxTurns, 10) || 3));
+      trimDialogueTurns.run(current.id, current.id, boundedLimit);
     },
     getEvent(eventId) { return event.get(eventId); },
   };

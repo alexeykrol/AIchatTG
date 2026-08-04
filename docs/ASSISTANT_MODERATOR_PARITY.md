@@ -2,13 +2,13 @@
 
 ## Provenance
 
-This candidate is based on `AIchatTG@003ba927ce41a1869935d5b6a421af43e075800a`.
+This candidate is based on `AIchatTG@59f0a1754d7c5b0828ddf9da909f8a9ac1e46339`.
 Its behavior comes from two immutable, read-only News objects:
 
 | Source layer | Role in this port | Relationship |
 |---|---|---|
 | `a729ccd` | Deployed Moderator, Assistant command and safety disposition behavior | Production source of truth |
-| `ef1c6ea` | Accepted course-operations/help routing behavior | Separate accepted overlay; neither object is an ancestor of the other |
+| `ef1c6ea` | Accepted course-operations/help routing behavior | Separate accepted overlay; intentionally unported while course knowledge is frozen |
 
 No News file, runtime import, path, database, configuration value or secret is
 used by AIchatTG.
@@ -23,17 +23,26 @@ used by AIchatTG.
   Assistant waits only for that exact revision and fails closed otherwise.
 - Native Assistant-question claims prevent a redelivery or approved edit from
   producing a second answer after a source message was already handled.
-- The Assistant role route is closed: content teaching/navigation can use only
-  `course-content-v1`; course operations support can use only
-  `course-operations-v1`; redirect has no source package.
-- Knowledge is a local manifest plus SHA-256-verified snapshot. The repo ships
-  no course content and the loader rejects paths outside its explicit root.
+- A fenced inbound-delivery receipt names the exact role/update/revision and
+  prevents auto-replay after an ambiguous Telegram delivery.
+- Assistant rate reservations are chat/user scoped. Cooldown and daily caps are
+  checked before any optional provider or Telegram delivery. Deterministic local
+  route/knowledge rejections release their reservation; provider transport and
+  Telegram delivery uncertainty are retained rather than blindly retried.
+- Dialogue turns are scoped to chat/user, bounded by a configurable TTL and
+  turn cap, and are persisted only after a successful final Telegram receipt.
+- `/ask` and `/help` retain their leading-command contract. Public identity and
+  usage questions use a code-owned profile; internal implementation details are
+  not disclosed and do not call a provider.
+- Course routes remain disabled by default. Knowledge is a local manifest plus
+  SHA-256-verified snapshot, but no course content or index is in this repo and
+  no News path can be read.
 
 ## Deliberate gaps
 
 This is not a deployment or full production-equivalence claim. Deferred work
-includes the approved-content import, provider-specific prompts/models/pricing,
-Telegram admin lookup and exemptions, image handling, rate limits/analytics,
-operator UI, migration of historical data and all webhook/token/cutover work.
-Those decisions need the permanent integrator and, where relevant, a Product
-Owner approval and exact release lease.
+includes the approved-content import, live provider prompts/models/pricing,
+image handling, historical-state migration and all webhook/token/cutover work.
+The read-only operator console is separate from this runtime and does not
+receive message or dialogue text. Those decisions need the permanent integrator
+and, where relevant, a Product Owner approval and exact release lease.
