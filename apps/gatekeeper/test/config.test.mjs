@@ -133,6 +133,20 @@ describe('loadConfig', () => {
     );
   });
 
+  test('normalizes the Gatekeeper public base under the fixed route prefix', () => {
+    const value = loadConfig(env({
+      GATEKEEPER_SITE_ENABLED: 'true',
+      GATEKEEPER_SITE_WEBHOOK_SECRET: 'site-secret-that-is-at-least-32-characters',
+      GATEKEEPER_PUBLIC_ORIGIN: 'https://aikrol.questtales.com/',
+    }));
+    assert.equal(value.publicOrigin, 'https://aikrol.questtales.com');
+    assert.equal(value.publicBaseUrl, 'https://aikrol.questtales.com/gatekeeper');
+    assert.equal(
+      new URL('onboarding/site', `${value.publicBaseUrl}/`).toString(),
+      'https://aikrol.questtales.com/gatekeeper/onboarding/site',
+    );
+  });
+
   test('enables both Zapier hooks with HTTPS endpoints and bounded delivery settings', () => {
     const value = loadConfig(env({
       GATEKEEPER_ZAPIER_ENABLED: 'true',

@@ -49,7 +49,7 @@ function configuration() {
     zapierAuthToken: '',
     zapierTimeoutMs: 10_000,
     adminSettingsToken: 'admin-settings-token-with-more-than-32-characters',
-    publicBaseUrl: 'https://news.questtales.com',
+    publicBaseUrl: 'https://aikrol.questtales.com/gatekeeper',
     scenarioPath: DEFAULT_SCENARIO_PATH,
   };
 }
@@ -123,6 +123,11 @@ describe('site email-only onboarding flow', () => {
     assert.equal(deliveries[0].eventType, 'site_invite_requested');
     assert.equal(deliveries[0].data.email, 'Student@example.org');
     assert.equal(deliveries[0].data.email_subject, 'Ваш онбординг');
+    assert.match(
+      deliveries[0].data.onboarding_url,
+      /^https:\/\/aikrol\.questtales\.com\/gatekeeper\/onboarding\/site\?token=[A-Za-z0-9_-]+$/u,
+    );
+    assert.equal(deliveries[0].data.onboarding_url.includes('https://aikrol.questtales.com/onboarding/'), false);
     assert.equal(JSON.stringify(firstBody).includes('Student@example.org'), false);
 
     const duplicate = await fetch(`${baseUrl}/webhooks/site-registration`, {
@@ -142,6 +147,11 @@ describe('site email-only onboarding flow', () => {
     const pageText = await page.text();
     assert.match(pageText, /Прочитайте материалы и подтвердите завершение/u);
     assert.equal(pageText.includes('Student@example.org'), false);
+    assert.match(
+      pageText,
+      /action="https:\/\/aikrol\.questtales\.com\/gatekeeper\/onboarding\/site\/complete"/u,
+    );
+    assert.equal(pageText.includes('action="/onboarding/site/complete"'), false);
 
     const completed = await fetch(`${baseUrl}/onboarding/site/complete`, {
       method: 'POST',
@@ -217,7 +227,19 @@ describe('site email-only onboarding flow', () => {
     const authorization = `Basic ${Buffer.from(`gatekeeper:${config.adminSettingsToken}`).toString('base64')}`;
     const page = await fetch(`${baseUrl}/admin/gatekeeper`, { headers: { authorization } });
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /<h1>Привратник<\/h1>/u);
+    const pageText = await page.text();
+    assert.match(pageText, /<h1>Привратник<\/h1>/u);
+    assert.match(
+      pageText,
+      /href="https:\/\/aikrol\.questtales\.com\/gatekeeper\/admin\/gatekeeper\.css"/u,
+    );
+    assert.match(
+      pageText,
+      /data-snapshot-endpoint="https:\/\/aikrol\.questtales\.com\/gatekeeper\/admin\/settings\/snapshot"/u,
+    );
+    assert.equal(pageText.includes('href="/admin/'), false);
+    assert.equal(pageText.includes('data-snapshot-endpoint="/admin/'), false);
+    assert.equal((await fetch(`${baseUrl}/admin/gatekeeper.css`, { headers: { authorization } })).status, 200);
     const snapshot = await fetch(`${baseUrl}/admin/settings/snapshot`, {
       headers: { authorization },
     });

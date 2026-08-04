@@ -72,12 +72,33 @@ function copyHtml(value) {
   return escapeHtml(value).replaceAll('\n', '<br>');
 }
 
-function sitePage({ title, text, links = [], buttonText = '', token = '' }) {
+function publicRoute(config, routePath, relativeFallback) {
+  const normalizedRoute = String(routePath).replace(/^\/+/, '');
+  const publicBaseUrl = String(config.publicBaseUrl || '').replace(/\/+$/, '');
+  if (!publicBaseUrl) return relativeFallback;
+  return new URL(normalizedRoute, `${publicBaseUrl}/`).toString();
+}
+
+function renderAdminPage(config) {
+  return ADMIN_PAGE
+    .replaceAll('__GATEKEEPER_CSS_URL__', escapeHtml(publicRoute(
+      config,
+      'admin/gatekeeper.css',
+      'gatekeeper.css',
+    )))
+    .replaceAll('__GATEKEEPER_SNAPSHOT_URL__', escapeHtml(publicRoute(
+      config,
+      'admin/settings/snapshot',
+      'settings/snapshot',
+    )));
+}
+
+function sitePage({ title, text, links = [], buttonText = '', token = '', completionUrl = '' }) {
   const linkHtml = links.map((link) => (
     `<li><a href="${escapeHtml(link.url)}" rel="noreferrer noopener">${escapeHtml(link.label)}</a></li>`
   )).join('');
-  const form = buttonText && token
-    ? `<form method="post" action="/onboarding/site/complete">`
+  const form = buttonText && token && completionUrl
+    ? `<form method="post" action="${escapeHtml(completionUrl)}">`
       + `<input type="hidden" name="token" value="${escapeHtml(token)}">`
       + `<button type="submit">${escapeHtml(buttonText)}</button></form>`
     : '';
@@ -175,7 +196,7 @@ export function createGatekeeperHttpServer({
       }
       if (request.method === 'GET' && url.pathname === '/admin/gatekeeper') {
         if (!authorizeAdmin(request, response)) return;
-        textResponse(response, 200, 'text/html; charset=utf-8', ADMIN_PAGE, {
+        textResponse(response, 200, 'text/html; charset=utf-8', renderAdminPage(config), {
           'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
           'referrer-policy': 'no-referrer',
           'x-frame-options': 'DENY',
@@ -224,6 +245,7 @@ export function createGatekeeperHttpServer({
           links: copy.links,
           buttonText: copy.completion_button_text,
           token: url.searchParams.get('token'),
+          completionUrl: publicRoute(config, 'onboarding/site/complete', 'site/complete'),
         }));
         return;
       }

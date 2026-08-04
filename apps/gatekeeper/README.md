@@ -35,7 +35,7 @@ webhooks, configuration, database, Compose files, or production runtime.
 ### B. Site + email (Telegram may be absent)
 
 1. The site sends `student_registered` to the separate
-   `/webhooks/site-registration` endpoint. The service verifies the exact raw
+   `/gatekeeper/webhooks/site-registration` endpoint. The service verifies the exact raw
    body with a separate HMAC secret before JSON parsing.
 2. The payload contains the provider event ID, occurrence time and email;
    Telegram ID/username are optional. The email is encrypted before SQLite is
@@ -44,7 +44,7 @@ webhooks, configuration, database, Compose files, or production runtime.
    `site_invite_requested` event to the configured Zapier hook. That payload
    includes the exact subject/body/button from the scenario and the personal
    onboarding URL, so Zapier does not own a second copy of the email text.
-4. The user opens `/onboarding/site`, reads the two HTTPS resources and confirms
+4. The user opens `/gatekeeper/onboarding/site`, reads the two HTTPS resources and confirms
    completion. Gatekeeper records completion and emits one
    `onboarding_completed` event to the second Zapier hook. Exact duplicate site
    events and repeated completion submissions never retry an earlier delivery.
@@ -213,7 +213,11 @@ The retired `GATEKEEPER_INSTRUCTION_TEXT`,
 cannot mistake them for overrides of the Markdown source of truth.
 
 The standalone read-only Gatekeeper settings surface is
-`/admin/gatekeeper`; its JSON snapshot is `/admin/settings/snapshot`. It shows
+`/gatekeeper/admin/gatekeeper`; its JSON snapshot is
+`/gatekeeper/admin/settings/snapshot` on the configured public origin. The
+application emits canonical URLs under the fixed `/gatekeeper` prefix, so its
+browser asset, snapshot and Site-completion requests cannot fall through to a
+root-level News or other application route. It shows
 only aggregate counts and whether sources/destinations are configured. It never
 returns secrets, endpoint identifiers, email, Telegram IDs or raw stored rows.
 A runtime `GATEKEEPER_ADMIN_SETTINGS_TOKEN` is required for both routes. Without
@@ -225,6 +229,12 @@ still listens on loopback only, and this candidate does not create a public
 route for the settings page.
 A link from the shared News Digest navigation is intentionally outside this
 module and requires the shared-interface owner.
+
+The historical `production/tribute-capture/` artifact is retained only as
+release evidence from the former News host topology. It is not an AIchatTG
+runtime, must not be started or adapted in place, and cannot activate a route
+under `aikrol.questtales.com`. Any future one-shot capture service needs a
+separate AIchatTG operations charter and exact deployment lease.
 
 Telegram webhook registration is deliberately separate from server startup
 because it mutates external bot configuration:
@@ -244,7 +254,7 @@ window. If a Telegram delivery times out after the request may have reached the
 provider, the stored delivery state is `inconclusive` and the service does not
 blindly repeat it.
 
-Entering the public `/webhooks/tribute` URL in Tribute is a separate external
+Entering the public `/gatekeeper/webhooks/tribute` URL in Tribute is a separate external
 configuration action and requires the same explicit test/deployment gate.
 
 ## Recovery and backup
