@@ -210,6 +210,8 @@ export function createTelegramRuntime({
   notifier,
   knowledge = unavailableKnowledge(),
   wait = sleep,
+  // Test-only crash injection. Production bootstrap never supplies hooks.
+  testHooks = null,
 }) {
   const modelProvider = provider || llm || createProviderAdapter({ enabled: false });
   const guardAdapter = guard;
@@ -341,19 +343,57 @@ export function createTelegramRuntime({
         revisionIdentity: comment.platformMessageId, userId: comment.userId,
         isWeak: false, guardProof, derivePolicy: derivePreviewPolicy,
       });
-      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      if (!planned.claimed) {
+        if (planned.existing?.status === 'planned') {
+          return {
+            action: 'enforcement_planned_guard_unproven', receipt: planned.existing, actions: [], pending: true,
+            reason: guardProof?.reason || 'guard_rights_unproven',
+          };
+        }
+        return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      }
       const receipt = enforcementReceipt(planned.policy, guardProof);
       receipt.status = 'guard_unproven';
       await completeEnforcement(planned.claim, 'skipped', receipt, guardProof?.reason || 'guard_rights_unproven');
       return { action: 'guard_unproven', receipt, actions: [], reason: guardProof?.reason || 'guard_rights_unproven' };
     }
 
-    const planned = store.claimModerationSafetyEnforcement({
+    let planned = store.claimModerationSafetyEnforcement({
       eventId, chatId: comment.chatId, messageId: comment.messageId,
       revisionIdentity: comment.platformMessageId, userId: comment.userId,
       isWeak, guardProof, derivePolicy: deriveLivePolicy,
     });
-    if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+    if (!planned.claimed) {
+      // A `planned` receipt proves that no Guard step was marked calling. It is
+      // the only external-action state recovery may reclaim. Anything else is
+      // terminal or ambiguous and must not be sent to Telegram again.
+      if (planned.existing?.status !== 'planned') {
+        return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      }
+      let persistedPlan;
+      try { persistedPlan = JSON.parse(planned.existing.policy_json); } catch { persistedPlan = null; }
+      let deterministicPlan;
+      try {
+        deterministicPlan = persistedPlan == null
+          ? null
+          : planTelegramSafetyAction(decision, persistedPlan.strikeBefore);
+      } catch { deterministicPlan = null; }
+      if (!deterministicPlan || canonicalJson(persistedPlan) !== canonicalJson(deterministicPlan)) {
+        return { action: 'enforcement_plan_invalid', receipt: planned.existing, actions: [], pending: true };
+      }
+      const resumed = store.resumePlannedModerationEnforcement({ eventId });
+      if (!resumed.claimed) {
+        return { action: 'enforcement_already_recorded', receipt: resumed.row, actions: [] };
+      }
+      planned = {
+        claimed: true,
+        claim: resumed.claim,
+        existing: null,
+        duplicateNative: false,
+        policy: deterministicPlan,
+        resumed: true,
+      };
+    }
     const plan = planned.policy;
     const receipt = enforcementReceipt(plan, guardProof);
     if (planned.duplicateNative) {
@@ -362,6 +402,7 @@ export function createTelegramRuntime({
       return { action: 'duplicate_native_revision', receipt, actions: [] };
     }
     const actions = [];
+    await testHooks?.afterEnforcementPlanned?.({ eventId, plan, resumed: planned.resumed === true });
     const callStep = async (name, invoke) => {
       receipt.steps[name] = { status: 'calling' };
       const calling = store.markModerationEnforcementCalling({ claim: planned.claim, receipt });
@@ -610,9 +651,10 @@ export function createTelegramRuntime({
     decision = applyTelegramSafetySignals(config, decision, comment);
     const plan = planTelegramSafetyAction(decision, strikeState.weakStrikes);
     // The semantic verdict is final before any Telegram enforcement. A crash
-    // below this line must not cause another provider call; existing Guard
-    // receipts remain the only authority over Telegram effects.
-    const resolved = store.resolveModeratorJudgement({
+    // below this line must not cause another provider call. `decision_ready`
+    // is deliberately not terminal until the fixed plan finds a terminal
+    // Guard receipt (or safely completes a previously planned one).
+    const ready = store.markModeratorDecisionReady({
       claim,
       // This operator-visible durable decision intentionally excludes the
       // model's reason/quote/receipt. The private comment snapshot is the only
@@ -625,9 +667,9 @@ export function createTelegramRuntime({
         plan,
       },
       result: { verdict: plan.verdict, actionPlan: plan.action },
-      providerBoundary: 'returned',
     });
-    if (!resolved.resolved) return jobResult(claim.eventId, resolved.row, 'judgement_claim_fenced');
+    if (!ready.ready) return jobResult(claim.eventId, ready.row, 'judgement_claim_fenced');
+    await testHooks?.afterDecisionReady?.({ eventId, plan });
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({
       chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
@@ -641,9 +683,74 @@ export function createTelegramRuntime({
     store.recordModeration({
       eventId, ...comment, ...decision, ...plan, mode: config.moderationMode, actions,
     });
+    store.completeModeratorDecision({ eventId });
     return {
       kind: 'moderated', verdict: plan.verdict, action: enforcement.action,
       actions, enforcement: enforcement.receipt || null,
+    };
+  }
+
+  function readDurableModeratorDecision(job) {
+    let snapshot;
+    let durableDecision;
+    try { snapshot = JSON.parse(job?.snapshot_json || ''); } catch { snapshot = null; }
+    try { durableDecision = JSON.parse(job?.decision_json || ''); } catch { durableDecision = null; }
+    const comment = snapshot?.schemaVersion === 'moderator-comment-v1' && snapshot?.expired !== true
+      ? snapshot.comment : null;
+    const decision = normalizeSafetyClassification(durableDecision);
+    const storedPlan = durableDecision?.plan;
+    let plan;
+    try {
+      plan = storedPlan == null ? null : planTelegramSafetyAction(decision, storedPlan.strikeBefore);
+    } catch { plan = null; }
+    if (!comment || !decision || !plan || canonicalJson(storedPlan) !== canonicalJson(plan)) return null;
+    return { comment, decision, plan };
+  }
+
+  /**
+   * A ready decision has crossed only the provider boundary. It may create an
+   * initial receipt or resume a still-planned receipt, but `calling` and
+   * `uncertain` Guard receipts are evidence of an ambiguous external action
+   * and are terminalized without a second Telegram call.
+   */
+  async function recoverDecisionReadyModeratorJob(job) {
+    const durable = readDurableModeratorDecision(job);
+    if (!durable) {
+      const reviewed = store.manualReviewDecisionReadyModeratorJudgement({
+        eventId: job?.event_id,
+        errorCode: 'durable_decision_or_snapshot_invalid',
+      });
+      return jobResult(job?.event_id, reviewed.row, 'durable_decision_or_snapshot_invalid');
+    }
+    const { comment, decision, plan } = durable;
+    store.observeModerationMessage({
+      chatId: comment.chatId, messageId: comment.messageId, userId: comment.userId,
+      revisionIdentity: comment.platformMessageId,
+    });
+    const assistantDisposition = assistantDispositionForSafety(plan);
+    store.upsertAssistantDisposition({
+      chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
+      moderationMessageId: comment.platformMessageId,
+      reason: 'moderator_decision_recovered', moderationEventId: job.event_id,
+    });
+    const enforcement = await enforceSafetyPlan(job.event_id, comment, decision, plan);
+    if (enforcement.pending === true) {
+      return {
+        kind: 'moderation_deferred', eventId: job.event_id,
+        reason: enforcement.reason || enforcement.action,
+      };
+    }
+    // Notifications are deliberately not replayed: unlike the Guard receipt,
+    // their prior delivery cannot be proved from this job.
+    store.recordModeration({
+      eventId: job.event_id, ...comment, ...decision, ...plan,
+      mode: config.moderationMode, actions: enforcement.actions || [],
+    });
+    store.completeModeratorDecision({ eventId: job.event_id });
+    return {
+      kind: 'moderated', eventId: job.event_id, recovered: true,
+      verdict: plan.verdict, action: enforcement.action,
+      actions: enforcement.actions || [], enforcement: enforcement.receipt || null,
     };
   }
 
@@ -838,21 +945,34 @@ export function createTelegramRuntime({
       return store.quarantineProcessingInboundDeliveries({ recoveryId });
     },
     /**
-     * Startup/timer recovery is intentionally limited to safe_retry jobs. It
-     * first makes stale `calling` rows visible as manual review, then claims at
-     * most the requested safe jobs. No inbound, Telegram or provider action is
-     * replayed for `calling`, `manual_review` or `resolved` records.
+     * Recovery replays only provably pre-provider `safe_retry` work. A
+     * provider-returned `decision_ready` row is resumed from its durable fixed
+     * plan without calling the provider; its Guard receipt may be created or
+     * reclaimed only while it remains `planned`. `calling`, `uncertain`,
+     * `manual_review`, and `resolved` records never trigger a Telegram retry.
      */
     async recoverModeratorJudgements({ limit = 10, startup = false } = {}) {
       const quarantined = store.quarantineExpiredModeratorCalls({ allCalling: startup === true });
       const outcomes = [];
+      const decisionOutcomes = [];
       const maximum = Math.max(1, Math.min(50, Number(limit) || 10));
       for (let index = 0; index < maximum; index++) {
         const claimed = store.claimNextModeratorJudgement({ leaseSec: moderatorLeaseSeconds() });
         if (!claimed.claimed) break;
         outcomes.push(await runModeratorJudgement(claimed.claim));
       }
-      return { ...quarantined, recovered: outcomes.length, outcomes };
+      const attemptedDecisionIds = new Set();
+      for (let index = 0; index < maximum; index++) {
+        const job = store.nextDecisionReadyModeratorJudgement();
+        if (!job || attemptedDecisionIds.has(job.event_id)) break;
+        attemptedDecisionIds.add(job.event_id);
+        decisionOutcomes.push(await recoverDecisionReadyModeratorJob(job));
+      }
+      return {
+        ...quarantined,
+        recovered: outcomes.length + decisionOutcomes.length,
+        outcomes: [...outcomes, ...decisionOutcomes],
+      };
     },
     moderatorRecoveryStatus({ limit = 50 } = {}) {
       const status = store.moderatorRecoveryStatus();

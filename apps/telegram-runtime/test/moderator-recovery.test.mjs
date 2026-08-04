@@ -58,14 +58,18 @@ function cleanDecision() {
   return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fixture' };
 }
 
-function withRuntime({ provider, now = 100, runtimeConfig = {}, actions = [] } = {}) {
+function threatDecision() {
+  return { safetyRoute: 'threat', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fixture' };
+}
+
+function withRuntime({ provider, now = 100, runtimeConfig = {}, actions = [], testHooks = null } = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-moderator-recovery-'));
   const databasePath = join(folder, 'runtime.db');
   const db = openRuntimeDatabase(databasePath);
   const clock = { now };
   const store = createRuntimeStore(db, { now: () => clock.now });
   const runtime = createTelegramRuntime({
-    config: config(runtimeConfig), store, provider, ...adapters(actions),
+    config: config(runtimeConfig), store, provider, ...adapters(actions), testHooks,
   });
   return {
     db, store, runtime, clock, actions,
@@ -181,6 +185,131 @@ test('resolved judgement is never reconsidered, and expiring a bounded snapshot 
       state: 'manual_review', error_code: 'snapshot_expired', snapshot_sha256: 'expired',
     });
     assert.equal(calls, 2);
+  } finally { context.close(); }
+});
+
+test('a persisted decision before enforcement recovers its fixed Guard plan without a second provider call', async () => {
+  let providerCalls = 0;
+  const context = withRuntime({
+    runtimeConfig: { moderationMode: 'live' },
+    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+    testHooks: { async afterDecisionReady() { throw new Error('crash_after_decision_ready'); } },
+  });
+  try {
+    const first = await context.runtime.handleUpdate('moderator', update(40, 50, 'durable decision first'));
+    assert.equal(first.kind, 'uncertain_delivery');
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.db.prepare(`SELECT state, provider_boundary FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:40'`).get(), { state: 'decision_ready', provider_boundary: 'returned' });
+    assert.equal(context.store.getModerationEnforcement('moderator:40'), null);
+
+    context.runtime = createTelegramRuntime({
+      config: config({ moderationMode: 'live' }), store: context.store,
+      provider: { async moderate() { providerCalls++; throw new Error('provider_must_not_be_called'); } },
+      ...adapters(context.actions),
+    });
+    const recovered = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(recovered.recovered, 1);
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.actions, ['ban', 'delete']);
+    assert.deepEqual(context.db.prepare(`SELECT state FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:40'`).get(), { state: 'resolved' });
+    assert.deepEqual(context.db.prepare(`SELECT status FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:40'`).get(), { status: 'completed' });
+    assert.equal(context.db.prepare(`SELECT COUNT(*) AS count FROM runtime_moderation_records
+      WHERE event_id = 'moderator:40'`).get().count, 1);
+    assert.deepEqual(context.store.getAssistantDisposition({ chatId: '-100', messageId: '50' }), {
+      chat_id: '-100', message_id: '50', status: 'blocked', moderation_message_id: '-100:50', verdict: 'ban',
+      reason: 'moderator_decision_recovered', moderation_event_id: 'moderator:40', created_at: 100, updated_at: 100,
+    });
+  } finally { context.close(); }
+});
+
+test('a planned receipt resumes exactly once after a crash before the first Guard action', async () => {
+  let providerCalls = 0;
+  const context = withRuntime({
+    runtimeConfig: { moderationMode: 'live' },
+    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+    testHooks: { async afterEnforcementPlanned() { throw new Error('crash_after_enforcement_planned'); } },
+  });
+  try {
+    const first = await context.runtime.handleUpdate('moderator', update(41, 51, 'planned before guard'));
+    assert.equal(first.kind, 'uncertain_delivery');
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.db.prepare(`SELECT state FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:41'`).get(), { state: 'decision_ready' });
+    assert.deepEqual(context.db.prepare(`SELECT status, claim_generation FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:41'`).get(), { status: 'planned', claim_generation: 1 });
+    assert.deepEqual(context.actions, []);
+
+    context.runtime = createTelegramRuntime({
+      config: config({ moderationMode: 'live' }), store: context.store,
+      provider: { async moderate() { providerCalls++; throw new Error('provider_must_not_be_called'); } },
+      ...adapters(context.actions),
+    });
+    const recovered = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(recovered.recovered, 1);
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.actions, ['ban', 'delete']);
+    assert.deepEqual(context.db.prepare(`SELECT state FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:41'`).get(), { state: 'resolved' });
+    assert.deepEqual(context.db.prepare(`SELECT status, claim_generation FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:41'`).get(), { status: 'completed', claim_generation: 2 });
+    assert.equal((await context.runtime.recoverModeratorJudgements({ limit: 2 })).recovered, 0);
+    assert.deepEqual(context.actions, ['ban', 'delete']);
+  } finally { context.close(); }
+});
+
+test('calling and uncertain Guard receipts are terminal recovery boundaries and are never re-issued', async () => {
+  let providerCalls = 0;
+  let releaseBan;
+  const pendingBan = new Promise((resolve) => { releaseBan = resolve; });
+  const context = withRuntime({
+    runtimeConfig: { moderationMode: 'live' },
+    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+  });
+  try {
+    const service = adapters(context.actions);
+    service.guard.banAuthor = async () => {
+      context.actions.push('ban');
+      return pendingBan;
+    };
+    context.runtime = createTelegramRuntime({
+      config: config({ moderationMode: 'live' }), store: context.store,
+      provider: { async moderate() { providerCalls++; return threatDecision(); } }, ...service,
+    });
+    const running = context.runtime.handleUpdate('moderator', update(42, 52, 'calling guard boundary'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(context.db.prepare(`SELECT state FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:42'`).get(), { state: 'decision_ready' });
+    assert.deepEqual(context.db.prepare(`SELECT status FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:42'`).get(), { status: 'calling' });
+    const callingRecovery = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(callingRecovery.recovered, 1);
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(context.actions, ['ban']);
+    releaseBan({ ok: true });
+    await running;
+    assert.deepEqual(context.actions, ['ban', 'delete']);
+
+    service.guard.banAuthor = async () => {
+      context.actions.push('ban_uncertain');
+      return { ok: false, uncertain: true, error: 'telegram_transport_unknown' };
+    };
+    const uncertain = await context.runtime.handleUpdate('moderator', update(43, 53, 'uncertain guard boundary'));
+    assert.equal(uncertain.kind, 'moderated');
+    assert.deepEqual(context.db.prepare(`SELECT status FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:43'`).get(), { status: 'uncertain' });
+    // Simulate the narrow crash after receipt completion and before the job's
+    // terminal transition; recovery must not turn `uncertain` into a retry.
+    context.db.prepare(`UPDATE runtime_moderator_judgement_jobs
+      SET state = 'decision_ready', resolved_at = NULL WHERE event_id = 'moderator:43'`).run();
+    const uncertainRecovery = await context.runtime.recoverModeratorJudgements({ limit: 2 });
+    assert.equal(uncertainRecovery.recovered, 1);
+    assert.equal(providerCalls, 2);
+    assert.deepEqual(context.actions, ['ban', 'delete', 'ban_uncertain']);
+    assert.deepEqual(context.db.prepare(`SELECT state FROM runtime_moderator_judgement_jobs
+      WHERE event_id = 'moderator:43'`).get(), { state: 'resolved' });
   } finally { context.close(); }
 });
 
