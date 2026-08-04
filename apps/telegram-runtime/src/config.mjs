@@ -74,6 +74,15 @@ function roleConfig(env, role) {
   };
 }
 
+function providerTuple(env, name) {
+  const prefix = `TELEGRAM_RUNTIME_PROVIDER_${name}`;
+  return {
+    model: String(env[`${prefix}_MODEL`] || ''),
+    reasoningEffort: String(env[`${prefix}_REASONING_EFFORT`] || ''),
+    maxOutputTokens: String(env[`${prefix}_MAX_OUTPUT_TOKENS`] || ''),
+  };
+}
+
 export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {}) {
   if (boolean(env, 'TELEGRAM_RUNTIME_POLLING_ENABLED', false)) {
     throw new Error('TELEGRAM_RUNTIME_POLLING_ENABLED is unsupported: polling is intentionally not implemented');
@@ -94,12 +103,18 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
   }
   const provider = {
     enabled: boolean(env, 'TELEGRAM_RUNTIME_PROVIDER_ENABLED', false),
+    vendor: String(env.TELEGRAM_RUNTIME_PROVIDER_VENDOR || ''),
     endpoint: String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || ''),
     apiKey: String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || ''),
-    model: String(env.TELEGRAM_RUNTIME_PROVIDER_MODEL || ''),
+    modelTuples: {
+      moderatorSafety: providerTuple(env, 'MODERATOR_SAFETY'),
+      assistantRouter: providerTuple(env, 'ASSISTANT_ROUTER'),
+      assistantAnswer: providerTuple(env, 'ASSISTANT_ANSWER'),
+    },
   };
-  if (provider.enabled && !validateProviderRuntimeConfig(provider).valid) {
-    throw new Error('an enabled provider requires a HTTPS endpoint, API key and model');
+  const validatedProvider = validateProviderRuntimeConfig(provider);
+  if (provider.enabled && !validatedProvider.valid) {
+    throw new Error(`an enabled provider requires the explicit OpenAI-compatible configuration (${validatedProvider.code})`);
   }
   return {
     port: integer(env, 'TELEGRAM_RUNTIME_PORT', 8788),
@@ -128,7 +143,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     moderator,
     assistant,
-    provider,
+    provider: provider.enabled ? validatedProvider.config : provider,
     notification: { enabled: boolean(env, 'TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED', false) },
     startupPlan: Object.freeze({ setCommands: false, registerWebhook: false, deleteWebhook: false, poll: false }),
   };

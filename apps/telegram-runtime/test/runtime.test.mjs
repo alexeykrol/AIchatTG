@@ -91,6 +91,21 @@ function fakeLlm({ safetyRoute = 'clean', abuseLevel = null } = {}) {
   };
 }
 
+function enabledProviderConfig(overrides = {}) {
+  return {
+    enabled: true,
+    vendor: 'openai-compatible',
+    endpoint: 'https://provider.example.test/v1',
+    apiKey: 'fixture-key',
+    modelTuples: {
+      moderatorSafety: { model: 'moderator-model', reasoningEffort: 'minimal', maxOutputTokens: 200 },
+      assistantRouter: { model: 'router-model', reasoningEffort: 'none', maxOutputTokens: 100 },
+      assistantAnswer: { model: 'answer-model', reasoningEffort: 'low', maxOutputTokens: 500 },
+    },
+    ...overrides,
+  };
+}
+
 test('default configuration does not plan Telegram side effects or polling', () => {
   const loaded = loadRuntimeConfig({}, { cwd: '/tmp/aichattg-test' });
   assert.deepEqual(loaded.startupPlan, { setCommands: false, registerWebhook: false, deleteWebhook: false, poll: false });
@@ -98,7 +113,7 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.equal(loaded.assistantModerationWaitMs, 30_000);
   assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
-  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /provider requires/);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /OpenAI-compatible/);
   assert.throws(() => loadRuntimeConfig({
     TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH: '/tmp/unreviewed-course-content.manifest.json',
   }, { cwd: '/tmp/aichattg-test' }), /must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT/);
@@ -108,34 +123,38 @@ test('disabled or invalid provider adapters cannot call fetch', async () => {
   let calls = 0;
   const fetchFn = async () => { calls++; };
   const disabled = createProviderAdapter({ enabled: false }, { fetchFn });
-  const invalid = createProviderAdapter({
-    enabled: true, endpoint: 'http://provider.example.test', apiKey: 'fixture-key', model: 'fixture-model',
-  }, { fetchFn });
+  const invalid = createProviderAdapter(enabledProviderConfig({ endpoint: 'http://provider.example.test/v1' }), { fetchFn });
   await assert.rejects(disabled.answer({}), (error) => error instanceof ProviderUnavailableError && error.code === 'provider_disabled');
-  await assert.rejects(invalid.routeAssistant({}), (error) => error instanceof ProviderUnavailableError && error.code === 'provider_configuration_invalid');
+  await assert.rejects(invalid.routeAssistant({}), (error) => error instanceof ProviderUnavailableError && error.code === 'provider_endpoint_invalid');
   assert.equal(calls, 0);
 });
 
 test('provider adapter accepts only explicit runtime configuration and fake fetch', async () => {
   const calls = [];
-  const adapter = createProviderAdapter({
-    enabled: true,
-    endpoint: 'https://provider.example.test/v1/generate',
-    apiKey: 'fixture-key',
-    model: 'fixture-model',
-  }, {
+  const adapter = createProviderAdapter(enabledProviderConfig(), {
     async fetchFn(url, init) {
       calls.push({ url, init });
-      return { ok: true, status: 200, async json() { return { safetyRoute: 'clean', confidence: 1 }; } };
+      return {
+        ok: true, status: 200,
+        headers: { get(name) { return name === 'x-request-id' ? 'fixture-request' : null; } },
+        async json() {
+          return {
+            model: 'moderator-model',
+            choices: [{ message: { content: JSON.stringify({ safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', quote: '' }) } }],
+            usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+          };
+        },
+      };
     },
   });
-  assert.deepEqual(await adapter.moderate({ text: 'fixture' }), { safetyRoute: 'clean', confidence: 1 });
+  const result = await adapter.moderate({ text: 'fixture' });
+  assert.equal(result.safetyRoute, 'clean');
+  assert.equal(result.modelId, 'moderator-model');
+  assert.equal(result.receipt.requestId, 'fixture-request');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://provider.example.test/v1/generate');
+  assert.equal(calls[0].url, 'https://provider.example.test/v1/chat/completions');
   assert.equal(calls[0].init.headers.authorization, 'Bearer fixture-key');
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
-    kind: 'moderate', model: 'fixture-model', input: { text: 'fixture' },
-  });
+  assert.equal(JSON.parse(calls[0].init.body).model, 'moderator-model');
 });
 
 test('knowledge admissions require one matching identity per source package', () => {
