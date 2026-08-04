@@ -20,11 +20,14 @@ receipt. It must never read the News Digest database directly.
 
 The current migration is documented in
 [docs/MIGRATION_FROM_NEWS.md](docs/MIGRATION_FROM_NEWS.md). Gatekeeper has
-been ported with its isolated persistence boundary, and the first independent
-Moderator/Assistant runtime core is present. Course knowledge, provider
-adapters, historical-state migration, and the live webhook cutover remain
+been ported with an isolated persistence boundary and a host-portable container
+contract. Moderator and Assistant have their own runtime, safety disposition
+barrier, idempotent event state, and verified local knowledge-manifest seam.
+The separate Compose release defines independent images, data roots and disabled
+Traefik routes. Approved knowledge content, provider configuration, historical
+state import, public hostname selection, and the live webhook cutover remain
 separate reviewed stages. No production webhook, bot token, model call, or
-Telegram message is changed by this repository setup.
+Telegram message has been changed by this repository setup.
 
 ## Local checks
 
