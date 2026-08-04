@@ -266,7 +266,7 @@
     </nav>
 
     <div class="auth-bar" id="authbar">
-      <span class="auth-ro">👁 Интерфейс перенесён из News. Сейчас доступен безопасный просмотр данных AIchatTG; управляющие действия будут подключены отдельно.</span>
+      <span class="auth-ro">👁 AIchatTG Operator Console: безопасный просмотр. Управляющие действия пока отключены.</span>
       <span class="auth-ok">✅ Вы авторизованы.</span>
       <a class="btn-login" href="#" id="btn-login">Войти</a>
       <a class="btn-logout" href="#" id="btn-logout">Выйти</a>
@@ -380,17 +380,10 @@
         `<pre style="white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto">${esc(rendered)}</pre></details>`;
     }
 
-    // ── Social networks ─────────────────────────────────────────────────────────
-    // Moderation is GENERAL — it judges comments/messages across networks, not just
-    // Facebook. Registry-driven so a new network is one entry, not a rewrite.
-    // What's shared across networks: mode (shadow/live) and the judge model.
-    // What's per-network: the prompt/criteria (each platform's audience differs) and,
-    // of course, the comments themselves.
+    // AIchatTG moderation is Telegram-only. Facebook Page moderation stays in News Pro.
     const PLATFORM_META = {
-      facebook: { label: 'Facebook', short: 'FB', icon: '📘', cls: 'fb',
-        promptHint: 'Критерии для комментариев под постами Facebook-страницы.' },
       telegram: { label: 'Telegram', short: 'TG', icon: '✈️', cls: 'tg',
-        promptHint: 'Критерии для сообщений в Telegram-группе (иная аудитория и тон, чем в FB).' },
+        promptHint: 'Критерии для сообщений в Telegram-группе.' },
     };
     // Networks offered in the prompt-platform selector. Extend as adapters ship.
     const PROMPT_PLATFORMS = ['telegram'];
@@ -432,7 +425,7 @@
     // Friendly RU messages for enforcement failures surfaced by ok:false responses.
     function enforceMsg(code) {
       const map = {
-        token_invalid: 'токен Facebook недействителен',
+        token_invalid: 'токен Telegram недействителен',
         no_author_id: 'нет ID автора — забанить нельзя',
         not_found: 'объект не найден на платформе',
         rate_limited: 'платформа ограничила частоту запросов',
@@ -506,7 +499,7 @@
 
       const defaultHint = overriding
         ? `Задана отдельная модель модерации. <b>${esc(selModel)}</b> (${esc(selVendor)}).`
-        : `по умолчанию: как в дайджесте (<b>${esc(M.digestModel || selModel)}</b>). Судья наследует модель дайджеста, пока вы не выберете свою.`;
+        : `Модель модерации AIchatTG: <b>${esc(M.defaultModel || selModel)}</b> (${esc(M.defaultVendor || selVendor)}).`;
       const safety = M.telegramSafety || {};
       const safetyHint = safety.model
         ? `<div class="info-note" style="margin-top:10px"><b>Telegram safety:</b> ` +
@@ -540,7 +533,7 @@
             <label>Модель</label>
             <select id="f-model">${modelOpts}</select>
             <input type="text" id="f-modelCustom" style="margin-top:8px;display:${inList ? 'none' : 'block'}" placeholder="Введите id модели вручную" value="${inList ? '' : esc(selModel)}">
-            <div class="hint">Список — подсказка, не исчерпывающий. Можно ввести любой id через «Другая». Пусто → используется модель дайджеста.</div>
+            <div class="hint">Список — подсказка, не исчерпывающий. Можно ввести любой разрешённый AIchatTG model id через «Другая».</div>
           </div>
 
           <div class="group-subtitle write">Дополнительно</div>
@@ -548,7 +541,7 @@
             <div class="field">
               <label>Модель-улучшатель</label>
               <input type="text" id="f-improver" value="${esc(M.improverModelOverride || '')}" placeholder="по умолчанию: ${esc(M.improverModel || '')}">
-              <div class="hint">Сильная модель для предложений по промпту. Пусто → модель дайджеста.</div>
+              <div class="hint">Сильная модель для предложений по промпту. Пусто → runtime default AIchatTG.</div>
             </div>
             <div class="field">
               <label>Порог авто-бана (0..1)</label>
@@ -566,7 +559,7 @@
 
           <div class="save-bar write">
             <button class="btn btn-primary" id="save-model">Сохранить</button>
-            <button class="btn" id="reset-model">Сбросить к модели дайджеста</button>
+            <button class="btn" id="reset-model">Сбросить к runtime default</button>
             <span class="status" id="status-model"></span>
           </div>
         </div>`;
@@ -739,7 +732,7 @@
         if (!res.ok) { showStatus('model', false, data.error || 'Ошибка'); return; }
         await loadMode();
         renderModelTab();
-        showStatus('model', true, 'Сброшено к модели дайджеста ✓');
+        showStatus('model', true, 'Сброшено к runtime default ✓');
       } catch (e) { if (e.message !== 'auth') showStatus('model', false, e.message); }
     }
 
@@ -912,11 +905,6 @@
     function postUrl(e) {
       const ref = e.post_ref || '';
       const cid = e.platform_comment_id || '';
-      if (e.platform === 'facebook' && ref) {
-        // post_ref = {pageId}_{postId}; comment id's tail focuses the comment.
-        const tail = cid.includes('_') ? cid.split('_').pop() : '';
-        return 'https://www.facebook.com/' + encodeURIComponent(ref) + (tail ? '?comment_id=' + encodeURIComponent(tail) : '');
-      }
       if (e.platform === 'telegram' && ref) {
         // Supergroup -100XXXX + message id → t.me/c/ link (works for members).
         const m = ref.match(/^-100(\d+)$/);

@@ -15,12 +15,11 @@ other.
 | `a729ccd:src/pro/moderation/assistant-responses.js` | `src/provider-adapter.mjs` | Explicit provider-neutral seam only. Runtime-only configuration is disabled by default and makes no provider request. |
 | `a729ccd:src/services/notifier.js` | `src/notification-adapter.mjs` | Explicit adapter seam only. Default is a no-op receipt. |
 
-Deliberately deferred: News model catalog/pricing, actual course-index content,
-rate/daily limits and analytics, dashboard/operator pages, image download/Sharp
-pipeline, Telegram admin lookup, legacy poller, and all News database tables.
-The safe follow-up is a separately approved content import into the versioned
-AIchatTG snapshot format; no direct source path or `news-digest.db` mount is
-permitted.
+Deliberately excluded: News model catalog/pricing, News database tables, the
+legacy poller and direct News filesystem access. AIchatTG now owns rate limits,
+analytics read models and its operator console. Course-index content remains
+disabled until a new versioned AIchatTG snapshot is accepted; no direct source
+path or `news-digest.db` mount is permitted.
 
 ## Moderator safety-v3 artifact receipt
 

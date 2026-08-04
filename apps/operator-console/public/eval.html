@@ -244,7 +244,7 @@
       <h1>Тесты</h1>
       <div class="header-right"><span class="version-badge">AIchatTG</span></div>
     </div>
-    <p class="subtitle">Регрессионные тесты ассистента: фиксированная батарея вопросов гоняется через живой пайплайн (роутер → персона → база → модель) с детерминированными проверками кода. Отправки в группу не происходит.</p>
+    <p class="subtitle">Результаты регрессионных тестов AIchatTG Assistant. Запуск live-модели из Operator Console пока отключён.</p>
     <nav class="tabs">
       <a class="tab" href="moderation.html">Модерация</a>
       <a class="tab" href="assistant.html">Ассистент</a>
@@ -252,7 +252,7 @@
     </nav>
 
     <div class="auth-bar" id="authbar">
-      <span class="auth-ro">👁 Интерфейс перенесён из News. Сейчас доступен безопасный просмотр данных AIchatTG; тестовые вызовы модели отключены.</span>
+      <span class="auth-ro">👁 AIchatTG Operator Console: безопасный просмотр. Тестовые вызовы модели отключены.</span>
       <span class="auth-ok">✅ Вы авторизованы.</span>
       <a class="btn-login" href="#" id="btn-login">Войти</a>
       <a class="btn-logout" href="#" id="btn-logout">Выйти</a>
@@ -409,7 +409,7 @@
       return `
         <div class="card">
           <h2>Регрессионный прогон</h2>
-          <p class="card-desc">Фиксированная батарея кейсов проходит через живой пайплайн ассистента; каждый ответ проверяется кодом (роут, наличие/отсутствие ключевых сигналов, длина).</p>
+          <p class="card-desc">Здесь отображаются сохранённые результаты. Новый live-прогон требует отдельного подключённого eval runner.</p>
           <div class="run-head">
             ${ringBlock}
             ${stats}

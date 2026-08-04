@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+const composeUrl = new URL('../../../infra/aichattg/docker-compose.yml', import.meta.url);
+
+test('Telegram runtime receives the documented recovery and assistant settings', async () => {
+  const compose = await readFile(composeUrl, 'utf8');
+  const required = [
+    'TELEGRAM_RUNTIME_MODERATION_ANTICHANNELPIN',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_INTERVAL_SEC',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_BATCH_SIZE',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_LEASE_SEC',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_MAX_SAFE_RETRIES',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_BACKOFF_SEC',
+    'TELEGRAM_RUNTIME_MODERATOR_RECOVERY_SNAPSHOT_TTL_SEC',
+    'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC',
+    'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER',
+    'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED',
+  ];
+
+  for (const name of required) {
+    assert.match(compose, new RegExp(`^\\s+${name}:`, 'm'), `${name} is not passed to runtime`);
+  }
+});
+
+test('knowledge admission uses a separate read-only mount', async () => {
+  const compose = await readFile(composeUrl, 'utf8');
+
+  assert.match(compose, /source: "\$\{AICHATTG_KNOWLEDGE_ROOT:/);
+  assert.match(compose, /target: \/var\/lib\/aichattg\/knowledge\n\s+read_only: true/);
+  assert.match(compose, /TELEGRAM_RUNTIME_KNOWLEDGE_ROOT: \/var\/lib\/aichattg\/knowledge/);
+  assert.doesNotMatch(compose, /\/srv\/news_agent_001|news-digest\.db/);
+});

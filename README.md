@@ -14,7 +14,7 @@ publication to a Telegram channel — remain in the separate News Digest project
 ## Architecture principle
 
 The VPS and Traefik are shared infrastructure. AIchatTG is nevertheless a
-separate application: it will own its repository, release archive, container,
+separate application: it owns its repository, release archive, containers,
 database, data root, secrets, bot webhook paths, health endpoint, and release
 receipt. It must never read the News Digest database directly.
 
@@ -25,11 +25,11 @@ contract. Moderator and Assistant are now ported into their own runtime with a
 safety disposition barrier, fenced inbound receipts, bounded per-user dialogue
 state and code-owned public fallback replies. Course knowledge is deliberately
 disabled and unimported until a separately reviewed snapshot is admitted.
-The separate Compose release defines independent images, data roots and disabled
-Traefik routes. Approved knowledge content, provider configuration, historical
-state import, public hostname selection, and the live webhook cutover remain
-separate reviewed stages. No production webhook, bot token, model call, or
-Telegram message has been changed by this repository setup.
+The separate Compose release defines independent images, data roots and routes
+at `aikrol.questtales.com`. Moderator, Assistant and the operator console have
+completed their application cutover. Gatekeeper activation, a newly built
+course index, approved knowledge content, and any historical state import remain
+separate reviewed stages.
 
 ## Local checks
 
@@ -40,6 +40,7 @@ checks:
 ```bash
 npm --prefix apps/gatekeeper ci
 npm --prefix apps/telegram-runtime ci
+npm --prefix apps/operator-console ci
 npm test
 npm run check:gatekeeper
 ```
@@ -50,11 +51,12 @@ npm run check:gatekeeper
 apps/
   gatekeeper/       # entry and onboarding adapter
   telegram-runtime/ # moderator and assistant adapters
+  operator-console/ # read-only operations UI
 packages/
   telegram-core/    # shared event, identity, state and policy contracts
 docs/
 ```
 
-Gatekeeper, Moderator and Assistant now each have an AIchatTG-owned code and
-database boundary. Their live credentials, webhooks, historical state and
-course knowledge remain separate cutover stages.
+Gatekeeper, Moderator and Assistant each have an AIchatTG-owned code and data
+boundary. Course knowledge is intentionally disabled until a new index is
+built and accepted; it is never read from News.

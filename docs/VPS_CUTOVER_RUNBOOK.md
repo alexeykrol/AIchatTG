@@ -2,12 +2,11 @@
 
 ## Status and boundary
 
-This is a **prepared** local candidate, not a deployment receipt. It defines
-the two bot-runtime containers plus an optional read-only operator console,
-their own image names, bind-mounted data roots, environment boundary, health
-checks, and disabled Traefik routers. It
-does not create a VPS service, select a hostname, read or write secrets, copy a
-database, change a webhook, or touch News Digest.
+This runbook defines the bot-runtime containers plus the read-only operator
+console, their own image names, bind-mounted data roots, environment boundary,
+health checks, disabled Traefik routers, and the separation rules for later
+releases. A source commit is not itself a deployment receipt; verify the
+current production receipt before mutation.
 
 The permanent AIchatTG integrator owns public routing and the cutover queue. A
 production operation needs an exact candidate accepted by that controller, an
@@ -20,9 +19,9 @@ and stop conditions.
 | Concern | AIchatTG value | Separation rule |
 | --- | --- | --- |
 | Compose project | `aichattg` | Never run a News Compose file. |
-| Services | `aichattg-gatekeeper`, `aichattg-telegram-runtime`, optional `aichattg-operator-console` | None is named or derived from `news-digest`; the console mounts both AIchatTG databases read-only. |
+| Services | `aichattg-gatekeeper`, `aichattg-telegram-runtime`, `aichattg-operator-console` | None is named or derived from `news-digest`; the console mounts only the Telegram-runtime DB read-only. Gatekeeper has its own admin surface. |
 | Release source | one detached AIchatTG Git worktree at `AICHATTG_SOURCE_SHA` | Build only from that exact revision; no overlay or copied partial tree. |
-| Data root | `AICHATTG_DATA_ROOT/gatekeeper` and `AICHATTG_DATA_ROOT/telegram-runtime` | Must be a new non-symlink root outside `/srv/news_agent_001`; no Docker volume or SQLite file is shared. |
+| Data root | `AICHATTG_DATA_ROOT/gatekeeper`, `AICHATTG_DATA_ROOT/telegram-runtime`, and read-only `AICHATTG_KNOWLEDGE_ROOT` | Must be non-symlink roots outside `/srv/news_agent_001`; no Docker volume or SQLite file is shared. |
 | Runtime configuration | lease-scoped, mode-0600 file outside Git | Do not commit, print, or reuse News configuration/secrets. |
 | Shared host network | existing external `root_default` | It is only the Traefik attachment; AIchatTG owns different service and router names. |
 | Public hostname | `aikrol.questtales.com` | Approved Product Owner hostname; supplied through `AICHATTG_FQDN` in the private runtime file. |
@@ -100,8 +99,11 @@ These steps are intentionally not authorized by this candidate alone.
    `verify-release-source.sh` before any build. Do not stage files from an
    existing host checkout.
 3. Create `/srv/aichattg/data/{gatekeeper,telegram-runtime}` (or the other
-   approved `AICHATTG_DATA_ROOT`) as real, non-symlink directories owned by
-   UID/GID 1000 and mode `0700`. Confirm it is outside the News data root.
+   approved `AICHATTG_DATA_ROOT`) and the separate
+   `/srv/aichattg/knowledge` (or approved `AICHATTG_KNOWLEDGE_ROOT`) as real,
+   non-symlink directories owned by UID/GID 1000 and mode `0700`. Confirm all
+   three are outside the News data root. The knowledge directory is required
+   by the read-only mount even while knowledge admission is disabled.
 4. Place a new mode-0600 runtime file outside Git, based on
    `infra/aichattg/runtime.env.example`. Do not inspect or log its values.
    Keep both router flags `false` until their individual ingress approvals.

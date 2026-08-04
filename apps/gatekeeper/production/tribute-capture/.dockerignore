@@ -1,5 +1,0 @@
-node_modules
-receipts
-.env
-.env.*
-npm-debug.log*

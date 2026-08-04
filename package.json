@@ -1,6 +1,6 @@
 {
   "name": "@aichattg/platform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=20.20.0 <21"
@@ -12,7 +12,8 @@
     "status:moderator-recovery": "node scripts/aichattg/moderator-recovery-status.mjs",
     "telegram:ops": "node scripts/aichattg/telegram-ops.mjs",
     "test:knowledge-snapshot": "node --test scripts/aichattg/test/course-knowledge-snapshot.test.mjs",
+    "test:infra": "node --test scripts/aichattg/test/compose-contract.test.mjs",
     "test:operator-console": "npm --prefix apps/operator-console test",
-    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:operator-console"
+    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:infra && npm run test:operator-console"
   }
 }

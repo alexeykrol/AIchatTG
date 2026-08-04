@@ -2,10 +2,9 @@
 
 ## Starting point
 
-The legacy source is `News/news-digest-pipeline`. It currently contains both
-publishing and Telegram product code. The migration creates a new clean home
-for the Telegram product; it does not alter the production News runtime during
-the initial phases.
+The legacy source was `News/news-digest-pipeline`. AIchatTG now owns the
+Telegram product, while News is being cleaned back to digest, publishing and
+Facebook Page moderation responsibilities.
 
 ## Ownership map
 
@@ -17,23 +16,27 @@ the initial phases.
 | `src/services/llm.js`, model catalogue, config and auth | AIchatTG adapters/core | Recreate minimal Telegram-owned interfaces; do not import News application code. |
 | `news-digest.db` moderation records | AIchatTG database | Migrate only through a separately approved, versioned one-way plan. No direct mounting or dual writing. |
 
-## Phases
+## Completed extraction
 
-1. **Foundation** — establish this repository, the boundaries, migration
-   charter, and source provenance. No production change.
-2. **Gatekeeper port** — copy the exact accepted Gatekeeper subtree into
-   `apps/gatekeeper`, preserve its standalone tests and data-root isolation,
-   then verify it independently.
-3. **Telegram core extraction** — map and extract shared contracts required by
-   Moderator and Assistant: event claims, identity/access state, policy,
-   delivery receipts, LLM adapter, and configuration.
-4. **Moderator + Assistant port** — move both adapters to
-   `apps/telegram-runtime` against the new core. Do not duplicate their state
-   machine in both repositories.
-5. **Cutover plan** — separately approve data migration, webhook routes,
-   secret injection, Traefik routing, one service deployment, smoke limits and
-   rollback. Only after a verified cutover can legacy Telegram AI code be
-   retired from News.
+1. Repository, product boundaries and source provenance are established.
+2. Gatekeeper is ported under `apps/gatekeeper` with isolated persistence; its
+   onboarding scenario remains draft until Product Owner content is complete.
+3. Moderator and Assistant share AIchatTG core contracts and run under
+   `apps/telegram-runtime` with separate bot identities.
+4. The operator console is served by AIchatTG and no longer depends on News
+   routes, cookies or database files.
+5. AIchatTG is the production owner of Telegram AI. Removal of the duplicate
+   legacy source from the News repositories is a separate coordinated cleanup;
+   editorial Telegram publication and URL intake remain in News.
+
+## Remaining independent stages
+
+- Build and accept a new course index/knowledge snapshot; the old News course
+  artifact is not reused.
+- Import selected historical state only through the normalized one-way importer
+  if the Product Owner later needs it.
+- Activate Gatekeeper only after its scenario and external integrations pass
+  their own release gates.
 
 Historical state has a candidate-only, state-only importer described in
 [Runtime state importer](RUNTIME_STATE_IMPORT.md). It accepts a separately

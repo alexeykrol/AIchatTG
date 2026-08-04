@@ -107,8 +107,8 @@ export function legacyMode(config) {
     telegramChatIdSet: config.runtimeFlags.ingressEnabled,
     telegramAssistantChatCount: config.runtimeFlags.ingressEnabled ? 1 : 0,
     assistantEnabled: config.runtimeFlags.ingressEnabled,
-    digestModel: config.runtimeModels.answer || model,
-    digestVendor: vendor,
+    defaultModel: model,
+    defaultVendor: vendor,
     modelCatalog: {
       anthropic: [],
       openai: [model, config.runtimeModels.router, config.runtimeModels.answer]

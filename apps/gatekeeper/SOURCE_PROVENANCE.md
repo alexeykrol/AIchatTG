@@ -15,12 +15,11 @@ any bot, domain, webhook, secret, or production runtime.
   calculated by byte-sorting changed paths and hashing the concatenated
   candidate Git blob bytes.
 
-The local port has two deliberately mechanical adaptations: its package is
-renamed from `@news/telegram-gatekeeper` to `@aichattg/gatekeeper`, and
-`test/config.test.mjs` uses a location-independent scenario-path assertion
-instead of assuming the former `telegram-gatekeeper/` filesystem path. No
-runtime behavior, cryptographic derivation, scenario ID, or SQLite application
-identifier was changed.
+The first local port renamed the package and removed location assumptions.
+Later AIchatTG commits added the validated scenario catalog, Site/Zapier
+contracts and standalone deployment boundaries. The immutable source object
+above remains provenance for the imported baseline; current behavior is defined
+by this repository's Git history and tests.
 
 ## Isolation promise
 

@@ -216,8 +216,8 @@ The standalone read-only Gatekeeper settings surface is
 `/gatekeeper/admin/gatekeeper`; its JSON snapshot is
 `/gatekeeper/admin/settings/snapshot` on the configured public origin. The
 application emits canonical URLs under the fixed `/gatekeeper` prefix, so its
-browser asset, snapshot and Site-completion requests cannot fall through to a
-root-level News or other application route. It shows
+browser asset, snapshot and Site-completion requests cannot fall through to the
+AIchatTG operator console or another application route. It shows
 only aggregate counts and whether sources/destinations are configured. It never
 returns secrets, endpoint identifiers, email, Telegram IDs or raw stored rows.
 A runtime `GATEKEEPER_ADMIN_SETTINGS_TOKEN` is required for both routes. Without
@@ -225,16 +225,12 @@ it they return 404. With it they require HTTP Basic authentication using the
 fixed username `gatekeeper` and the token as the password. The application
 checks this boundary itself; a future reverse proxy must preserve the
 `Authorization` header and must not replace or bypass this check. The service
-still listens on loopback only, and this candidate does not create a public
-route for the settings page.
-A link from the shared News Digest navigation is intentionally outside this
-module and requires the shared-interface owner.
+still listens on the configured container port. A future unified AIchatTG
+navigation link is an operator-console integration task, not a News change.
 
-The historical `production/tribute-capture/` artifact is retained only as
-release evidence from the former News host topology. It is not an AIchatTG
-runtime, must not be started or adapted in place, and cannot activate a route
-under `aikrol.questtales.com`. Any future one-shot capture service needs a
-separate AIchatTG operations charter and exact deployment lease.
+The former one-shot Tribute capture service was removed from the active tree;
+its immutable Git history remains the release evidence. It must not be
+restarted as a production service.
 
 Telegram webhook registration is deliberately separate from server startup
 because it mutates external bot configuration:

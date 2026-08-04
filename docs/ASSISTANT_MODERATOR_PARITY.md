@@ -2,13 +2,13 @@
 
 ## Provenance
 
-This candidate is based on `AIchatTG@59f0a1754d7c5b0828ddf9da909f8a9ac1e46339`.
-Its behavior comes from two immutable, read-only News objects:
+The current AIchatTG main line descends from the original extraction candidate.
+Its imported behavior is grounded in two immutable, read-only News objects:
 
 | Source layer | Role in this port | Relationship |
 |---|---|---|
 | `a729ccd` | Deployed Moderator, Assistant command and safety disposition behavior | Production source of truth |
-| `ef1c6ea` | Accepted course-operations/help routing behavior | Separate accepted overlay; intentionally unported while course knowledge is frozen |
+| `ef1c6ea` | Accepted course-operations/help routing behavior | Ported policy/route layer; course content remains disabled until a new snapshot is admitted |
 
 No News file, runtime import, path, database, configuration value or secret is
 used by AIchatTG.
@@ -40,9 +40,9 @@ used by AIchatTG.
 
 ## Deliberate gaps
 
-This is not a deployment or full production-equivalence claim. Deferred work
-includes the approved-content import, live provider prompts/models/pricing,
-image handling, historical-state migration and all webhook/token/cutover work.
+This is not a full historical-state or course-content equivalence claim.
+Deferred work includes the new approved-content snapshot, image handling and
+optional historical-state migration.
 The read-only operator console is separate from this runtime and does not
 receive message or dialogue text. Those decisions need the permanent integrator
 and, where relevant, a Product Owner approval and exact release lease.
