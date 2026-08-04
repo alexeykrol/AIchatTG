@@ -102,9 +102,46 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_weak_strikes (
   chat_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   weak_strikes INTEGER NOT NULL CHECK(weak_strikes >= 0),
+  warning_stage TEXT NOT NULL DEFAULT 'none' CHECK(warning_stage IN ('none', 'first', 'final')),
+  warning_delivered_at INTEGER,
+  last_event_id TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (chat_id, user_id)
 );
+-- One native Telegram message may have several edit revisions. A weak-abuse
+-- strike is claimed at most once across those revisions, matching the deployed
+-- Guard policy and preventing edits from escalating a member repeatedly.
+CREATE TABLE IF NOT EXISTS runtime_moderation_message_ledger (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  latest_revision_identity TEXT NOT NULL,
+  weak_strike_event_id TEXT,
+  deletion_state TEXT,
+  deletion_at INTEGER,
+  PRIMARY KEY (chat_id, message_id)
+);
+-- External enforcement is a finite state machine. It deliberately contains no
+-- source text, answer text, token, or raw Telegram payload. A step marked
+-- calling or uncertain is never re-issued automatically because Telegram
+-- action endpoints do not offer a caller-provided idempotency key.
+CREATE TABLE IF NOT EXISTS runtime_moderation_enforcement_receipts (
+  event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  policy_action TEXT NOT NULL,
+  policy_json TEXT NOT NULL,
+  guard_proof_json TEXT,
+  status TEXT NOT NULL CHECK(status IN ('planned', 'calling', 'completed', 'skipped', 'uncertain')),
+  receipt_json TEXT,
+  error_code TEXT,
+  claim_id TEXT NOT NULL,
+  claim_generation INTEGER NOT NULL CHECK(claim_generation >= 1),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  completed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_moderation_enforcement_recovery
+  ON runtime_moderation_enforcement_receipts(status, updated_at);
 `;
 
 const MIGRATION_RECEIPT_SCHEMA = `
@@ -132,6 +169,13 @@ export function ensureRuntimeDatabaseSchema(db) {
   db.pragma('foreign_keys = ON');
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  // The pre-Guard standalone runtime created this table without warning state.
+  // Keep the expansion guarded and additive so an existing isolated runtime DB
+  // opens safely without a destructive table rebuild.
+  const columns = new Set(db.prepare('PRAGMA table_info(runtime_moderation_weak_strikes)').all().map((row) => row.name));
+  if (!columns.has('warning_stage')) db.exec("ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN warning_stage TEXT NOT NULL DEFAULT 'none'");
+  if (!columns.has('warning_delivered_at')) db.exec('ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN warning_delivered_at INTEGER');
+  if (!columns.has('last_event_id')) db.exec('ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN last_event_id TEXT');
 }
 
 /**
@@ -242,14 +286,85 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const currentWeakStrikes = db.prepare(`SELECT weak_strikes FROM runtime_moderation_weak_strikes
     WHERE chat_id = ? AND user_id = ?`);
   const incrementWeakStrike = db.prepare(`INSERT INTO runtime_moderation_weak_strikes
-    (chat_id, user_id, weak_strikes, updated_at) VALUES (?, ?, 1, ?)
+    (chat_id, user_id, weak_strikes, last_event_id, updated_at) VALUES (?, ?, 1, ?, ?)
     ON CONFLICT(chat_id, user_id) DO UPDATE SET
       weak_strikes = runtime_moderation_weak_strikes.weak_strikes + 1,
+      last_event_id = excluded.last_event_id,
       updated_at = excluded.updated_at`);
-  const reserveWeakStrike = db.transaction((chatId, userId, at) => {
+  const observeModerationMessage = db.prepare(`INSERT INTO runtime_moderation_message_ledger
+    (chat_id, message_id, latest_revision_identity) VALUES (?, ?, ?)
+    ON CONFLICT(chat_id, message_id) DO UPDATE SET latest_revision_identity = excluded.latest_revision_identity`);
+  const weakMessageClaim = db.prepare(`UPDATE runtime_moderation_message_ledger
+    SET weak_strike_event_id = ? WHERE chat_id = ? AND message_id = ? AND weak_strike_event_id IS NULL`);
+  const moderationMessage = db.prepare(`SELECT * FROM runtime_moderation_message_ledger
+    WHERE chat_id = ? AND message_id = ?`);
+  const markWarningDelivered = db.prepare(`UPDATE runtime_moderation_weak_strikes
+    SET warning_stage = CASE WHEN warning_stage = 'final' THEN 'final' ELSE ? END,
+        warning_delivered_at = ?, last_event_id = ?, updated_at = ?
+    WHERE chat_id = ? AND user_id = ?`);
+  const recordMessageDeletion = db.prepare(`UPDATE runtime_moderation_message_ledger
+    SET deletion_state = ?, deletion_at = ? WHERE chat_id = ? AND message_id = ?`);
+  const enforcementReceipt = db.prepare('SELECT * FROM runtime_moderation_enforcement_receipts WHERE event_id = ?');
+  const createEnforcementReceipt = db.prepare(`INSERT INTO runtime_moderation_enforcement_receipts
+    (event_id, chat_id, message_id, policy_action, policy_json, guard_proof_json,
+     status, claim_id, claim_generation, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, 1, ?, ?)
+    ON CONFLICT(event_id) DO NOTHING`);
+  const markEnforcementCalling = db.prepare(`UPDATE runtime_moderation_enforcement_receipts
+    SET status = 'calling', receipt_json = ?, error_code = NULL, updated_at = ?
+    WHERE event_id = ? AND claim_id = ? AND claim_generation = ? AND status IN ('planned', 'calling')`);
+  const completeEnforcementReceipt = db.prepare(`UPDATE runtime_moderation_enforcement_receipts
+    SET status = ?, receipt_json = ?, error_code = ?, updated_at = ?, completed_at = ?
+    WHERE event_id = ? AND claim_id = ? AND claim_generation = ? AND status IN ('planned', 'calling')`);
+  const reserveWeakStrike = db.transaction((chatId, userId, messageId, revisionIdentity, eventId, at) => {
+    observeModerationMessage.run(chatId, messageId, revisionIdentity);
     const before = currentWeakStrikes.get(chatId, userId)?.weak_strikes || 0;
-    incrementWeakStrike.run(chatId, userId, at);
-    return { before, after: before + 1 };
+    const claimed = weakMessageClaim.run(eventId, chatId, messageId).changes === 1;
+    if (!claimed) return { claimed: false, before, after: before, row: moderationMessage.get(chatId, messageId) };
+    incrementWeakStrike.run(chatId, userId, eventId, at);
+    return { claimed: true, before, after: before + 1, row: moderationMessage.get(chatId, messageId) };
+  });
+  const claimModerationSafetyEnforcement = db.transaction(({
+    eventId, chatId, messageId, revisionIdentity, userId = null, isWeak = false,
+    guardProof = null, derivePolicy,
+  }) => {
+    const existing = enforcementReceipt.get(String(eventId));
+    if (existing) return { claimed: false, existing, duplicateNative: false, policy: null };
+
+    const normalizedChatId = String(chatId);
+    const normalizedMessageId = String(messageId);
+    const normalizedEventId = String(eventId);
+    const normalizedUserId = userId == null || String(userId) === '' ? null : String(userId);
+    const at = now();
+    let strike = { claimed: false, before: 0, after: 0, row: null };
+    if (isWeak && normalizedUserId) {
+      observeModerationMessage.run(normalizedChatId, normalizedMessageId, String(revisionIdentity));
+      const before = currentWeakStrikes.get(normalizedChatId, normalizedUserId)?.weak_strikes || 0;
+      const claimed = weakMessageClaim.run(normalizedEventId, normalizedChatId, normalizedMessageId).changes === 1;
+      if (claimed) incrementWeakStrike.run(normalizedChatId, normalizedUserId, normalizedEventId, at);
+      strike = {
+        claimed,
+        before,
+        after: claimed ? before + 1 : before,
+        row: moderationMessage.get(normalizedChatId, normalizedMessageId),
+      };
+    } else {
+      observeModerationMessage.run(normalizedChatId, normalizedMessageId, String(revisionIdentity));
+    }
+    const policy = derivePolicy(strike.before);
+    const claimId = randomUUID();
+    createEnforcementReceipt.run(
+      normalizedEventId, normalizedChatId, normalizedMessageId, String(policy.action), JSON.stringify(policy),
+      guardProof == null ? null : JSON.stringify(guardProof), claimId, at, at,
+    );
+    return {
+      claimed: true,
+      claim: { eventId: normalizedEventId, claimId, claimGeneration: 1 },
+      existing: null,
+      duplicateNative: isWeak && normalizedUserId != null && !strike.claimed,
+      strike,
+      policy,
+    };
   });
 
   return {
@@ -354,9 +469,80 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       );
       return disposition.get(String(chatId), String(messageId));
     },
+    observeModerationMessage({ chatId, messageId, revisionIdentity }) {
+      observeModerationMessage.run(String(chatId), String(messageId), String(revisionIdentity));
+      return moderationMessage.get(String(chatId), String(messageId));
+    },
+    getWeakStrikeState({ chatId, userId }) {
+      if (userId == null || String(userId) === '') return { weakStrikes: 0, warningStage: 'none' };
+      const row = db.prepare(`SELECT weak_strikes, warning_stage, warning_delivered_at, last_event_id
+        FROM runtime_moderation_weak_strikes WHERE chat_id = ? AND user_id = ?`).get(String(chatId), String(userId));
+      return row
+        ? { weakStrikes: row.weak_strikes, warningStage: row.warning_stage, warningDeliveredAt: row.warning_delivered_at, lastEventId: row.last_event_id }
+        : { weakStrikes: 0, warningStage: 'none' };
+    },
+    reserveWeakStrikeForMessage({ chatId, userId, messageId, revisionIdentity, eventId }) {
+      if (userId == null || String(userId) === '') return { claimed: false, before: 0, after: 0, reason: 'author_identity_missing' };
+      return reserveWeakStrike(
+        String(chatId), String(userId), String(messageId), String(revisionIdentity), String(eventId), now(),
+      );
+    },
+    markWarningDelivered({ chatId, userId, eventId, stage }) {
+      if (userId == null || !['first', 'final'].includes(String(stage))) return { marked: false };
+      const at = now();
+      const changed = markWarningDelivered.run(String(stage), at, String(eventId), at, String(chatId), String(userId)).changes;
+      return { marked: changed === 1 };
+    },
+    recordModerationDeletion({ chatId, messageId, state }) {
+      return { recorded: recordMessageDeletion.run(String(state), now(), String(chatId), String(messageId)).changes === 1 };
+    },
+    claimModerationEnforcement({ eventId, chatId, messageId, policy, guardProof = null }) {
+      const claimId = randomUUID();
+      const at = now();
+      const claimed = createEnforcementReceipt.run(
+        String(eventId), String(chatId), String(messageId), String(policy.action), JSON.stringify(policy),
+        guardProof == null ? null : JSON.stringify(guardProof), claimId, at, at,
+      ).changes === 1;
+      const existing = claimed ? null : enforcementReceipt.get(String(eventId));
+      return {
+        claimed,
+        claim: claimed ? { eventId: String(eventId), claimId, claimGeneration: 1 } : null,
+        existing,
+      };
+    },
+    claimModerationSafetyEnforcement({
+      eventId, chatId, messageId, revisionIdentity, userId = null, isWeak = false,
+      guardProof = null, derivePolicy,
+    }) {
+      if (typeof derivePolicy !== 'function') throw new Error('derivePolicy is required');
+      return claimModerationSafetyEnforcement({
+        eventId, chatId, messageId, revisionIdentity, userId, isWeak, guardProof, derivePolicy,
+      });
+    },
+    markModerationEnforcementCalling({ claim: enforcementClaim, receipt }) {
+      if (!enforcementClaim) return { marked: false };
+      const marked = markEnforcementCalling.run(
+        JSON.stringify(receipt), now(), enforcementClaim.eventId,
+        enforcementClaim.claimId, enforcementClaim.claimGeneration,
+      ).changes === 1;
+      return { marked, row: enforcementReceipt.get(enforcementClaim.eventId) || null };
+    },
+    completeModerationEnforcement({ claim: enforcementClaim, status, receipt, errorCode = null }) {
+      if (!enforcementClaim || !['completed', 'skipped', 'uncertain'].includes(String(status))) return { completed: false };
+      const at = now();
+      const completed = completeEnforcementReceipt.run(
+        String(status), JSON.stringify(receipt), errorCode == null ? null : String(errorCode).slice(0, 120), at, at,
+        enforcementClaim.eventId, enforcementClaim.claimId, enforcementClaim.claimGeneration,
+      ).changes === 1;
+      return { completed, row: enforcementReceipt.get(enforcementClaim.eventId) || null };
+    },
+    getModerationEnforcement(eventId) { return enforcementReceipt.get(String(eventId)) || null; },
     reserveWeakStrike({ chatId, userId }) {
-      if (userId == null || String(userId) === '') return { before: 0, after: 0 };
-      return reserveWeakStrike(String(chatId), String(userId), now());
+      // Compatibility helper for non-Guard callers. Guard enforcement must use
+      // reserveWeakStrikeForMessage so edited revisions cannot create extra strikes.
+      if (userId == null || String(userId) === '') return { claimed: false, before: 0, after: 0 };
+      const syntheticMessageId = `compat:${randomUUID()}`;
+      return reserveWeakStrike(String(chatId), String(userId), syntheticMessageId, syntheticMessageId, syntheticMessageId, now());
     },
     recentDialogue(chatId, userId, limit = 3) {
       const current = dialogue.get(chatId, userId);

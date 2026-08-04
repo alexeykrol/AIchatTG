@@ -73,6 +73,51 @@ function replayInboundResult({ eventId, receiptId, existing, collision }) {
   };
 }
 
+function redactedActionResult(result, fallback) {
+  if (result?.ok === true) return { ok: true };
+  return {
+    ok: false,
+    error: String(result?.error || result?.skipped || fallback).slice(0, 120),
+    uncertain: result?.uncertain === true,
+  };
+}
+
+function applyTelegramSafetySignals(config, decision, comment) {
+  if (decision.safetyRoute === 'threat') return decision;
+  const exemptBots = new Set((config.moderator?.exemptBotIds || []).map(String));
+  let signal = null;
+  if (comment.isBot && !exemptBots.has(String(comment.userId || ''))) signal = 'is_bot';
+  else if (comment.senderChatId) signal = 'sender_chat';
+  else if (config.moderationBanLinks === true && comment.hasLink) signal = 'link';
+  if (!signal) return decision;
+  return {
+    ...decision,
+    safetyRoute: 'threat',
+    abuseLevel: null,
+    confidence: Math.max(decision.confidence, 1),
+    reason: `${decision.reason || ''} [signal:${signal}]`.trim(),
+    codeSignal: signal,
+  };
+}
+
+function enforcementReceipt(plan, guardProof = null) {
+  return {
+    policy: {
+      action: plan.action,
+      route: plan.safetyRoute,
+      abuseLevel: plan.abuseLevel,
+      strikeBefore: plan.strikeBefore,
+      strikeAfter: plan.strikeAfter,
+    },
+    guard: guardProof == null ? null : {
+      proven: guardProof.proven === true,
+      reason: guardProof.reason || null,
+      status: guardProof.status || null,
+    },
+    steps: {},
+  };
+}
+
 /**
  * The assistant reads only the moderator's durable terminal result for the exact
  * source revision. A missing/pending/error row never falls through to a model or
@@ -107,30 +152,149 @@ export function createTelegramRuntime({
   // previous seam. New bootstrap code provides `provider` exclusively.
   llm = null,
   moderatorTelegram,
+  guard = null,
   assistantTelegram,
   notifier,
   knowledge = unavailableKnowledge(),
   wait = sleep,
 }) {
   const modelProvider = provider || llm || createProviderAdapter({ enabled: false });
-  async function moderatorActions(comment, plan) {
-    const actions = [];
-    if (config.moderationMode !== 'live') return actions;
-    if (plan.action === 'delete_warn_1' || plan.action === 'delete_warn_2') {
-      actions.push(await moderatorTelegram.deleteMessage({ chatId: comment.chatId, messageId: comment.messageId }));
-      actions.push(await moderatorTelegram.sendMessage({
-        chatId: comment.chatId,
-        text: plan.action === 'delete_warn_1' ? WARNING_FIRST : WARNING_FINAL,
-        replyToMessageId: comment.messageId,
-      }));
-    } else if (plan.action === 'ban_purge') {
-      actions.push(await moderatorTelegram.banMember({ chatId: comment.chatId, userId: comment.userId }));
-      actions.push(await moderatorTelegram.deleteMessage({ chatId: comment.chatId, messageId: comment.messageId }));
+  const guardAdapter = guard;
+
+  async function completeEnforcement(claim, status, receipt, errorCode = null) {
+    const completed = store.completeModerationEnforcement({ claim, status, receipt, errorCode });
+    return { receipt, persisted: completed.completed === true, status };
+  }
+
+  async function enforceSafetyPlan(eventId, comment, decision, previewPlan) {
+    const isWeak = decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak';
+    const derivePreviewPolicy = () => planTelegramSafetyAction(decision, previewPlan.strikeBefore);
+    const deriveLivePolicy = (strikeBefore) => planTelegramSafetyAction(
+      decision, isWeak ? strikeBefore : previewPlan.strikeBefore,
+    );
+
+    // Clean is a terminal Moderator outcome but not enforcement. It gets its
+    // own receipt without probing or depending on destructive Guard rights.
+    if (previewPlan.action === 'none') {
+      const planned = store.claimModerationSafetyEnforcement({
+        eventId, chatId: comment.chatId, messageId: comment.messageId,
+        revisionIdentity: comment.platformMessageId, userId: comment.userId,
+        isWeak: false, derivePolicy: derivePreviewPolicy,
+      });
+      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      const receipt = enforcementReceipt(planned.policy);
+      receipt.status = 'clean';
+      await completeEnforcement(planned.claim, 'skipped', receipt, 'clean');
+      return { action: 'none', receipt, actions: [] };
     }
-    return actions;
+
+    if (config.moderationMode !== 'live') {
+      const planned = store.claimModerationSafetyEnforcement({
+        eventId, chatId: comment.chatId, messageId: comment.messageId,
+        revisionIdentity: comment.platformMessageId, userId: comment.userId,
+        isWeak: false, derivePolicy: derivePreviewPolicy,
+      });
+      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      const receipt = enforcementReceipt(planned.policy);
+      receipt.status = 'shadow';
+      await completeEnforcement(planned.claim, 'skipped', receipt, 'shadow_mode');
+      return { action: 'shadow', receipt, actions: [] };
+    }
+
+    const guardProof = !guardAdapter || typeof guardAdapter.verifyEnforcement !== 'function'
+      ? { proven: false, reason: 'guard_adapter_missing' }
+      : await guardAdapter.verifyEnforcement({ chatId: comment.chatId });
+    if (!guardProof?.proven) {
+      const planned = store.claimModerationSafetyEnforcement({
+        eventId, chatId: comment.chatId, messageId: comment.messageId,
+        revisionIdentity: comment.platformMessageId, userId: comment.userId,
+        isWeak: false, guardProof, derivePolicy: derivePreviewPolicy,
+      });
+      if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+      const receipt = enforcementReceipt(planned.policy, guardProof);
+      receipt.status = 'guard_unproven';
+      await completeEnforcement(planned.claim, 'skipped', receipt, guardProof?.reason || 'guard_rights_unproven');
+      return { action: 'guard_unproven', receipt, actions: [], reason: guardProof?.reason || 'guard_rights_unproven' };
+    }
+
+    const planned = store.claimModerationSafetyEnforcement({
+      eventId, chatId: comment.chatId, messageId: comment.messageId,
+      revisionIdentity: comment.platformMessageId, userId: comment.userId,
+      isWeak, guardProof, derivePolicy: deriveLivePolicy,
+    });
+    if (!planned.claimed) return { action: 'enforcement_already_recorded', receipt: planned.existing, actions: [] };
+    const plan = planned.policy;
+    const receipt = enforcementReceipt(plan, guardProof);
+    if (planned.duplicateNative) {
+      receipt.status = 'duplicate_native_revision';
+      await completeEnforcement(planned.claim, 'skipped', receipt, 'duplicate_native_revision');
+      return { action: 'duplicate_native_revision', receipt, actions: [] };
+    }
+    const actions = [];
+    const callStep = async (name, invoke) => {
+      receipt.steps[name] = { status: 'calling' };
+      const calling = store.markModerationEnforcementCalling({ claim: planned.claim, receipt });
+      if (!calling.marked) return { ok: false, error: 'enforcement_claim_fenced', uncertain: true };
+      const result = redactedActionResult(await invoke(), `${name}_failed`);
+      receipt.steps[name] = { status: result.ok ? 'completed' : result.uncertain ? 'uncertain' : 'skipped', ...result };
+      actions.push({ step: name, ...receipt.steps[name] });
+      return result;
+    };
+    if (plan.action === 'delete_warn_1' || plan.action === 'delete_warn_2') {
+      const deleted = await callStep('delete', () => guardAdapter.deleteMessage({
+        chatId: comment.chatId, messageId: comment.messageId,
+      }));
+      if (!deleted.ok) {
+        receipt.status = deleted.uncertain ? 'uncertain' : 'guard_unproven';
+        await completeEnforcement(planned.claim, deleted.uncertain ? 'uncertain' : 'skipped', receipt, deleted.error);
+        return { action: 'abuse_delete_unconfirmed', receipt, actions };
+      }
+      store.recordModerationDeletion({ chatId: comment.chatId, messageId: comment.messageId, state: 'deleted' });
+      const warned = await callStep('warning', () => guardAdapter.sendWarning({
+        chatId: comment.chatId,
+        messageId: comment.messageId,
+        text: plan.action === 'delete_warn_1' ? WARNING_FIRST : WARNING_FINAL,
+      }));
+      if (!warned.ok) {
+        receipt.status = warned.uncertain ? 'uncertain' : 'guard_unproven';
+        await completeEnforcement(planned.claim, warned.uncertain ? 'uncertain' : 'skipped', receipt, warned.error);
+        return { action: 'abuse_warning_unconfirmed', receipt, actions };
+      }
+      store.markWarningDelivered({
+        chatId: comment.chatId, userId: comment.userId, eventId,
+        stage: plan.action === 'delete_warn_1' ? 'first' : 'final',
+      });
+      receipt.status = 'completed';
+      await completeEnforcement(planned.claim, 'completed', receipt);
+      return { action: plan.action, receipt, actions };
+    }
+
+    const banned = await callStep('ban', () => guardAdapter.banAuthor({
+      chatId: comment.chatId, userId: comment.userId, senderChatId: comment.senderChatId,
+    }));
+    if (!banned.ok && banned.uncertain) {
+      receipt.status = 'uncertain';
+      await completeEnforcement(planned.claim, 'uncertain', receipt, banned.error);
+      return { action: 'ban_unconfirmed', receipt, actions };
+    }
+    const deleted = await callStep('delete', () => guardAdapter.deleteMessage({
+      chatId: comment.chatId, messageId: comment.messageId,
+    }));
+    if (!deleted.ok) {
+      receipt.status = deleted.uncertain ? 'uncertain' : 'guard_unproven';
+      await completeEnforcement(planned.claim, deleted.uncertain ? 'uncertain' : 'skipped', receipt, deleted.error);
+      return { action: 'purge_unconfirmed', receipt, actions };
+    }
+    store.recordModerationDeletion({ chatId: comment.chatId, messageId: comment.messageId, state: 'deleted' });
+    receipt.status = 'completed';
+    await completeEnforcement(planned.claim, 'completed', receipt);
+    return { action: banned.ok ? 'ban_purge' : 'delete_no_author', receipt, actions };
   }
 
   async function handleModerator(eventId, comment) {
+    store.observeModerationMessage({
+      chatId: comment.chatId, messageId: comment.messageId, revisionIdentity: comment.platformMessageId,
+    });
     store.upsertAssistantDisposition({
       chatId: comment.chatId,
       messageId: comment.messageId,
@@ -139,6 +303,38 @@ export function createTelegramRuntime({
       reason: 'moderator_judging',
       moderationEventId: eventId,
     });
+    if (!guardAdapter || typeof guardAdapter.senderDisposition !== 'function') {
+      store.upsertAssistantDisposition({
+        chatId: comment.chatId, messageId: comment.messageId, status: 'error',
+        moderationMessageId: comment.platformMessageId, reason: 'guard_adapter_missing', moderationEventId: eventId,
+      });
+      return { kind: 'skipped', reason: 'guard_adapter_missing' };
+    }
+    const sender = await guardAdapter.senderDisposition({
+      chatId: comment.chatId,
+      userId: comment.userId,
+      isBot: comment.isBot,
+      senderChatId: comment.senderChatId,
+    });
+    if (!sender?.proven) {
+      store.upsertAssistantDisposition({
+        chatId: comment.chatId, messageId: comment.messageId, status: 'error',
+        moderationMessageId: comment.platformMessageId,
+        reason: sender?.reason || 'sender_exemption_unproven', moderationEventId: eventId,
+      });
+      return { kind: 'skipped', reason: sender?.reason || 'sender_exemption_unproven' };
+    }
+    if (sender.exempt) {
+      store.upsertAssistantDisposition({
+        chatId: comment.chatId, messageId: comment.messageId, status: 'allowed', verdict: 'exempt',
+        moderationMessageId: comment.platformMessageId, reason: sender.reason, moderationEventId: eventId,
+      });
+      store.recordModeration({
+        eventId, ...comment, verdict: 'clean', confidence: 1, reason: sender.reason,
+        mode: config.moderationMode, actions: [],
+      });
+      return { kind: 'moderated', verdict: 'clean', action: 'exempt', actions: [] };
+    }
     let decision;
     try {
       decision = normalizeSafetyClassification(await modelProvider.moderate({
@@ -166,23 +362,26 @@ export function createTelegramRuntime({
       });
       throw new Error('moderation adapter returned an invalid closed safety verdict');
     }
-    const strikes = decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak'
-      ? store.reserveWeakStrike({ chatId: comment.chatId, userId: comment.userId })
-      : { before: 0, after: 0 };
-    const plan = planTelegramSafetyAction(decision, strikes.before);
+    decision = applyTelegramSafetySignals(config, decision, comment);
+    const strikeState = store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
+    const plan = planTelegramSafetyAction(decision, strikeState.weakStrikes);
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({
       chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
       moderationMessageId: comment.platformMessageId, reason: decision.reason, moderationEventId: eventId,
     });
-    const actions = await moderatorActions(comment, plan);
-    if (plan.verdict === 'suspect') {
+    const enforcement = await enforceSafetyPlan(eventId, comment, decision, plan);
+    const actions = enforcement.actions || [];
+    if (plan.verdict === 'suspect' && ['delete_warn_1', 'delete_warn_2'].includes(enforcement.action)) {
       actions.push(await notifier.notify({ kind: 'moderation_suspect', comment, decision, plan }));
     }
     store.recordModeration({
       eventId, ...comment, ...decision, ...plan, mode: config.moderationMode, actions,
     });
-    return { kind: 'moderated', verdict: plan.verdict, action: plan.action, actions };
+    return {
+      kind: 'moderated', verdict: plan.verdict, action: enforcement.action,
+      actions, enforcement: enforcement.receipt || null,
+    };
   }
 
   async function routeAssistantQuestion(question) {

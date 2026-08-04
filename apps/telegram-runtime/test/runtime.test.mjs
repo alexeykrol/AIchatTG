@@ -64,11 +64,23 @@ function availableKnowledge() {
 }
 
 function adapters(actions) {
+  const moderatorTelegram = {
+    async getChatMember() { return { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } }; },
+    async banMember(input) { actions.push(['ban', input]); return { ok: true }; },
+    async banSenderChat(input) { actions.push(['ban_sender_chat', input]); return { ok: true }; },
+    async deleteMessage(input) { actions.push(['delete', input]); return { ok: true }; },
+    async sendMessage(input) { actions.push(['warn', input]); return { ok: true }; },
+  };
   return {
-    moderatorTelegram: {
-      async banMember(input) { actions.push(['ban', input]); return { ok: true }; },
-      async deleteMessage(input) { actions.push(['delete', input]); return { ok: true }; },
-      async sendMessage(input) { actions.push(['warn', input]); return { ok: true }; },
+    moderatorTelegram,
+    guard: {
+      async verifyEnforcement() { return { proven: true, status: 'administrator' }; },
+      async senderDisposition() { return { proven: true, exempt: false, reason: null }; },
+      deleteMessage(input) { return moderatorTelegram.deleteMessage(input); },
+      sendWarning(input) { return moderatorTelegram.sendMessage(input); },
+      banAuthor(input) { return input.senderChatId != null
+        ? moderatorTelegram.banSenderChat(input)
+        : moderatorTelegram.banMember(input); },
     },
     assistantTelegram: {
       async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: 90 } }; },
@@ -111,6 +123,8 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.deepEqual(loaded.startupPlan, { setCommands: false, registerWebhook: false, deleteWebhook: false, poll: false });
   assert.equal(loaded.ingressEnabled, false);
   assert.equal(loaded.assistantModerationWaitMs, 30_000);
+  assert.equal(loaded.moderationBanLinks, true);
+  assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_MODERATION_BAN_LINKS: 'false' }).moderationBanLinks, false);
   assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /OpenAI-compatible/);
@@ -540,5 +554,114 @@ test('an ambiguous Telegram delivery is quarantined and exact redelivery cannot 
     assert.equal(sends, 1);
     assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_inbound_update_receipts
       WHERE receipt_id = 'assistant:406'`).get(), { status: 'uncertain', error_code: 'runtime_error' });
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('unproven Guard rights fail closed before a destructive safety plan reaches Telegram', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-guard-rights-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const guarded = adapters(actions);
+  guarded.guard.verifyEnforcement = async () => ({ proven: false, reason: 'guard_rights_unproven' });
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm({ safetyRoute: 'threat' }),
+    knowledge: availableKnowledge(), ...guarded,
+  });
+  try {
+    const moderated = await runtime.handleUpdate('moderator', update(501, 101, 'unsafe'));
+    assert.deepEqual({ verdict: moderated.verdict, action: moderated.action }, { verdict: 'ban', action: 'guard_unproven' });
+    assert.equal(actions.length, 0);
+    assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:501'`).get(), { status: 'skipped', error_code: 'guard_rights_unproven' });
+    const assistant = await runtime.handleUpdate('assistant', update(502, 101, '/ask unsafe'));
+    assert.equal(assistant.reason, 'moderator_blocked');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('exempt chat administrators become a terminal Moderator allow without a model call', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-guard-exempt-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const guarded = adapters(actions);
+  let safetyCalls = 0;
+  guarded.guard.senderDisposition = async () => ({ proven: true, exempt: true, reason: 'chat_admin_or_creator' });
+  const provider = fakeLlm();
+  provider.moderate = async () => { safetyCalls++; throw new Error('must not judge exempt sender'); };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...guarded,
+  });
+  try {
+    const moderated = await runtime.handleUpdate('moderator', update(503, 102, '/ask protected'));
+    assert.deepEqual({ verdict: moderated.verdict, action: moderated.action }, { verdict: 'clean', action: 'exempt' });
+    assert.equal(safetyCalls, 0);
+    const answered = await runtime.handleUpdate('assistant', update(504, 102, '/ask protected'));
+    assert.equal(answered.kind, 'answered');
+    assert.equal(actions.at(-1)[0], 'send');
+    assert.equal(db.prepare(`SELECT verdict, reason FROM runtime_assistant_moderation_dispositions
+      WHERE chat_id = '-100' AND message_id = '102'`).get().verdict, 'exempt');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('link hard rule escalates URLs but never an @mention', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-link-policy-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config({ moderationBanLinks: true }), store: createRuntimeStore(db), provider: fakeLlm(),
+    knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    const mention = update(505, 103, '@participant спасибо');
+    mention.message.entities = [{ type: 'mention', offset: 0, length: 12 }];
+    assert.equal((await runtime.handleUpdate('moderator', mention)).action, 'none');
+    assert.equal(actions.length, 0);
+
+    const linked = update(506, 104, 'https://example.test');
+    linked.message.entities = [{ type: 'url', offset: 0, length: linked.message.text.length }];
+    const result = await runtime.handleUpdate('moderator', linked);
+    assert.deepEqual({ verdict: result.verdict, action: result.action }, { verdict: 'ban', action: 'ban_purge' });
+    assert.deepEqual(actions.map(([kind]) => kind), ['ban', 'delete']);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an edited weak-abuse revision cannot mint a second strike or resend enforcement', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-weak-edit-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm({ safetyRoute: 'abuse', abuseLevel: 'weak' }),
+    knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    assert.equal((await runtime.handleUpdate('moderator', update(507, 105, 'weak abuse'))).action, 'delete_warn_1');
+    const actionCount = actions.length;
+    assert.equal((await runtime.handleUpdate('moderator', editedUpdate(508, 105, 'edited weak abuse'))).action, 'duplicate_native_revision');
+    assert.equal(actions.length, actionCount);
+    assert.equal(db.prepare('SELECT weak_strikes FROM runtime_moderation_weak_strikes').get().weak_strikes, 1);
+    assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:508'`).get(), { status: 'skipped', error_code: 'duplicate_native_revision' });
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an uncertain Guard delete is durably quarantined and exact redelivery never resends it', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-guard-uncertain-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const guarded = adapters(actions);
+  let deletes = 0;
+  guarded.guard.deleteMessage = async () => { deletes++; return { ok: false, error: 'transport_unknown', uncertain: true }; };
+  const runtime = createTelegramRuntime({
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm({ safetyRoute: 'abuse', abuseLevel: 'weak' }),
+    knowledge: availableKnowledge(), ...guarded,
+  });
+  const delivery = update(509, 106, 'weak abuse');
+  try {
+    const first = await runtime.handleUpdate('moderator', delivery);
+    const replay = await runtime.handleUpdate('moderator', delivery);
+    assert.equal(first.action, 'abuse_delete_unconfirmed');
+    assert.deepEqual(replay, first);
+    assert.equal(deletes, 1);
+    assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_moderation_enforcement_receipts
+      WHERE event_id = 'moderator:509'`).get(), { status: 'uncertain', error_code: 'transport_unknown' });
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });

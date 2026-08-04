@@ -37,6 +37,11 @@ const ASSISTANT_CMD_RE = /^\s*\/(ask|help)(?:@([A-Za-z0-9_]+))?(?:\s+|$)/i;
 const QUOTED_LITERAL_ENTITY_TYPES = new Set([
   'blockquote', 'expandable_blockquote', 'code', 'pre', 'pre_code',
 ]);
+// Telegram `mention` entities are deliberately not links: a person may address
+// another participant without triggering the hard link policy.  Entities are
+// authoritative when present; this narrow fallback covers normal URLs, t.me
+// links and Telegram deep links when clients omit entity metadata.
+const TELEGRAM_LINK_RE = /(?<![\p{L}\p{N}_])(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|tg:\/\/)/iu;
 const SERVICE_FIELDS = [
   'new_chat_members', 'left_chat_member', 'new_chat_title', 'new_chat_photo',
   'delete_chat_photo', 'group_chat_created', 'supergroup_chat_created',
@@ -102,6 +107,16 @@ export function incomingEventId(role, update) {
     throw new Error('Telegram update_id must be a non-negative safe integer');
   }
   return `${role}:${update.update_id}`;
+}
+
+/**
+ * Code-owned Telegram link signal for the Guard safety policy.  Only a URL or
+ * text_link entity is a link; an @mention remains ordinary conversation.
+ */
+export function detectTelegramLink(message) {
+  const entities = [...(message?.entities || []), ...(message?.caption_entities || [])];
+  if (entities.some((entity) => entity && (entity.type === 'url' || entity.type === 'text_link'))) return true;
+  return TELEGRAM_LINK_RE.test(`${message?.text || ''}\n${message?.caption || ''}`);
 }
 
 export function messageFromUpdate(update) {
@@ -185,6 +200,7 @@ export function classifyTelegramUpdate({
       username: message.from?.username || null,
       isBot: Boolean(message.from?.is_bot),
       senderChatId: message.sender_chat?.id == null ? null : String(message.sender_chat.id),
+      hasLink: detectTelegramLink(message),
     },
   };
 }

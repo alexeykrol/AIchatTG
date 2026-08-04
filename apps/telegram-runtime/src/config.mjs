@@ -139,6 +139,10 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     },
     ingressEnabled,
     moderationMode: String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow',
+    // The published Telegram safety policy treats real URLs as a hard spam
+    // signal. @mentions are excluded by the core detector, so this default does
+    // not turn normal conversation into a link violation.
+    moderationBanLinks: boolean(env, 'TELEGRAM_RUNTIME_MODERATION_BAN_LINKS', true),
     assistantModerationWaitMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_WAIT_MS', 30_000),
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     moderator,

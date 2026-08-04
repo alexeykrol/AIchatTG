@@ -11,6 +11,7 @@ import {
   assistantDispositionForSafety,
   classifyTelegramUpdate,
   detectAssistantQuestion,
+  detectTelegramLink,
   incomingEventId,
   isCourseOperationsSupportQuestion,
   knowledgeManifestDigest,
@@ -66,6 +67,18 @@ test('closed safety policy owns actions and Assistant access dispositions', () =
     status: 'allowed', verdict: 'clean',
   });
   assert.equal(normalizeSafetyClassification({ safetyRoute: 'clean', abuseLevel: 'weak', confidence: 1 }), null);
+});
+
+test('Telegram real-link signal keeps ordinary @mentions legal', () => {
+  assert.equal(detectTelegramLink(message('@participant спасибо', {
+    entities: [{ type: 'mention', offset: 0, length: 12 }],
+  })), false);
+  assert.equal(detectTelegramLink(message('посмотри https://example.test')), true);
+  assert.equal(detectTelegramLink(message('канал', {
+    entities: [{ type: 'text_link', offset: 0, length: 5, url: 'https://example.test' }],
+  })), true);
+  assert.equal(detectTelegramLink(message('not.me/fragment')), false);
+  assert.equal(detectTelegramLink(message('t.me/example')), true);
 });
 
 test('course operations and course content use disjoint closed routing packages', () => {
