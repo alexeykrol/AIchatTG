@@ -133,6 +133,28 @@ test('default configuration does not plan Telegram side effects or polling', () 
   }, { cwd: '/tmp/aichattg-test' }), /must name a file below TELEGRAM_RUNTIME_KNOWLEDGE_ROOT/);
 });
 
+test('enabled ingress requires both role identities and live Assistant-to-Guard chat coverage', () => {
+  const ingress = {
+    TELEGRAM_RUNTIME_INGRESS_ENABLED: 'true',
+    TELEGRAM_RUNTIME_MODERATOR_BOT_TOKEN: 'moderator-token',
+    TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS: 'guarded-chat',
+    TELEGRAM_RUNTIME_MODERATOR_WEBHOOK_SECRET: 'moderator-secret',
+    TELEGRAM_RUNTIME_ASSISTANT_BOT_TOKEN: 'assistant-token',
+    TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS: 'guarded-chat',
+    TELEGRAM_RUNTIME_ASSISTANT_WEBHOOK_SECRET: 'assistant-secret',
+  };
+  assert.equal(loadRuntimeConfig(ingress).ingressEnabled, true);
+  assert.throws(() => loadRuntimeConfig({ ...ingress, TELEGRAM_RUNTIME_ASSISTANT_BOT_TOKEN: '' }),
+    /TELEGRAM_RUNTIME_ASSISTANT_BOT_TOKEN is required when ingress is enabled/);
+  assert.throws(() => loadRuntimeConfig({ ...ingress, TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS: '' }),
+    /TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS requires at least one chat when ingress is enabled/);
+  assert.throws(() => loadRuntimeConfig({
+    ...ingress,
+    TELEGRAM_RUNTIME_MODERATION_MODE: 'live',
+    TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS: 'assistant-only-chat',
+  }), /TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS must be covered by TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS when live ingress is enabled/);
+});
+
 test('disabled or invalid provider adapters cannot call fetch', async () => {
   let calls = 0;
   const fetchFn = async () => { calls++; };

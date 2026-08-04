@@ -92,6 +92,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     throw new Error('webhook registration and command setup are separate cutover actions, never startup behavior');
   }
   const ingressEnabled = boolean(env, 'TELEGRAM_RUNTIME_INGRESS_ENABLED', false);
+  const moderationMode = String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow';
   const knowledgeRoot = resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge'));
   const moderator = roleConfig(env, 'MODERATOR');
   const assistant = roleConfig(env, 'ASSISTANT');
@@ -99,6 +100,15 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     for (const role of roleNames) {
       const config = role === 'MODERATOR' ? moderator : assistant;
       if (!config.webhookSecret) throw new Error(`TELEGRAM_RUNTIME_${role}_WEBHOOK_SECRET is required when ingress is enabled`);
+      if (!config.botToken) throw new Error(`TELEGRAM_RUNTIME_${role}_BOT_TOKEN is required when ingress is enabled`);
+      if (!config.chatIds.length) throw new Error(`TELEGRAM_RUNTIME_${role}_CHAT_IDS requires at least one chat when ingress is enabled`);
+    }
+    if (moderationMode === 'live') {
+      const guardedChats = new Set(moderator.chatIds);
+      const uncoveredAssistantChat = assistant.chatIds.find((chatId) => !guardedChats.has(chatId));
+      if (uncoveredAssistantChat) {
+        throw new Error('TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS must be covered by TELEGRAM_RUNTIME_MODERATOR_CHAT_IDS when live ingress is enabled');
+      }
     }
   }
   const provider = {
@@ -138,7 +148,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
       },
     },
     ingressEnabled,
-    moderationMode: String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow',
+    moderationMode,
     // The published Telegram safety policy treats real URLs as a hard spam
     // signal. @mentions are excluded by the core detector, so this default does
     // not turn normal conversation into a link violation.
