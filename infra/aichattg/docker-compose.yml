@@ -133,6 +133,60 @@ services:
       traefik.http.routers.aichattg-telegram-runtime.priority: "250"
       traefik.http.services.aichattg-telegram-runtime.loadbalancer.server.port: "8788"
 
+  aichattg-operator-console:
+    <<: *service-security
+    profiles:
+      - operator-console
+    image: "aichattg/operator-console:${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    build:
+      context: ../..
+      dockerfile: infra/aichattg/Dockerfile.operator-console
+      args:
+        AICHATTG_SOURCE_SHA: "${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    environment:
+      OPERATOR_CONSOLE_PORT: "8790"
+      OPERATOR_CONSOLE_CONTAINER_BIND: "true"
+      AICHATTG_OPERATOR_TOKEN: "${AICHATTG_OPERATOR_TOKEN:-}"
+      OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH: /var/lib/aichattg/telegram-runtime/telegram-runtime.sqlite
+      OPERATOR_CONSOLE_GATEKEEPER_DATABASE_PATH: /var/lib/aichattg/gatekeeper/gatekeeper.sqlite
+      TELEGRAM_RUNTIME_INGRESS_ENABLED: "${TELEGRAM_RUNTIME_INGRESS_ENABLED:-false}"
+      TELEGRAM_RUNTIME_MODERATION_MODE: "${TELEGRAM_RUNTIME_MODERATION_MODE:-shadow}"
+      TELEGRAM_RUNTIME_PROVIDER_ENABLED: "${TELEGRAM_RUNTIME_PROVIDER_ENABLED:-false}"
+      TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED: "${TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED:-false}"
+      GATEKEEPER_SCENARIO_READY: "${GATEKEEPER_SCENARIO_READY:-false}"
+      GATEKEEPER_SITE_ENABLED: "${GATEKEEPER_SITE_ENABLED:-false}"
+      GATEKEEPER_ZAPIER_ENABLED: "${GATEKEEPER_ZAPIER_ENABLED:-false}"
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/telegram-runtime"
+        target: /var/lib/aichattg/telegram-runtime
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/gatekeeper"
+        target: /var/lib/aichattg/gatekeeper
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      traefik.enable: "${AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED:-false}"
+      traefik.docker.network: root_default
+      traefik.http.routers.aichattg-operator-console.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`) && PathPrefix(`/operator`)"
+      traefik.http.routers.aichattg-operator-console.entrypoints: web,websecure
+      traefik.http.routers.aichattg-operator-console.tls: "true"
+      traefik.http.routers.aichattg-operator-console.tls.certresolver: mytlschallenge
+      traefik.http.routers.aichattg-operator-console.middlewares: aichattg-operator-console-strip@docker
+      traefik.http.routers.aichattg-operator-console.priority: "300"
+      traefik.http.middlewares.aichattg-operator-console-strip.stripprefix.prefixes: /operator
+      traefik.http.services.aichattg-operator-console.loadbalancer.server.port: "8790"
+
 networks:
   aichattg_private:
     internal: true

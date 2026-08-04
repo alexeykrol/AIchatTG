@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIchatTG Bot Console</title>
+  <link rel="stylesheet" href="operator.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">AIchatTG</p>
+      <h1>Bot console</h1>
+      <p class="summary">Read-only operational view for Moderator, Assistant, and Gatekeeper.</p>
+    </header>
+    <p id="state" role="status">Loading current read-only status…</p>
+    <section id="bots" class="cards" aria-label="Bot status"></section>
+    <section>
+      <h2>State counts</h2>
+      <pre id="counts">Loading…</pre>
+    </section>
+    <section>
+      <h2>Recovery queues</h2>
+      <pre id="recovery">Loading…</pre>
+    </section>
+    <section>
+      <h2>Redacted audit</h2>
+      <div class="audit-wrap"><table><thead><tr><th>Source</th><th>Type</th><th>Identifier</th><th>Status</th><th>Timestamp</th></tr></thead><tbody id="audit"></tbody></table></div>
+    </section>
+    <footer>AIchatTG operator console · No actions are available here.</footer>
+  </main>
+  <script type="module" src="operator.js"></script>
+</body>
+</html>

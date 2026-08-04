@@ -1,0 +1,20 @@
+:root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background: #10151d; color: #eef3f7; }
+body { margin: 0; }
+main { max-width: 1080px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+h1, h2, p { margin-top: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.25rem); margin-bottom: .4rem; }
+h2 { margin-top: 2.25rem; }
+.eyebrow { color: #8ee6bc; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.summary, footer { color: #b7c2ce; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; }
+.card, pre, .audit-wrap { background: #19212c; border: 1px solid #304052; border-radius: .75rem; }
+.card { padding: 1rem; }
+.card h2 { font-size: 1.1rem; margin: 0 0 .7rem; }
+.badge { display: inline-block; padding: .2rem .55rem; border-radius: 99px; background: #284e3d; color: #baf6d1; font-size: .86rem; }
+.unavailable { background: #562d34; color: #ffd8dc; }
+pre { margin: 0; overflow: auto; padding: 1rem; white-space: pre-wrap; }
+.audit-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { padding: .75rem; text-align: left; border-bottom: 1px solid #304052; white-space: nowrap; }
+th { color: #b7c2ce; }
+footer { margin-top: 2.5rem; font-size: .9rem; }
