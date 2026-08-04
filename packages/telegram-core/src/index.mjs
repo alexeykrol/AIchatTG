@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 
 export {
+  admitKnowledgeSnapshot,
   KNOWLEDGE_MANIFEST_FORMAT,
+  KNOWLEDGE_SOURCE_IDS,
+  knowledgeManifestDigest,
   loadKnowledgeSnapshot,
   validateKnowledgeManifest,
 } from './knowledge.mjs';

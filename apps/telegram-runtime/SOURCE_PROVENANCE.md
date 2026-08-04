@@ -12,7 +12,7 @@ other.
 | `a729ccd:src/pro/moderation/adapters/telegram.js` | `packages/telegram-core/src/index.mjs` | Exact leading `/ask` and `/help` command recognition, forwarded/literal command rejection, chat-scoped identities and role isolation. |
 | `a729ccd:src/pro/moderation/service.js`, `db.js`, `safety-policy.js` | `apps/telegram-runtime/src/database.mjs`, `src/runtime.mjs`; `packages/telegram-core/src/index.mjs` | Durable native question claims, exact-revision Moderator dispositions, fail-closed Assistant barrier and deterministic clean/weak-abuse/strong-abuse/threat action planning. |
 | `ef1c6ea:src/pro/moderation/topics/registry.js`, `role-action-gate.js` | `packages/telegram-core/src/index.mjs`, `src/knowledge.mjs`; `apps/telegram-runtime/src/knowledge-adapter.mjs` | Disjoint course-content and course-operations source packages; malformed/absent route or knowledge snapshot fails closed. |
-| `a729ccd:src/pro/moderation/assistant-responses.js` | `src/llm-adapter.mjs` | Explicit provider-neutral seams only. Default is disabled and makes no provider request. |
+| `a729ccd:src/pro/moderation/assistant-responses.js` | `src/provider-adapter.mjs` | Explicit provider-neutral seam only. Runtime-only configuration is disabled by default and makes no provider request. |
 | `a729ccd:src/services/notifier.js` | `src/notification-adapter.mjs` | Explicit adapter seam only. Default is a no-op receipt. |
 
 Deliberately deferred: News model catalog/pricing, actual course-index content,

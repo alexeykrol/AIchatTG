@@ -11,7 +11,7 @@ import {
   normalizeSafetyClassification,
   planTelegramSafetyAction,
 } from '@aichattg/telegram-core';
-import { LlmDisabledError } from './llm-adapter.mjs';
+import { createProviderAdapter, isProviderUnavailableError } from './provider-adapter.mjs';
 
 const HELP_TEXT = 'Используйте /ask <вопрос>, чтобы обратиться к ассистенту.';
 const EMPTY_ASK_TEXT = 'После /ask напишите ваш вопрос.';
@@ -66,13 +66,17 @@ async function waitForAssistantDisposition(store, config, question, wait) {
 export function createTelegramRuntime({
   config,
   store,
-  llm,
+  provider = null,
+  // Temporary injection compatibility for tests and local callers of the
+  // previous seam. New bootstrap code provides `provider` exclusively.
+  llm = null,
   moderatorTelegram,
   assistantTelegram,
   notifier,
   knowledge = unavailableKnowledge(),
   wait = sleep,
 }) {
+  const modelProvider = provider || llm || createProviderAdapter({ enabled: false });
   async function moderatorActions(comment, plan) {
     const actions = [];
     if (config.moderationMode !== 'live') return actions;
@@ -101,17 +105,17 @@ export function createTelegramRuntime({
     });
     let decision;
     try {
-      decision = normalizeSafetyClassification(await llm.moderate({
+      decision = normalizeSafetyClassification(await modelProvider.moderate({
         text: comment.text, chatId: comment.chatId, userId: comment.userId,
         messageId: comment.messageId, platformMessageId: comment.platformMessageId,
       }));
     } catch (error) {
-      if (error instanceof LlmDisabledError) {
+      if (isProviderUnavailableError(error)) {
         store.upsertAssistantDisposition({
           chatId: comment.chatId, messageId: comment.messageId, status: 'error',
-          moderationMessageId: comment.platformMessageId, reason: 'llm_disabled', moderationEventId: eventId,
+          moderationMessageId: comment.platformMessageId, reason: error.code, moderationEventId: eventId,
         });
-        return { kind: 'skipped', reason: 'llm_disabled' };
+        return { kind: 'skipped', reason: error.code };
       }
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
@@ -148,14 +152,14 @@ export function createTelegramRuntime({
   async function routeAssistantQuestion(question) {
     let route;
     try {
-      route = normalizeAssistantRoleRoute(await llm.routeAssistant({
+      route = normalizeAssistantRoleRoute(await modelProvider.routeAssistant({
         text: question.text,
         chatId: question.chatId,
         userId: question.userId,
         courseOperationsHint: isCourseOperationsSupportQuestion(question.text),
       }));
     } catch (error) {
-      if (error instanceof LlmDisabledError) return { error: 'llm_disabled' };
+      if (isProviderUnavailableError(error)) return { error: error.code };
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
@@ -212,7 +216,7 @@ export function createTelegramRuntime({
       }
       let answer;
       try {
-        answer = await llm.answer({
+        answer = await modelProvider.answer({
           text: question.text,
           chatId: question.chatId,
           userId: question.userId,
@@ -221,9 +225,9 @@ export function createTelegramRuntime({
           knowledge: routing.knowledge,
         });
       } catch (error) {
-        if (error instanceof LlmDisabledError) {
+        if (isProviderUnavailableError(error)) {
           store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
-          return { kind: 'skipped', reason: 'llm_disabled' };
+          return { kind: 'skipped', reason: error.code };
         }
         throw error;
       }

@@ -1,4 +1,6 @@
 import { resolve } from 'node:path';
+import { ASSISTANT_SOURCE_PACKAGES } from '@aichattg/telegram-core';
+import { validateProviderRuntimeConfig } from './provider-adapter.mjs';
 
 const roleNames = ['MODERATOR', 'ASSISTANT'];
 
@@ -38,6 +40,20 @@ function optionalSecret(env, name) {
   return value;
 }
 
+function configuredDigest(env, name) {
+  return String(env[name] || '').trim().toLowerCase();
+}
+
+function knowledgeAdmission(env, cwd, { sourceId, pathName, digestName, defaultPath }) {
+  return {
+    manifestPath: resolve(cwd, String(env[pathName] || defaultPath)),
+    expectedIdentity: {
+      sourceId,
+      manifestDigest: configuredDigest(env, digestName),
+    },
+  };
+}
+
 function roleConfig(env, role) {
   const prefix = `TELEGRAM_RUNTIME_${role}`;
   return {
@@ -66,11 +82,14 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
       if (!config.webhookSecret) throw new Error(`TELEGRAM_RUNTIME_${role}_WEBHOOK_SECRET is required when ingress is enabled`);
     }
   }
-  const llmEnabled = boolean(env, 'TELEGRAM_RUNTIME_LLM_ENABLED', false);
-  const llmEndpoint = String(env.TELEGRAM_RUNTIME_LLM_ENDPOINT || '').replace(/\/$/u, '');
-  const llmApiKey = String(env.TELEGRAM_RUNTIME_LLM_API_KEY || '');
-  if (llmEnabled && (!llmEndpoint || !llmApiKey)) {
-    throw new Error('TELEGRAM_RUNTIME_LLM_ENDPOINT and TELEGRAM_RUNTIME_LLM_API_KEY are required when LLM is enabled');
+  const provider = {
+    enabled: boolean(env, 'TELEGRAM_RUNTIME_PROVIDER_ENABLED', false),
+    endpoint: String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || ''),
+    apiKey: String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || ''),
+    model: String(env.TELEGRAM_RUNTIME_PROVIDER_MODEL || ''),
+  };
+  if (provider.enabled && !validateProviderRuntimeConfig(provider).valid) {
+    throw new Error('an enabled provider requires a HTTPS endpoint, API key and model');
   }
   return {
     port: integer(env, 'TELEGRAM_RUNTIME_PORT', 8788),
@@ -78,7 +97,20 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     databasePath: resolve(cwd, String(env.TELEGRAM_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.db')),
     knowledge: {
       root: resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge')),
-      manifestPath: resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_MANIFEST_PATH || 'data/knowledge/manifest.json')),
+      admissions: {
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT]: knowledgeAdmission(env, cwd, {
+          sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT,
+          pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH',
+          digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_SHA256',
+          defaultPath: 'data/knowledge/course-content.manifest.json',
+        }),
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS]: knowledgeAdmission(env, cwd, {
+          sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS,
+          pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_PATH',
+          digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_SHA256',
+          defaultPath: 'data/knowledge/manifest.json',
+        }),
+      },
     },
     ingressEnabled,
     moderationMode: String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow',
@@ -86,12 +118,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     assistantModerationPollMs: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_MODERATION_POLL_MS', 50, 5_000),
     moderator,
     assistant,
-    llm: {
-      enabled: llmEnabled,
-      endpoint: llmEndpoint,
-      apiKey: llmApiKey,
-      model: String(env.TELEGRAM_RUNTIME_LLM_MODEL || ''),
-    },
+    provider,
     notification: { enabled: boolean(env, 'TELEGRAM_RUNTIME_NOTIFICATIONS_ENABLED', false) },
     startupPlan: Object.freeze({ setCommands: false, registerWebhook: false, deleteWebhook: false, poll: false }),
   };
