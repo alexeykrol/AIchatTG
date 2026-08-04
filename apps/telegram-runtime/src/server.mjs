@@ -8,6 +8,7 @@ import { createGuardAdapter } from './guard-adapter.mjs';
 import { botIdFromToken } from '@aichattg/telegram-core';
 import { createTelegramRuntime } from './runtime.mjs';
 import { createTelegramRuntimeHttpServer } from './http-server.mjs';
+import { createModeratorRecoveryWorker } from './moderator-recovery.mjs';
 
 const config = loadRuntimeConfig();
 const database = openRuntimeDatabase(config.databasePath);
@@ -35,10 +36,19 @@ const runtime = createTelegramRuntime({
   notifier: createNotificationAdapter(config.notification),
 });
 const server = createTelegramRuntimeHttpServer({ config, runtime });
+const recoveryWorker = createModeratorRecoveryWorker({
+  runtime,
+  intervalSec: config.moderatorRecoveryIntervalSec,
+  batchSize: config.moderatorRecoveryBatchSize,
+});
 
 server.listen(config.port, () => {
   console.log(`[telegram-runtime] listening on ${config.port}; ingress=${config.ingressEnabled}; poll=false; webhook-registration=false; commands=false`);
+  recoveryWorker.start();
 });
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.once(signal, () => server.close(() => { database.close(); process.exit(0); }));
+  process.once(signal, () => {
+    recoveryWorker.stop();
+    server.close(() => { database.close(); process.exit(0); });
+  });
 }

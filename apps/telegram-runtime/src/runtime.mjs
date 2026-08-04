@@ -448,7 +448,46 @@ export function createTelegramRuntime({
     };
   }
 
-  async function handleModerator(eventId, comment) {
+  function moderatorRetryDelaySeconds(safeRetryCount) {
+    const base = Math.max(0, Number(config.moderatorRecoveryBackoffSec ?? 60));
+    return Math.min(3_600, base * (2 ** Math.min(6, Math.max(0, safeRetryCount))));
+  }
+
+  function moderatorRetryLimit() {
+    return Math.max(1, Math.min(10, Number(config.moderatorRecoveryMaxSafeRetries ?? 3)));
+  }
+
+  function moderatorLeaseSeconds() {
+    return Math.max(5, Math.min(900, Number(config.moderatorRecoveryLeaseSec ?? 90)));
+  }
+
+  function jobResult(eventId, row, fallback = 'moderator_recovery_pending') {
+    if (row?.state === 'manual_review') {
+      return { kind: 'moderation_manual_review', eventId, reason: row.error_code || 'manual_review' };
+    }
+    if (row?.state === 'resolved') {
+      return { kind: 'moderation_resolved', eventId, reason: 'already_resolved' };
+    }
+    return { kind: 'moderation_deferred', eventId, reason: row?.error_code || fallback };
+  }
+
+  /**
+   * Runs one fenced, private Moderator job. Its state remains `safe_retry`
+   * during read-only guard preflight and flips to `calling` in SQLite directly
+   * before the semantic provider boundary. Therefore a crash can never be
+   * mistaken for a proved-zero-call retry.
+   */
+  async function runModeratorJudgement(claim) {
+    const eventId = claim.eventId;
+    const job = store.getModeratorJudgement(claim.eventId);
+    let snapshot;
+    try { snapshot = JSON.parse(job?.snapshot_json || ''); } catch { snapshot = null; }
+    const comment = snapshot?.schemaVersion === 'moderator-comment-v1' ? snapshot.comment : null;
+    if (!comment || snapshot?.expired === true) {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'snapshot_invalid_or_expired', providerBoundary: 'not_started' });
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), 'snapshot_invalid_or_expired');
+    }
+
     store.observeModerationMessage({
       chatId: comment.chatId, messageId: comment.messageId, userId: comment.userId,
       revisionIdentity: comment.platformMessageId,
@@ -462,27 +501,50 @@ export function createTelegramRuntime({
       moderationEventId: eventId,
     });
     if (!guardAdapter || typeof guardAdapter.senderDisposition !== 'function') {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'guard_adapter_missing', providerBoundary: 'not_started' });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
         moderationMessageId: comment.platformMessageId, reason: 'guard_adapter_missing', moderationEventId: eventId,
       });
-      return { kind: 'skipped', reason: 'guard_adapter_missing' };
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
     }
-    const sender = await guardAdapter.senderDisposition({
-      chatId: comment.chatId,
-      userId: comment.userId,
-      isBot: comment.isBot,
-      senderChatId: comment.senderChatId,
-    });
+    let sender;
+    try {
+      sender = await guardAdapter.senderDisposition({
+        chatId: comment.chatId,
+        userId: comment.userId,
+        isBot: comment.isBot,
+        senderChatId: comment.senderChatId,
+      });
+    } catch {
+      sender = { proven: false, reason: 'telegram_membership_unavailable' };
+    }
     if (!sender?.proven) {
+      const reason = sender?.reason || 'sender_exemption_unproven';
+      if (reason === 'telegram_membership_unavailable' && job.safe_retry_count < moderatorRetryLimit()) {
+        const deferred = store.deferModeratorJudgement({
+          claim,
+          nextAttemptAt: store.currentTime() + moderatorRetryDelaySeconds(job.safe_retry_count),
+          errorCode: reason,
+        });
+        return jobResult(claim.eventId, deferred.row, reason);
+      }
+      store.manualReviewModeratorJudgement({ claim, errorCode: reason, providerBoundary: 'not_started' });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
         moderationMessageId: comment.platformMessageId,
-        reason: sender?.reason || 'sender_exemption_unproven', moderationEventId: eventId,
+        reason, moderationEventId: eventId,
       });
-      return { kind: 'skipped', reason: sender?.reason || 'sender_exemption_unproven' };
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), reason);
     }
     if (sender.exempt) {
+      const resolved = store.resolveModeratorJudgement({
+        claim,
+        decision: { verdict: 'clean', reason: sender.reason || 'sender_exempt', source: 'guard_preflight' },
+        result: { verdict: 'clean', action: 'exempt' },
+        providerBoundary: 'not_started',
+      });
+      if (!resolved.resolved) return jobResult(claim.eventId, resolved.row, 'judgement_claim_fenced');
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'allowed', verdict: 'exempt',
         moderationMessageId: comment.platformMessageId, reason: sender.reason, moderationEventId: eventId,
@@ -499,6 +561,9 @@ export function createTelegramRuntime({
     // the non-retrying provider boundary, then use the same snapshot to plan
     // the resulting safety action.
     const strikeState = store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
+    if (!store.markModeratorProviderCalling({ claim, leaseSec: moderatorLeaseSeconds() }).marked) {
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), 'judgement_claim_fenced');
+    }
     try {
       decision = normalizeSafetyClassification(await modelProvider.moderate({
         text: comment.text, chatId: comment.chatId, userId: comment.userId,
@@ -508,27 +573,61 @@ export function createTelegramRuntime({
       }));
     } catch (error) {
       if (isProviderUnavailableError(error)) {
+        if (job.safe_retry_count < moderatorRetryLimit()) {
+          const deferred = store.deferModeratorJudgement({
+            claim,
+            nextAttemptAt: store.currentTime() + moderatorRetryDelaySeconds(job.safe_retry_count),
+            errorCode: error.code,
+          });
+          return jobResult(claim.eventId, deferred.row, error.code);
+        }
+        store.manualReviewModeratorJudgement({
+          claim, errorCode: 'provider_unavailable_retry_limit', providerBoundary: 'not_started',
+        });
         store.upsertAssistantDisposition({
           chatId: comment.chatId, messageId: comment.messageId, status: 'error',
-          moderationMessageId: comment.platformMessageId, reason: error.code, moderationEventId: eventId,
+          moderationMessageId: comment.platformMessageId, reason: 'provider_unavailable_retry_limit', moderationEventId: eventId,
         });
-        return { kind: 'skipped', reason: error.code };
+        return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
       }
+      store.manualReviewModeratorJudgement({
+        claim, errorCode: String(error?.code || 'provider_request_failed').slice(0, 120), providerBoundary: 'unknown',
+      });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
-        moderationMessageId: comment.platformMessageId, reason: 'moderation_error', moderationEventId: eventId,
+        moderationMessageId: comment.platformMessageId, reason: 'moderation_manual_review', moderationEventId: eventId,
       });
-      throw error;
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
     }
     if (!decision) {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'invalid_safety_verdict', providerBoundary: 'unknown' });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
         moderationMessageId: comment.platformMessageId, reason: 'invalid_safety_verdict', moderationEventId: eventId,
       });
-      throw new Error('moderation adapter returned an invalid closed safety verdict');
+      return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
     }
     decision = applyTelegramSafetySignals(config, decision, comment);
     const plan = planTelegramSafetyAction(decision, strikeState.weakStrikes);
+    // The semantic verdict is final before any Telegram enforcement. A crash
+    // below this line must not cause another provider call; existing Guard
+    // receipts remain the only authority over Telegram effects.
+    const resolved = store.resolveModeratorJudgement({
+      claim,
+      // This operator-visible durable decision intentionally excludes the
+      // model's reason/quote/receipt. The private comment snapshot is the only
+      // retained message text, and inbound/enforcement receipts remain textless.
+      decision: {
+        safetyRoute: decision.safetyRoute,
+        abuseLevel: decision.abuseLevel,
+        confidence: decision.confidence,
+        modelId: decision.modelId || null,
+        plan,
+      },
+      result: { verdict: plan.verdict, actionPlan: plan.action },
+      providerBoundary: 'returned',
+    });
+    if (!resolved.resolved) return jobResult(claim.eventId, resolved.row, 'judgement_claim_fenced');
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({
       chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
@@ -546,6 +645,15 @@ export function createTelegramRuntime({
       kind: 'moderated', verdict: plan.verdict, action: enforcement.action,
       actions, enforcement: enforcement.receipt || null,
     };
+  }
+
+  async function handleModerator(eventId, receiptId, comment) {
+    const created = store.ensureModeratorJudgement({
+      eventId, receiptId, comment, snapshotTtlSec: config.moderatorRecoverySnapshotTtlSec,
+    });
+    const claimed = store.claimModeratorJudgement({ eventId, leaseSec: moderatorLeaseSeconds() });
+    if (!claimed.claimed) return jobResult(eventId, claimed.row || created);
+    return runModeratorJudgement(claimed.claim);
   }
 
   async function routeAssistantQuestion(question) {
@@ -702,7 +810,7 @@ export function createTelegramRuntime({
       }
       try {
         const result = classified.kind === 'comment'
-          ? await handleModerator(eventId, classified.comment)
+          ? await handleModerator(eventId, receiptId, classified.comment)
           : classified.kind === 'question'
             ? await handleAssistant(eventId, classified.question)
             : classified.kind === 'pin_governance'
@@ -728,6 +836,27 @@ export function createTelegramRuntime({
     /** Explicit, side-effect-free recovery: fence in-flight claims into review. */
     recoverInboundDeliveries({ recoveryId }) {
       return store.quarantineProcessingInboundDeliveries({ recoveryId });
+    },
+    /**
+     * Startup/timer recovery is intentionally limited to safe_retry jobs. It
+     * first makes stale `calling` rows visible as manual review, then claims at
+     * most the requested safe jobs. No inbound, Telegram or provider action is
+     * replayed for `calling`, `manual_review` or `resolved` records.
+     */
+    async recoverModeratorJudgements({ limit = 10, startup = false } = {}) {
+      const quarantined = store.quarantineExpiredModeratorCalls({ allCalling: startup === true });
+      const outcomes = [];
+      const maximum = Math.max(1, Math.min(50, Number(limit) || 10));
+      for (let index = 0; index < maximum; index++) {
+        const claimed = store.claimNextModeratorJudgement({ leaseSec: moderatorLeaseSeconds() });
+        if (!claimed.claimed) break;
+        outcomes.push(await runModeratorJudgement(claimed.claim));
+      }
+      return { ...quarantined, recovered: outcomes.length, outcomes };
+    },
+    moderatorRecoveryStatus({ limit = 50 } = {}) {
+      const status = store.moderatorRecoveryStatus();
+      return { states: status.states, jobs: store.listModeratorJudgements({ limit }) };
     },
   };
 }
