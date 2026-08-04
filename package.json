@@ -1,0 +1,12 @@
+{
+  "name": "@aichattg/platform",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.20.0 <21"
+  },
+  "scripts": {
+    "test:gatekeeper": "npm --prefix apps/gatekeeper test",
+    "check:gatekeeper": "npm --prefix apps/gatekeeper run scenario:check"
+  }
+}

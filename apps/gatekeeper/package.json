@@ -1,0 +1,26 @@
+{
+  "name": "@aichattg/gatekeeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.20.0 <21"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "webhook:register": "node src/register-webhook.mjs",
+    "webhook:delete": "node src/delete-webhook.mjs",
+    "ops:status": "node src/status.mjs",
+    "ops:backup": "node src/backup.mjs",
+    "ops:resolve-delivery": "node src/resolve-delivery.mjs",
+    "ops:resolve-update": "node src/resolve-update.mjs",
+    "ops:replay-update": "node src/replay-update.mjs",
+    "scenario:check": "node src/scenario-texts-cli.mjs check",
+    "scenario:sync": "node src/scenario-texts-cli.mjs sync",
+    "simulate:onboarding": "node src/simulate-onboarding.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
+  }
+}

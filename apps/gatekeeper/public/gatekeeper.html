@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Привратник · News Digest</title>
+  <link rel="stylesheet" href="gatekeeper.css">
+</head>
+<body data-snapshot-endpoint="/admin/settings/snapshot">
+  <a class="skip-link" href="#main">К основному содержимому</a>
+  <div class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">News Digest</p>
+        <h1>Привратник</h1>
+        <p class="subtitle">Состояние источников, путей онбординга и доставки. Секреты и данные пользователей на этой странице не отображаются.</p>
+      </div>
+      <span class="readonly-pill">Только просмотр</span>
+    </header>
+
+    <nav class="tabs" aria-label="Основные разделы News Digest">
+      <span class="tab" aria-current="page">Привратник</span>
+    </nav>
+
+    <div id="load-error" class="error-banner" role="alert"></div>
+
+    <div class="layout">
+      <nav class="section-nav" aria-label="Настройки Привратника">
+        <a href="#overview">Обзор</a>
+        <a href="#sources">Источники</a>
+        <a href="#user-paths">Пути пользователей</a>
+        <a href="#delivery">Доставка</a>
+        <a href="#rules">Правила</a>
+        <a href="#events-test">События и тест</a>
+      </nav>
+
+      <main id="main">
+        <section class="panel" id="overview" aria-labelledby="overview-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="overview-title">Обзор</h2>
+              <p class="panel-description">Агрегированное состояние онбординга без email, Telegram ID и других персональных данных.</p>
+            </div>
+            <span class="status neutral" id="scenario-status">Загрузка</span>
+          </div>
+          <div class="grid" id="overview-metrics" aria-live="polite"></div>
+        </section>
+
+        <section class="panel" id="sources" aria-labelledby="sources-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="sources-title">Источники</h2>
+              <p class="panel-description">Отдельные входы для разных контрактов. Показывается только наличие конфигурации.</p>
+            </div>
+          </div>
+          <div class="grid two" id="source-list"></div>
+        </section>
+
+        <section class="panel" id="user-paths" aria-labelledby="paths-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="paths-title">Пути пользователей</h2>
+              <p class="panel-description">Покрытие реплик по веткам. Тексты редактируются отдельно и сюда не копируются.</p>
+            </div>
+          </div>
+          <div class="grid two" id="path-list"></div>
+        </section>
+
+        <section class="panel" id="delivery" aria-labelledby="delivery-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="delivery-title">Доставка</h2>
+              <p class="panel-description">Telegram, письмо через Zapier и уведомление Zapier о завершении.</p>
+            </div>
+          </div>
+          <div class="grid" id="delivery-list"></div>
+        </section>
+
+        <section class="panel" id="rules" aria-labelledby="rules-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="rules-title">Правила</h2>
+              <p class="panel-description">Действующие и запланированные переменные. Статус «Запланировано» означает, что runtime пока не применяет значение.</p>
+            </div>
+            <span class="status neutral">Только просмотр</span>
+          </div>
+          <div class="rules" id="rule-list"></div>
+        </section>
+
+        <section class="panel" id="events-test" aria-labelledby="events-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="events-title">События и тест</h2>
+              <p class="panel-description">Только агрегированный статус и безопасная офлайн-симуляция. Управления реальной отправкой здесь нет.</p>
+            </div>
+          </div>
+          <div class="notice" id="event-summary" aria-live="polite">Загрузка агрегированного статуса…</div>
+          <div class="actions">
+            <button class="button" id="safe-simulation" type="button" disabled>Офлайн-симуляция — подключается</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module">
+    const sourceLabels = {
+      tribute: ['Tribute', 'Оплаченная подписка и Telegram-профиль'],
+      site: ['Сайт', 'Регистрация с email; Telegram может отсутствовать'],
+      telegram: ['Telegram', 'Контакт с ботом и сопоставление пользователя'],
+      coinbase: ['Coinbase', 'Резерв для будущего платёжного контракта'],
+    };
+    const deliveryLabels = {
+      telegram: ['Telegram', 'Личные сообщения и путь после подтверждённого доступа'],
+      zapierEmail: ['Zapier · письмо', 'Отправка onboarding-письма пользователю сайта'],
+      zapierCompletion: ['Zapier · завершение', 'Исходящее событие после завершения онбординга'],
+    };
+    const ruleLabels = {
+      startTokenTtlSeconds: 'Срок действия ссылки Telegram',
+      siteTokenTtlSeconds: 'Срок действия ссылки из email',
+      correlationWindowSeconds: 'Окно сопоставления email и Telegram',
+      retryMaxAttempts: 'Максимум попыток доставки',
+      retryBaseSeconds: 'Базовая задержка повтора',
+      escalationAfterSeconds: 'Время до эскалации',
+    };
+
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = String(text);
+      return node;
+    }
+
+    function statusNode(item) {
+      if (item?.planned) return element('span', 'status planned', 'Запланировано');
+      return element('span', `status ${item?.configured ? 'ok' : 'off'}`, item?.configured ? 'Настроено' : 'Не настроено');
+    }
+
+    function renderOverview(overview) {
+      const scenario = document.querySelector('#scenario-status');
+      const ready = overview?.scenarioStatus === 'ready';
+      scenario.className = `status ${ready ? 'ok' : 'planned'}`;
+      scenario.textContent = ready ? 'Сценарий готов' : `Сценарий: ${overview?.scenarioStatus || 'unknown'}`;
+
+      const metrics = [
+        ['Ожидают контакта', overview?.onboarding?.pending],
+        ['Контакт установлен', overview?.onboarding?.contactEstablished],
+        ['Завершили', overview?.onboarding?.completed],
+        ['Сайт: ожидают', overview?.siteOnboarding?.pending],
+        ['Сайт: завершили', overview?.siteOnboarding?.completed],
+        ['Требуют внимания', overview?.attentionRequired],
+      ];
+      const container = document.querySelector('#overview-metrics');
+      container.replaceChildren(...metrics.map(([label, value]) => {
+        const card = element('article', 'metric');
+        card.append(element('strong', 'metric-value', Number.isSafeInteger(value) ? value : 0));
+        card.append(element('span', 'metric-label', label));
+        return card;
+      }));
+    }
+
+    function renderIntegrations(selector, items, labels) {
+      const container = document.querySelector(selector);
+      container.replaceChildren(...Object.entries(labels).map(([key, [title, note]]) => {
+        const item = items?.[key] || {};
+        const card = element('article', 'integration');
+        const head = element('div', 'row-head');
+        head.append(element('h3', 'row-title', title), statusNode(item));
+        card.append(head, element('p', 'row-note', item.detail ? `${note}. Назначение: ${item.detail}` : note));
+        return card;
+      }));
+    }
+
+    function renderPaths(paths) {
+      const container = document.querySelector('#path-list');
+      container.replaceChildren(...(Array.isArray(paths) ? paths : []).map((path) => {
+        const card = element('article', 'path-card');
+        card.append(element('h3', 'row-title', path.title));
+        const counts = element('div', 'path-counts');
+        const active = element('span', '', 'Активно: ');
+        active.append(element('strong', '', path.active || 0));
+        const planned = element('span', '', 'Запланировано: ');
+        planned.append(element('strong', '', path.planned || 0));
+        counts.append(active, planned);
+        card.append(counts);
+        return card;
+      }));
+    }
+
+    function renderRules(rules) {
+      const container = document.querySelector('#rule-list');
+      container.replaceChildren(...Object.entries(ruleLabels).map(([key, title]) => {
+        const rule = rules?.[key] || {};
+        const row = element('div', 'rule-row');
+        const name = element('div', 'rule-name', title);
+        name.append(element('code', 'env-name', rule.env || 'Не определено'));
+        const suffix = key === 'retryMaxAttempts' ? ' попыток' : ' сек.';
+        const value = rule.status === 'active' ? `${rule.value ?? '—'}${suffix}` : 'Запланировано';
+        const valueNode = element('div', 'rule-value', value);
+        if (rule.status === 'planned') valueNode.classList.add('status', 'planned');
+        row.append(name, valueNode);
+        return row;
+      }));
+    }
+
+    function renderEvents(events) {
+      const invitations = Number.isSafeInteger(events?.uncertainInvitations) ? events.uncertainInvitations : 0;
+      const updates = Number.isSafeInteger(events?.uncertainUpdates) ? events.uncertainUpdates : 0;
+      const zapier = Number.isSafeInteger(events?.uncertainZapierDeliveries)
+        ? events.uncertainZapierDeliveries
+        : 0;
+      document.querySelector('#event-summary').textContent =
+        `Неопределённых Telegram-доставок: ${invitations}. Неопределённых обновлений: ${updates}. ` +
+        `Неопределённых Zapier-доставок: ${zapier}. ` +
+        'Email, Telegram ID и исходные payload здесь намеренно отсутствуют.';
+    }
+
+    async function loadSnapshot() {
+      const endpoint = document.body.dataset.snapshotEndpoint;
+      const response = await fetch(endpoint, { headers: { accept: 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const snapshot = await response.json();
+      renderOverview(snapshot.overview);
+      renderIntegrations('#source-list', snapshot.sources, sourceLabels);
+      renderPaths(snapshot.userPaths);
+      renderIntegrations('#delivery-list', snapshot.delivery, deliveryLabels);
+      renderRules(snapshot.rules);
+      renderEvents(snapshot.eventsTest);
+    }
+
+    loadSnapshot().catch((error) => {
+      const banner = document.querySelector('#load-error');
+      banner.classList.add('visible');
+      banner.textContent = `Не удалось загрузить безопасный снимок настроек (${error.message}). Проверьте endpoint и повторите загрузку страницы.`;
+    });
+  </script>
+</body>
+</html>
