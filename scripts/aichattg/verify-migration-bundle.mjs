@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SHA1 = /^[0-9a-f]{40}$/u;
@@ -56,8 +57,8 @@ function parseArguments(argv) {
   return resolve(argv[1]);
 }
 
-async function main() {
-  const manifestPath = parseArguments(process.argv.slice(2));
+export async function verifyMigrationBundle(manifestPath) {
+  manifestPath = resolve(manifestPath);
   await regularFile(manifestPath, 'manifest');
   let manifest;
   try {
@@ -107,17 +108,34 @@ async function main() {
     fail('payload digest or record count does not match the manifest');
   }
 
-  process.stdout.write(`${JSON.stringify({
+  return {
     status: 'verified',
     bundleId,
     sourceCommit: manifest.source.commit,
     candidateSha: manifest.authorization.candidateSha,
     recordCount: inspected.recordCount,
     payloadSha256: inspected.sha256,
+    manifestPath,
+    payloadPath,
+    manifest,
+  };
+}
+
+async function main() {
+  const verified = await verifyMigrationBundle(parseArguments(process.argv.slice(2)));
+  process.stdout.write(`${JSON.stringify({
+    status: verified.status,
+    bundleId: verified.bundleId,
+    sourceCommit: verified.sourceCommit,
+    candidateSha: verified.candidateSha,
+    recordCount: verified.recordCount,
+    payloadSha256: verified.payloadSha256,
   })}\n`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

@@ -35,6 +35,11 @@ the initial phases.
    rollback. Only after a verified cutover can legacy Telegram AI code be
    retired from News.
 
+Historical state has a candidate-only, state-only importer described in
+[Runtime state importer](RUNTIME_STATE_IMPORT.md). It accepts a separately
+approved normalized bundle, not a News SQLite file, and deliberately excludes
+historical Assistant question/answer content.
+
 ## Release rules during migration
 
 - Each source baseline is identified by immutable commit SHA and manifest.

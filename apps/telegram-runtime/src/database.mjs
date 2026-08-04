@@ -76,13 +76,54 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_weak_strikes (
 );
 `;
 
+const MIGRATION_RECEIPT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS runtime_migration_receipts (
+  bundle_id TEXT PRIMARY KEY,
+  payload_sha256 TEXT NOT NULL UNIQUE,
+  source_commit TEXT NOT NULL,
+  candidate_sha TEXT NOT NULL,
+  controller_lease_id TEXT NOT NULL,
+  product_owner_approval_id TEXT NOT NULL,
+  record_count INTEGER NOT NULL CHECK(record_count >= 0),
+  record_summary_json TEXT NOT NULL,
+  applied_at INTEGER NOT NULL
+);
+`;
+
 export function openRuntimeDatabase(databasePath) {
   mkdirSync(dirname(databasePath), { recursive: true });
   const db = new Database(databasePath);
+  ensureRuntimeDatabaseSchema(db);
+  return db;
+}
+
+export function ensureRuntimeDatabaseSchema(db) {
   db.pragma('foreign_keys = ON');
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+}
+
+/**
+ * Used only by the state importer. Existing files are opened without schema or
+ * journal changes so the importer can prove they are the runtime database
+ * before it mutates them.
+ */
+export function openRuntimeDatabaseForImport(databasePath) {
+  return new Database(databasePath);
+}
+
+export function openReadOnlyRuntimeDatabase(databasePath) {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  db.pragma('foreign_keys = ON');
   return db;
+}
+
+/**
+ * The state importer calls this inside its transaction. The runtime itself does
+ * not create migration receipts during normal webhook processing.
+ */
+export function ensureRuntimeMigrationReceiptSchema(db) {
+  db.exec(MIGRATION_RECEIPT_SCHEMA);
 }
 
 export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 1000) } = {}) {

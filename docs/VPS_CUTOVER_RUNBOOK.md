@@ -40,7 +40,8 @@ and perform no network, provider, Docker build, or service-start action.
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm --prefix apps/gatekeeper ci
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm --prefix apps/telegram-runtime ci
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm test
-node --test scripts/aichattg/test/verify-migration-bundle.test.mjs
+node --test scripts/aichattg/test/verify-migration-bundle.test.mjs \
+  scripts/aichattg/test/import-runtime-state.test.mjs
 bash scripts/aichattg/assert-isolation.sh
 docker compose -f infra/aichattg/docker-compose.yml config --no-interpolate
 git diff --check
@@ -77,10 +78,13 @@ node scripts/aichattg/verify-migration-bundle.mjs \
 
 The verifier refuses a source database, a symlink, path traversal, unexpected
 manifest fields, a target other than AIchatTG, a bad digest, or a record-count
-mismatch. It is an admission check only: a controller must approve the record
-mapping, target-transaction/import procedure, duplicate policy, and privacy
-handling before any target database write. Never point an importer at a live
-News SQLite file.
+mismatch. The candidate-side [runtime state importer](RUNTIME_STATE_IMPORT.md)
+adds a state-only record allowlist, explicit dry-run/apply modes, current
+candidate-SHA admission, all-or-nothing duplicate checks and a content-free
+SQLite audit receipt. It still does not prove the external lease or approval:
+the controller must approve the record mapping, target transaction, duplicate
+policy and privacy handling before any target database write. Never point an
+importer at a live News SQLite file.
 
 ## Later leased cutover sequence
 
