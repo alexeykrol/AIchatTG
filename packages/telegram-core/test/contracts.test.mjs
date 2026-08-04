@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   ASSISTANT_SOURCE_PACKAGES,
+  admitKnowledgeSnapshot,
   BOT_ROLES,
   assistantDispositionForSafety,
   classifyTelegramUpdate,
   detectAssistantQuestion,
   incomingEventId,
   isCourseOperationsSupportQuestion,
+  knowledgeManifestDigest,
   loadKnowledgeSnapshot,
   normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
@@ -93,7 +95,16 @@ test('knowledge snapshots reject path escapes and accept only matching local dig
     };
     assert.deepEqual(validateKnowledgeManifest(manifest)?.entries.map(({ content: ignored, ...entry }) => entry), manifest.entries);
     assert.equal(loadKnowledgeSnapshot(manifest, folder)?.entries[0].content, content);
+    const identity = {
+      sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS,
+      manifestDigest: knowledgeManifestDigest(manifest),
+    };
+    assert.equal(admitKnowledgeSnapshot({ manifest, root: folder, expectedIdentity: identity }).available, true);
+    assert.equal(admitKnowledgeSnapshot({ manifest, root: folder, expectedIdentity: { ...identity, manifestDigest: '0'.repeat(64) } }).reason, 'knowledge_identity_mismatch');
+    assert.equal(admitKnowledgeSnapshot({ manifest, root: folder, expectedIdentity: { sourceId: 'unreviewed-source', manifestDigest: identity.manifestDigest } }).reason, 'knowledge_identity_invalid');
+    assert.equal(admitKnowledgeSnapshot({ manifest, root: folder }).reason, 'knowledge_identity_missing');
     assert.equal(validateKnowledgeManifest({ ...manifest, entries: [{ ...manifest.entries[0], path: '../News.db' }] }), null);
+    assert.equal(validateKnowledgeManifest({ ...manifest, sourceId: 'unreviewed-source' }), null);
     assert.equal(loadKnowledgeSnapshot({ ...manifest, entries: [{ ...manifest.entries[0], sha256: '0'.repeat(64) }] }, folder), null);
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });

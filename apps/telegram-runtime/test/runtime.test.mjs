@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { ASSISTANT_SOURCE_PACKAGES, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
-import { createLlmAdapter, LlmDisabledError } from '../src/llm-adapter.mjs';
+import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
+import { createProviderAdapter, ProviderUnavailableError } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramRuntimeHttpServer } from '../src/http-server.mjs';
 
@@ -93,15 +96,92 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.deepEqual(loaded.startupPlan, { setCommands: false, registerWebhook: false, deleteWebhook: false, poll: false });
   assert.equal(loaded.ingressEnabled, false);
   assert.equal(loaded.assistantModerationWaitMs, 30_000);
+  assert.equal(loaded.provider.enabled, false);
   assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_POLLING_ENABLED: 'true' }), /polling/);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_PROVIDER_ENABLED: 'true' }), /provider requires/);
 });
 
-test('disabled LLM adapter cannot call fetch', async () => {
+test('disabled or invalid provider adapters cannot call fetch', async () => {
   let calls = 0;
-  const adapter = createLlmAdapter({ enabled: false }, { fetchFn: async () => { calls++; } });
-  await assert.rejects(adapter.answer({}), LlmDisabledError);
-  await assert.rejects(adapter.routeAssistant({}), LlmDisabledError);
+  const fetchFn = async () => { calls++; };
+  const disabled = createProviderAdapter({ enabled: false }, { fetchFn });
+  const invalid = createProviderAdapter({
+    enabled: true, endpoint: 'http://provider.example.test', apiKey: 'fixture-key', model: 'fixture-model',
+  }, { fetchFn });
+  await assert.rejects(disabled.answer({}), (error) => error instanceof ProviderUnavailableError && error.code === 'provider_disabled');
+  await assert.rejects(invalid.routeAssistant({}), (error) => error instanceof ProviderUnavailableError && error.code === 'provider_configuration_invalid');
   assert.equal(calls, 0);
+});
+
+test('provider adapter accepts only explicit runtime configuration and fake fetch', async () => {
+  const calls = [];
+  const adapter = createProviderAdapter({
+    enabled: true,
+    endpoint: 'https://provider.example.test/v1/generate',
+    apiKey: 'fixture-key',
+    model: 'fixture-model',
+  }, {
+    async fetchFn(url, init) {
+      calls.push({ url, init });
+      return { ok: true, status: 200, async json() { return { safetyRoute: 'clean', confidence: 1 }; } };
+    },
+  });
+  assert.deepEqual(await adapter.moderate({ text: 'fixture' }), { safetyRoute: 'clean', confidence: 1 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://provider.example.test/v1/generate');
+  assert.equal(calls[0].init.headers.authorization, 'Bearer fixture-key');
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    kind: 'moderate', model: 'fixture-model', input: { text: 'fixture' },
+  });
+});
+
+test('knowledge admissions require one matching identity per source package', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-knowledge-admission-'));
+  try {
+    const createManifest = (sourceId, file, content) => ({
+      format: 'aichattg-knowledge-manifest-v1', sourceId, entries: [{
+        id: sourceId, path: file,
+        sha256: createHash('sha256').update(content).digest('hex'),
+        canonicalUrl: `https://knowledge.example.test/${file}`,
+      }],
+    });
+    const contentSource = ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT;
+    const operationsSource = ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS;
+    const contentManifest = createManifest(contentSource, 'content.md', 'content fixture');
+    const operationsManifest = createManifest(operationsSource, 'operations.md', 'operations fixture');
+    writeFileSync(join(folder, 'content.md'), 'content fixture');
+    writeFileSync(join(folder, 'operations.md'), 'operations fixture');
+    writeFileSync(join(folder, 'content-manifest.json'), JSON.stringify(contentManifest));
+    writeFileSync(join(folder, 'operations-manifest.json'), JSON.stringify(operationsManifest));
+    const adapter = createKnowledgeAdapter({
+      root: folder,
+      admissions: {
+        [contentSource]: {
+          manifestPath: join(folder, 'content-manifest.json'),
+          expectedIdentity: { sourceId: contentSource, manifestDigest: knowledgeManifestDigest(contentManifest) },
+        },
+        [operationsSource]: {
+          manifestPath: join(folder, 'operations-manifest.json'),
+          expectedIdentity: { sourceId: operationsSource, manifestDigest: knowledgeManifestDigest(operationsManifest) },
+        },
+      },
+    });
+    assert.equal(adapter.forSource(contentSource).available, true);
+    assert.equal(adapter.forSource(operationsSource).available, true);
+    assert.equal(adapter.forSource('unreviewed-source').reason, 'knowledge_source_invalid');
+
+    const rejected = createKnowledgeAdapter({
+      root: folder,
+      admissions: {
+        [contentSource]: {
+          manifestPath: join(folder, 'content-manifest.json'),
+          expectedIdentity: { sourceId: contentSource, manifestDigest: '0'.repeat(64) },
+        },
+      },
+    });
+    assert.equal(rejected.forSource(contentSource).reason, 'knowledge_identity_mismatch');
+    assert.equal(rejected.forSource(operationsSource).reason, 'knowledge_identity_missing');
+  } finally { rmSync(folder, { recursive: true, force: true }); }
 });
 
 test('moderator safety result writes a matching allow disposition before an Assistant answer', async () => {
@@ -109,7 +189,7 @@ test('moderator safety result writes a matching allow disposition before an Assi
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   const runtime = createTelegramRuntime({
-    config: config(), store: createRuntimeStore(db), llm: fakeLlm(), knowledge: availableKnowledge(),
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(),
     ...adapters(actions),
   });
   try {
@@ -130,9 +210,9 @@ test('Assistant fails closed before the claim, model and delivery boundary witho
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   let routeCalls = 0;
-  const llm = fakeLlm();
-  llm.routeAssistant = async () => { routeCalls++; return { action: 'teach', sourceId: 'course-content-v1' }; };
-  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), llm, knowledge: availableKnowledge(), ...adapters(actions) });
+  const provider = fakeLlm();
+  provider.routeAssistant = async () => { routeCalls++; return { action: 'teach', sourceId: 'course-content-v1' }; };
+  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
   try {
     const result = await runtime.handleUpdate('assistant', update(4, 51, '/ask hello'));
     assert.equal(result.kind, 'skipped');
@@ -148,7 +228,7 @@ test('blocked and edited-revision dispositions never unlock an Assistant answer'
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   const runtime = createTelegramRuntime({
-    config: config(), store: createRuntimeStore(db), llm: fakeLlm({ safetyRoute: 'threat' }), knowledge: availableKnowledge(),
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm({ safetyRoute: 'threat' }), knowledge: availableKnowledge(),
     ...adapters(actions),
   });
   try {
@@ -158,7 +238,7 @@ test('blocked and edited-revision dispositions never unlock an Assistant answer'
     assert.deepEqual(actions.slice(0, 2).map(([kind]) => kind), ['ban', 'delete']);
 
     const cleanRuntime = createTelegramRuntime({
-      config: config(), store: createRuntimeStore(db), llm: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
+      config: config(), store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
     });
     await cleanRuntime.handleUpdate('moderator', update(7, 53, '/ask original'));
     const edited = await cleanRuntime.handleUpdate('assistant', editedUpdate(8, 53, '/ask changed'));
@@ -172,7 +252,7 @@ test('weak-abuse safety plans advance independently to warning, final warning an
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   const runtime = createTelegramRuntime({
-    config: config(), store: createRuntimeStore(db), llm: fakeLlm({ safetyRoute: 'abuse', abuseLevel: 'weak' }),
+    config: config(), store: createRuntimeStore(db), provider: fakeLlm({ safetyRoute: 'abuse', abuseLevel: 'weak' }),
     knowledge: availableKnowledge(), ...adapters(actions),
   });
   try {
@@ -189,9 +269,9 @@ test('course-operations hints reject content routing and need the isolated opera
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
-  const llm = fakeLlm();
-  llm.routeAssistant = async () => ({ action: 'teach', sourceId: 'course-content-v1' });
-  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), llm, knowledge: availableKnowledge(), ...adapters(actions) });
+  const provider = fakeLlm();
+  provider.routeAssistant = async () => ({ action: 'teach', sourceId: 'course-content-v1' });
+  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
   try {
     await runtime.handleUpdate('moderator', update(12, 70, '/ask В курсе как перейти к следующему уроку?'));
     const result = await runtime.handleUpdate('assistant', update(13, 70, '/ask В курсе как перейти к следующему уроку?'));
@@ -204,10 +284,10 @@ test('course-operations answers receive only the isolated operations snapshot', 
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
-  const llm = fakeLlm();
+  const provider = fakeLlm();
   let answerInput;
-  llm.answer = async (input) => { answerInput = input; return { text: 'offline support answer', modelId: 'fake' }; };
-  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), llm, knowledge: availableKnowledge(), ...adapters(actions) });
+  provider.answer = async (input) => { answerInput = input; return { text: 'offline support answer', modelId: 'fake' }; };
+  const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
   try {
     await runtime.handleUpdate('moderator', update(14, 71, '/ask В курсе какая цена?'));
     const result = await runtime.handleUpdate('assistant', update(15, 71, '/ask В курсе какая цена?'));
@@ -237,7 +317,7 @@ test('HTTP ingress is opt-in and validates role-specific webhook secrets', async
   const actions = [];
   const runtime = createTelegramRuntime({
     config: config({ ingressEnabled: true, moderationMode: 'shadow' }), store: createRuntimeStore(db),
-    llm: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
+    provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
   });
   const server = createTelegramRuntimeHttpServer({ config: config({ ingressEnabled: true, moderationMode: 'shadow' }), runtime, logger: { error() {} } });
   await new Promise((resolve) => server.listen(0, resolve));
