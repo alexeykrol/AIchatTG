@@ -9,7 +9,7 @@ policy; they differ in their Telegram credentials, permissions, and actions.
 | Role | Primary responsibility | Must not own |
 |---|---|---|
 | Moderator | Moderation decisions and enforcement | User teaching or onboarding copy |
-| Assistant | Answers, course navigation, support | Ban/delete authority |
+| Assistant | Public support and, later, approved knowledge navigation | Ban/delete authority |
 | Gatekeeper | Eligibility, onboarding, access handoff | Free-form assistant conversation |
 
 ## Target components
@@ -26,17 +26,19 @@ Moderator   Assistant   Gatekeeper
     AIchatTG-owned database and audit/recovery records
 ```
 
-The product core will provide versioned contracts for user identity, chat and
+The product core provides versioned contracts for user identity, chat and
 membership state, eligibility/onboarding disposition, moderation disposition,
 idempotent event claims, delivery receipts, and escalation state. A bot must
 not bypass another bot's ownership by writing its tables directly.
 
 ## Deployment boundary
 
-AIchatTG will run on the existing VPS but as a distinct service. Traefik may
-route public paths to it; the News Digest service remains separately built and
-deployed. A release must build from one AIchatTG commit and preserve its own
-runtime state. It must not rebuild `news-digest`.
+AIchatTG runs on the existing VPS as distinct services. Traefik may route the
+three bot endpoints and the optional read-only `/operator` console to it; the
+News Digest service remains separately built and deployed. A release must build
+from one AIchatTG commit and preserve its own runtime state. It must not rebuild
+`news-digest`. Course/index content is not part of this extraction and remains
+disabled until a new reviewed snapshot is built.
 
 ## Deliberate non-goals
 

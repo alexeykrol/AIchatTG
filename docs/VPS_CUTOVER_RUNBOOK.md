@@ -3,8 +3,9 @@
 ## Status and boundary
 
 This is a **prepared** local candidate, not a deployment receipt. It defines
-two separate AIchatTG containers, their own image names, bind-mounted data
-roots, environment boundary, health checks, and disabled Traefik routers. It
+the two bot-runtime containers plus an optional read-only operator console,
+their own image names, bind-mounted data roots, environment boundary, health
+checks, and disabled Traefik routers. It
 does not create a VPS service, select a hostname, read or write secrets, copy a
 database, change a webhook, or touch News Digest.
 
@@ -19,7 +20,7 @@ and stop conditions.
 | Concern | AIchatTG value | Separation rule |
 | --- | --- | --- |
 | Compose project | `aichattg` | Never run a News Compose file. |
-| Services | `aichattg-gatekeeper`, `aichattg-telegram-runtime` | Neither service is named or derived from `news-digest`. |
+| Services | `aichattg-gatekeeper`, `aichattg-telegram-runtime`, optional `aichattg-operator-console` | None is named or derived from `news-digest`; the console mounts both AIchatTG databases read-only. |
 | Release source | one detached AIchatTG Git worktree at `AICHATTG_SOURCE_SHA` | Build only from that exact revision; no overlay or copied partial tree. |
 | Data root | `AICHATTG_DATA_ROOT/gatekeeper` and `AICHATTG_DATA_ROOT/telegram-runtime` | Must be a new non-symlink root outside `/srv/news_agent_001`; no Docker volume or SQLite file is shared. |
 | Runtime configuration | lease-scoped, mode-0600 file outside Git | Do not commit, print, or reuse News configuration/secrets. |
@@ -27,8 +28,8 @@ and stop conditions.
 | Public hostname | `aikrol.questtales.com` | Approved Product Owner hostname; supplied through `AICHATTG_FQDN` in the private runtime file. |
 
 `infra/aichattg/docker-compose.yml` has no default service profile. A later
-leased operation must explicitly choose `gatekeeper` and/or `telegram-runtime`.
-Both `traefik.enable` labels default to `false`, so a Compose start cannot
+leased operation must explicitly choose `gatekeeper`, `telegram-runtime`,
+and/or `operator-console`. All `traefik.enable` labels default to `false`, so a Compose start cannot
 silently activate a route without a separate runtime flag.
 
 ## Local candidate checks
@@ -39,6 +40,7 @@ and perform no network, provider, Docker build, or service-start action.
 ```bash
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm --prefix apps/gatekeeper ci
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm --prefix apps/telegram-runtime ci
+PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm --prefix apps/operator-console ci
 PATH=/Users/alexeykrolmini/.nvm/versions/node/v20.20.0/bin:$PATH npm test
 node --test scripts/aichattg/test/verify-migration-bundle.test.mjs \
   scripts/aichattg/test/import-runtime-state.test.mjs
@@ -139,6 +141,15 @@ The Telegram runtime can start with ingress disabled, but enabling
 webhook secrets, bot configuration, webhook decision, and a paid-model policy
 if LLM use is requested. A local health response is never authorization to
 perform Telegram, provider, or public-routing activity.
+
+## Operator console gate
+
+`aichattg-operator-console` is a separate optional service at
+`https://aikrol.questtales.com/operator`. It has no write API and mounts only
+the two AIchatTG SQLite directories read-only. The route remains disabled until
+both `AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED=true` and a non-empty
+runtime-only `AICHATTG_OPERATOR_TOKEN` are present. Its Basic-auth user name is
+fixed to `operator`; never reuse a News Digest session, cookie, or token.
 
 ## Rollback boundary
 
