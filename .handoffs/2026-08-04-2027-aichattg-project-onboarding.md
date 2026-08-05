@@ -8,17 +8,19 @@
 - Created: 2026-08-04T20:27:41-0700
 - Project root: `/Users/alexeykrolmini/Code/AIchatTG`
 - Controller generation: 1
-- Resume ref: `e7ee5d441ce4b95c816b6f063f7b50f0629bcb38`
+- Resume ref: `production=e7ee5d441ce4b95c816b6f063f7b50f0629bcb38; source=clean origin/main containing this handoff`
 - Relevant dirty paths: none; canonical `main` was clean and matched `origin/main` when this handoff was prepared.
 
 ## Goal and Exact Resume Point
 
-AIchatTG is the standalone QuestTales Telegram product for Moderator, Assistant
+AIchatTG is the QuestTales Telegram product for Moderator, Assistant
 and Gatekeeper/onboarding. News is separate and retains digest/editorial work,
 Telegram channel publication and editorial Telegram intake.
 
-Moderator, Assistant and the console are production-verified at `e7ee5d4` on
-`aikrol.questtales.com`. News was cleaned/deployed separately at `6b9dc31`.
+Source `main` descends from `e7ee5d4`; its post-deploy delta contains only this
+handoff and the permanent-integrator rule. Moderator, Assistant and the console
+are production-verified at `e7ee5d4` on `aikrol.questtales.com`. News was
+cleaned/deployed separately at `6b9dc31`.
 The applications share no database, `.env`, source, Compose or release artifact.
 
 Gatekeeper source is integrated under `apps/gatekeeper`, but it is intentionally
@@ -38,11 +40,9 @@ cross-bot architecture, shared core/schema/entrypoints/Compose, candidate
 acceptance, canonical `main`, release queue, production lock, rollback and
 receipt acceptance.
 
-The integrator creates Product Owner-facing executors for Moderator, Assistant,
-Gatekeeper/onboarding and future modules, plus bounded assurance children. It
-classifies each as `user-visible-workstream` or `service-child`; user-visible
-sessions remain until replaced/retired, while consumed service children are
-archived after their worktree and attention/lease state are clear.
+The integrator creates module executors and bounded assurance children. Each is
+`user-visible-workstream` or `service-child`: the former stays until replaced
+or retired; the latter is archived after acceptance and clean closure.
 
 Executors have the same contract as News executors:
 
@@ -57,24 +57,23 @@ Executors have the same contract as News executors:
 6. The executor may mechanically deploy under that lease and return a receipt;
    the integrator accepts it and retains shared production ownership.
 
-Overlays, concurrent rebuilds, unreviewed shared-core edits, secrets, paid
-calls and external/production actions outside the charter and gates are
-forbidden. The Product Owner decides product and attention gates; Codex handles
-session creation, handoffs, integration and conflict prevention internally.
+Overlays, concurrent rebuilds, unreviewed shared-core edits, secrets, paid or
+external/production actions outside the charter are forbidden. The Product
+Owner decides attention gates; Codex handles coordination and integration.
 
 ## Authority and Attention Gates
 
-- Authorized now: read-only orientation, local inspection, tests, plans, and reversible candidate work explicitly requested by the Product Owner.
+- Authorized now: orientation, local inspection/tests/plans, and reversible candidate work requested by the Product Owner.
 - Production gate: blocked until the Product Owner approves an exact candidate and the controller issues a one-time lease naming SHA, services, scope, rollback, expiry, verification, and stop rules.
 - Spending gate: blocked; no paid model/provider call without explicit target and cap.
 - External gate: no Telegram message, webhook mutation, Gatekeeper activation, secret/config change, migration, or publication without exact approval.
-- Stop/escalate for: new course knowledge admission, Gatekeeper final copy/links and activation, historical-state import, privacy/schema decisions, or any cross-project API contract.
+- Stop/escalate for: course admission, Gatekeeper activation, history import, privacy/schema decisions, or a cross-project API.
 
 ## Active Work Registry
 
 | ID | Executor | Status | Ownership | Ref/worktree | Evidence | Next owner |
 |---|---|---|---|---|---|---|
-| project-control-g1 | new AIchatTG permanent integrator | prepared | repository, active-module registry, shared contracts, integration queue, production lock and release lifecycle | `main@e7ee5d4` | this handoff | successor integrator |
+| project-control-g1 | new AIchatTG permanent integrator | prepared | repository, active-module registry, shared contracts, integration queue, production lock and release lifecycle | clean `origin/main` containing this handoff | this handoff | successor integrator |
 | runtime-console | controller | production-verified | Moderator, Assistant, operator console | `e7ee5d4` | healthy/restart `0`, public health `200` | controller |
 
 No module writer is currently active. Registry executor names refer to former
@@ -83,7 +82,7 @@ Owner workstream decision.
 
 ## Verified Delta
 
-- `passed`: local and remote `main` were exact `e7ee5d441ce4b95c816b6f063f7b50f0629bcb38`; canonical worktree clean.
+- `passed`: local `main` was clean, matched remote `main`, contained this handoff, and descended from production source `e7ee5d4`.
 - `passed`: production runtime container `9fecd657...` and console container `5df74da7...` were healthy, restart `0`, and labeled with exact `e7ee5d4`.
 - `passed`: `https://aikrol.questtales.com/health` returned `200`; unauthenticated console root returned `401`.
 - `passed`: the final local aggregate gate on exact source was 220 tests.
@@ -108,13 +107,13 @@ Owner workstream decision.
 ## Ground Checks
 
 ```bash
-git -C /Users/alexeykrolmini/Code/AIchatTG status --short --branch && git -C /Users/alexeykrolmini/Code/AIchatTG rev-parse HEAD && git -C /Users/alexeykrolmini/Code/AIchatTG ls-remote origin refs/heads/main
+repo=/Users/alexeykrolmini/Code/AIchatTG; git -C "$repo" status --short --branch; head=$(git -C "$repo" rev-parse HEAD); test "$(git -C "$repo" ls-remote origin refs/heads/main | awk '{print $1}')" = "$head"; git -C "$repo" merge-base --is-ancestor e7ee5d441ce4b95c816b6f063f7b50f0629bcb38 "$head"; printf 'source_main=%s\n' "$head"
 npm --prefix /Users/alexeykrolmini/Code/AIchatTG test
 ssh news-vps 'for c in aichattg-aichattg-telegram-runtime-1 aichattg-aichattg-operator-console-1; do docker inspect -f "{{.Name}} revision={{index .Config.Labels \"org.opencontainers.image.revision\"}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}}" "$c"; done' && curl -fsS https://aikrol.questtales.com/health
 ```
 
-Expected: clean `main`, local and remote SHA `e7ee5d4`; aggregate tests pass;
-both deployed services report exact `e7ee5d4`, healthy, restart `0`; public health
+Expected: clean `main`, local SHA equals remote `main`, and `e7ee5d4` is its ancestor; aggregate tests pass;
+both deployed services report production SHA `e7ee5d4`, healthy, restart `0`; public health
 returns the AIchatTG console health payload.
 
 ## Next Safe Action
@@ -155,7 +154,7 @@ resume ref, relevant dirty paths, active ownership, and integration state.
 If they match, reply internally:
 CONTROL ACCEPTED: generation 1
 Role: permanent AIchatTG integrator
-Resume point: AIchatTG main and production are exact e7ee5d4; Gatekeeper, course knowledge, and history import remain gated.
+Resume point: AIchatTG source main contains the integrator handoff and production is e7ee5d4; Gatekeeper, course knowledge, and history import remain gated.
 
 Then continue “Next Safe Action” without asking the user to coordinate sessions.
 If they do not match, reply CONTROL REJECTED with the exact contradiction and
