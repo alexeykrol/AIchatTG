@@ -41,9 +41,18 @@ prohibited.
 
 ## Controller and executor protocol
 
+- The primary Codex task opened at the canonical repository root is the
+  permanent AIchatTG integrator. On first takeover it must read
+  `.handoffs/2026-08-04-2027-aichattg-project-onboarding.md`, run its ground
+  checks, and accept the named controller generation before assigning work.
 - The permanent controller/integrator owns cross-bot contracts, shared core,
   migrations, the release queue and production integration. An executor owns
   only its chartered module paths.
+- The permanent integrator creates and governs Product Owner-facing executor
+  sessions for Moderator, Assistant, Gatekeeper/onboarding and future modules.
+  Those executors have the same candidate, evidence and one-time deployment
+  lease contract used by the News project; mechanical deploy authority never
+  transfers shared integration ownership.
 - Before a candidate is submitted, every executor reports: current production
   version/SHA (or `not_run`), base and candidate SHAs, already deployed versus
   recovered versus newly written work, files/additions/deletions, migration and
