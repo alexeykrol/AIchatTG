@@ -6,6 +6,7 @@ import {
   classifyTelegramUpdate,
   incomingEventId,
   isCourseOperationsSupportQuestion,
+  isDefinitiveDomainRouteReason,
   normalizeAssistantDisposition,
   normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
@@ -98,6 +99,14 @@ function assistantDeliveryReceipt(result) {
 // snapshot must not consume a user's cooldown or daily quota. Provider transport
 // errors deliberately stay outside this set because a remote call can be paid or
 // otherwise ambiguous even when no Telegram message was attempted.
+//
+// The `retriever_*` codes are decided by opening a local package file or by
+// validating the question string, always before the answer model is reached, so
+// they are definitive on the same grounds. The rewrite step (input-layer step 5)
+// is the one place where a code may follow a *model* call: `rewrite_provider_*`
+// is therefore deliberately absent from this set, because a rewrite request can
+// be billed even when it reports failure. That asymmetry is the whole point of
+// the classification and must survive future edits.
 function isDefinitiveAssistantRoutingExit(errorCode) {
   const code = String(errorCode || '');
   return code === 'assistant_route_invalid'
@@ -107,7 +116,28 @@ function isDefinitiveAssistantRoutingExit(errorCode) {
     || code === 'knowledge_source_invalid'
     || code === 'knowledge_source_unavailable'
     || code === 'knowledge_identity_missing'
-    || code === 'knowledge_identity_mismatch';
+    || code === 'knowledge_identity_mismatch'
+    || code === 'retriever_package_missing'
+    || code === 'retriever_package_unreadable'
+    || code === 'retriever_package_invalid'
+    || code === 'retriever_domain_unknown'
+    || code === 'retriever_question_invalid'
+    // v2 binary package admission (input-layer step 1, task B). Each of these
+    // is decided while validating a manifest and hashing local files, before
+    // any provider call, so the reservation is released.
+    || code === 'knowledge_identity_invalid'
+    || code === 'knowledge_manifest_missing'
+    || code === 'knowledge_manifest_invalid'
+    || code === 'knowledge_snapshot_invalid'
+    || code === 'knowledge_snapshot_empty'
+    || code === 'knowledge_package_manifest_invalid'
+    || code === 'knowledge_package_invalid'
+    // Step 1 domain veto. Its reasons are computed from the question text and
+    // the local dictionary only; the veto runs before the answer model, so a
+    // vetoed question costs the user nothing. See isDefinitiveDomainRouteReason,
+    // which lives beside the reason codes so a new code cannot be introduced
+    // without deciding its billing class.
+    || isDefinitiveDomainRouteReason(code);
 }
 
 function applyTelegramSafetySignals(config, decision, comment) {

@@ -1,4 +1,4 @@
-import { relative, resolve, sep } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { ASSISTANT_SOURCE_PACKAGES } from '@aichattg/telegram-core';
 import { validateProviderRuntimeConfig } from './provider-adapter.mjs';
 
@@ -59,6 +59,24 @@ function knowledgeAdmission(env, cwd, root, { sourceId, pathName, digestName, de
     expectedIdentity: {
       sourceId,
       manifestDigest: configuredDigest(env, digestName),
+    },
+  };
+}
+
+/**
+ * A v2 binary package is admitted by package digest, not manifest digest, and
+ * its files resolve against the package directory. Both that directory and the
+ * manifest itself must sit below the knowledge root, so a configured path can
+ * never point the loader at an arbitrary database on the host.
+ */
+function knowledgePackageAdmission(env, cwd, root, { sourceId, pathName, digestName, defaultPath }) {
+  const manifestPath = pathWithin(root, resolve(cwd, String(env[pathName] || defaultPath)), pathName);
+  return {
+    manifestPath,
+    packageRoot: pathWithin(root, dirname(manifestPath), pathName),
+    expectedIdentity: {
+      sourceId,
+      packageDigest: configuredDigest(env, digestName),
     },
   };
 }
@@ -144,6 +162,12 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
           pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_PATH',
           digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_OPERATIONS_MANIFEST_SHA256',
           defaultPath: 'data/knowledge/manifest.json',
+        }),
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE]: knowledgePackageAdmission(env, cwd, knowledgeRoot, {
+          sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE,
+          pathName: 'TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH',
+          digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256',
+          defaultPath: 'data/knowledge/package/knowledge.manifest.json',
         }),
       },
     },

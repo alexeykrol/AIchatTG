@@ -1,15 +1,23 @@
 import { createHash } from 'node:crypto';
 
 export {
+  admitKnowledgePackage,
   admitKnowledgeSnapshot,
+  KNOWLEDGE_ALL_SOURCE_IDS,
   KNOWLEDGE_MANIFEST_FORMAT,
+  KNOWLEDGE_PACKAGE_MANIFEST_FORMAT,
+  KNOWLEDGE_PACKAGE_SOURCE_IDS,
   KNOWLEDGE_SOURCE_IDS,
   knowledgeManifestDigest,
+  loadKnowledgePackage,
   loadKnowledgeSnapshot,
   validateKnowledgeManifest,
+  validateKnowledgePackageManifest,
 } from './knowledge.mjs';
 
+export * from './domain.mjs';
 export * from './retrieval.mjs';
+export * from './rewrite.mjs';
 
 export const BOT_ROLES = Object.freeze({
   MODERATOR: 'moderator',
@@ -23,6 +31,10 @@ export const ASSISTANT_DISPOSITION_STATUSES = Object.freeze([
 export const ASSISTANT_SOURCE_PACKAGES = Object.freeze({
   COURSE_CONTENT: 'course-content-v1',
   COURSE_OPERATIONS: 'course-operations-v1',
+  // Binary knowledge package (v2 manifest). It is admitted as a verified
+  // database path, not as inlined entries, and the router never names it: the
+  // domain veto decides whether a question may reach it.
+  COURSE_KNOWLEDGE: 'course-knowledge-v2',
 });
 
 export const ASSISTANT_ROLE_ACTIONS = Object.freeze({

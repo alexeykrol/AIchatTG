@@ -285,6 +285,75 @@ test('knowledge admissions require one matching identity per source package', ()
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });
 
+test('a v2 binary package is admitted beside the v1 text sources, not instead of them', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-knowledge-package-'));
+  try {
+    const database = 'SQLite format 3 fixture payload';
+    writeFileSync(join(folder, 'ai.db'), database);
+    const packageSource = ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE;
+    const packageDigest = createHash('sha256').update('package-fixture').digest('hex');
+    const manifest = {
+      format: 'aichattg-knowledge-manifest-v2',
+      sourceId: packageSource,
+      domainId: 'ai',
+      packageDigest,
+      databasePath: 'ai.db',
+      files: { 'ai.db': createHash('sha256').update(database).digest('hex') },
+    };
+    writeFileSync(join(folder, 'knowledge.manifest.json'), JSON.stringify(manifest));
+
+    const adapter = createKnowledgeAdapter({
+      root: folder,
+      admissions: {
+        [packageSource]: {
+          manifestPath: join(folder, 'knowledge.manifest.json'),
+          packageRoot: folder,
+          expectedIdentity: { sourceId: packageSource, packageDigest },
+        },
+      },
+    });
+    const admitted = adapter.forPackage(packageSource);
+    assert.equal(admitted.available, true);
+    assert.equal(admitted.package.domainId, 'ai');
+    assert.ok(admitted.package.databasePath.endsWith('ai.db'));
+    // The v1 text sources stay unavailable rather than being satisfied by the
+    // binary package: admitting one package never opens another.
+    assert.equal(adapter.forSource(ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT).reason, 'knowledge_identity_missing');
+
+    const forged = createKnowledgeAdapter({
+      root: folder,
+      admissions: {
+        [packageSource]: {
+          manifestPath: join(folder, 'knowledge.manifest.json'),
+          packageRoot: folder,
+          expectedIdentity: { sourceId: packageSource, packageDigest: '0'.repeat(64) },
+        },
+      },
+    });
+    assert.equal(forged.forPackage(packageSource).reason, 'knowledge_identity_mismatch');
+    assert.equal(forged.forPackage(packageSource).package, null);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('the v2 package admission is configured below the knowledge root', () => {
+  const config = loadRuntimeConfig({
+    TELEGRAM_RUNTIME_KNOWLEDGE_ROOT: 'data/knowledge',
+    TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH: 'data/knowledge/ai-pkg/knowledge.manifest.json',
+    TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256: 'AB'.repeat(32),
+  }, { cwd: '/tmp/aichattg-test' });
+  const admission = config.knowledge.admissions[ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE];
+  assert.equal(admission.manifestPath, '/tmp/aichattg-test/data/knowledge/ai-pkg/knowledge.manifest.json');
+  assert.equal(admission.packageRoot, '/tmp/aichattg-test/data/knowledge/ai-pkg');
+  // Digests are compared lowercase, so configuration casing cannot silently
+  // turn into an identity mismatch at admission time.
+  assert.equal(admission.expectedIdentity.packageDigest, 'ab'.repeat(32));
+  assert.equal(admission.expectedIdentity.sourceId, ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE);
+
+  assert.throws(() => loadRuntimeConfig({
+    TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH: '../outside/knowledge.manifest.json',
+  }, { cwd: '/tmp/aichattg-test' }), /KNOWLEDGE_ROOT/);
+});
+
 test('moderator safety result writes a matching allow disposition before an Assistant answer', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
@@ -409,6 +478,48 @@ test('definite local Assistant route rejections release quota while a provider t
     assert.deepEqual(db.prepare("SELECT status FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:154'").get(), {
       status: 'uncertain',
     });
+    assert.equal(actions.length, 0);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('v2 package and domain-veto refusals release quota because they precede the answer model', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-veto-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  // Each of these is reached while reading local files or measuring the
+  // question, never after a paid answer call, so none may burn a user's quota.
+  const localRefusals = [
+    'knowledge_package_manifest_invalid',
+    'knowledge_package_invalid',
+    'knowledge_manifest_missing',
+    'domain_no_signal',
+    'domain_claim_unknown',
+  ];
+  try {
+    let messageId = 900;
+    for (const reason of localRefusals) {
+      messageId += 2;
+      const provider = fakeLlm();
+      let answerCalls = 0;
+      provider.answer = async () => { answerCalls += 1; return { text: 'must not answer', modelId: 'fake' }; };
+      const runtime = createTelegramRuntime({
+        config: config({ assistantKnowledgeEnabled: true }),
+        store: createRuntimeStore(db),
+        provider,
+        knowledge: { forSource() { return { available: false, reason, snapshot: null }; } },
+        ...adapters(actions),
+      });
+      await runtime.handleUpdate('moderator', update(messageId, messageId, '/ask Привет'));
+      const result = await runtime.handleUpdate('assistant', update(messageId + 1, messageId, '/ask Привет'));
+      assert.equal(result.reason, reason);
+      assert.equal(answerCalls, 0, reason);
+      assert.equal(
+        db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = ?')
+          .get(`assistant:${messageId + 1}`).count,
+        0,
+        `${reason} must release the reservation`,
+      );
+    }
     assert.equal(actions.length, 0);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
