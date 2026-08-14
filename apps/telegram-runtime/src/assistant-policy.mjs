@@ -1,3 +1,5 @@
+import { DOMAIN_ROUTE_REASONS, GROUNDING_REASONS } from '@aichattg/telegram-core';
+
 const TOKEN_BOUNDARY = (words) => new RegExp(
   `(?:^|[^\\p{L}\\p{N}_])(?:${words})(?=$|[^\\p{L}\\p{N}_])`,
   'iu',
@@ -19,6 +21,19 @@ export const ASSISTANT_EMPTY_ASK_TEXT = 'После /ask напишите ваш
 export const ASSISTANT_UNAVAILABLE_TEXT = [
   'Подключённые учебные материалы сейчас проходят отдельную проверку, поэтому я не буду угадывать ответ или ссылку.',
   'Пока могу помочь со способом обращения ко мне: используйте /ask ваш вопрос или /help.',
+].join(' ');
+
+/**
+ * The honest abstention. It is deliberately a delivered message rather than
+ * silence: the retriever's coverage gate refuses roughly one question in
+ * twenty-five by design, and an unanswered /ask reads as a broken bot and gets
+ * retried into the same wall. The text says what happened and what would help,
+ * and it never guesses a lesson or a link.
+ */
+export const ASSISTANT_NOT_IN_MATERIALS_TEXT = [
+  'Не нашёл ответа в материалах курса, поэтому не буду угадывать.',
+  'Попробуйте переформулировать вопрос конкретнее — назвать термин, тему или урок,',
+  'о котором идёт речь.',
 ].join(' ');
 
 export const ASSISTANT_PROFILE_TEXT = [
@@ -50,6 +65,36 @@ export function isAssistantSelfQuestion(text) {
   const thisAssistant = /(?:эт(?:от|ого|ому|им)|данн(?:ый|ого|ому|ым)|наш(?:его|ему|им)?)\s+(?:бот|ассистент)|@\w*(?:assistant|bot)\b/iu.test(value);
   if (thisAssistant && /(?:кто|что|имя|называ|представь|зовут|умеет|может|границ|ограничен|источник)/iu.test(value)) return true;
   return internalDetail.test(value) && (thisAssistant || TOKEN_BOUNDARY('ты|тебя|тебе|твой|твоя|тво[её]|твои').test(value));
+}
+
+/**
+ * Which grounding refusals are an *answer* (the corpus has nothing for this
+ * question) rather than a *failure* (our layer could not run). The first kind
+ * gets the abstention message above; the second stays a routing exit, so an
+ * operator sees a reason code instead of users being told the material is
+ * missing when in truth the package failed to open.
+ *
+ * `domain_evidence_unavailable` and `domain_registry_empty` are deliberately
+ * absent: an empty dictionary is a deployment defect, not a fact about the
+ * question.
+ */
+const ABSTENTION_REASONS = new Set([
+  DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+  DOMAIN_ROUTE_REASONS.CLAIM_UNKNOWN,
+  DOMAIN_ROUTE_REASONS.CLAIM_MISSING,
+  GROUNDING_REASONS.NOT_FOUND,
+  GROUNDING_REASONS.EMPTY,
+]);
+
+export function isAbstentionReason(reason) {
+  return ABSTENTION_REASONS.has(String(reason || ''));
+}
+
+export function assistantAbstentionReply(reason) {
+  return {
+    route: `boundary:not_in_materials:${String(reason || 'unknown')}`.slice(0, 120),
+    text: ASSISTANT_NOT_IN_MATERIALS_TEXT,
+  };
 }
 
 export function assistantDeterministicReply(text) {

@@ -6,6 +6,8 @@
  * adapter, so this module can be evaluated without a package on disk.
  */
 
+import { createHash } from 'node:crypto';
+
 export const RETRIEVAL_VERSION = '1.1.0';
 
 // Scoring weights. Coverage is the dominant absolute signal; rank-based
@@ -113,6 +115,37 @@ const FOLLOWUP_LEADS = Object.freeze([
   'а почему', 'и почему', 'а дальше', 'и дальше',
 ]);
 const PRONOUN_LEADS = new Set('он она оно они это этот эта тот там тут'.split(' '));
+
+/**
+ * Every tunable that can change a ranking decision, hashed into the
+ * `retrieval_trace.config_version` the pack contract requires. It answers one
+ * question after the fact: were these numbers produced by this configuration?
+ *
+ * The digest identifies *this* implementation's constants. It is deliberately
+ * not asserted to equal the lab's Python hash: the two runtimes serialize floats
+ * and sort word lists differently, and the contract only requires a non-empty
+ * identifier. Equivalence between the implementations is proved where it
+ * matters — by the gold set, per question, not by a hash of the settings.
+ */
+export const RETRIEVAL_CONFIG = Object.freeze({
+  W_COV, W_BM25, ENTITY_BASE, ENTITY_DEFINED_BONUS, ENTITY_NHITS_MAX,
+  ENTITY_NHITS_SAT, ENTITY_CAP, DOC_BONUS_MAX, DOC_PULL_BASE,
+  TITLE_ONLY_FACTOR, TOC_MIN_ANCHORS, TOC_LINE_SHARE, TOC_FACTOR,
+  NO_CONCEPT_COV_MIN, NO_CONCEPT_MIN_UNITS, THRESHOLD_NOT_FOUND,
+  THRESHOLD_READY, READY_MIN_COV, MIN_ENTRIES, CONF_HIGH_COV,
+  CONF_HIGH_MIN_ENTRIES, CONF_MED_COV, FTS_LIMIT, DOC_LIMIT, ENTITY_LIMIT,
+  ENTITY_PER_UNIT, MAX_ENTITY_CONCEPTS, DIVERSITY_K, NEIGHBOR_MIN_SCORE,
+  STEM_MIN_TOKEN, STEM_MIN_BASE, IDF_FLOOR, CACHE_TTL_S,
+  TOPIC_SWITCH_MIN_OVERLAP, TAIL_MIN_SIG, TAIL_MAX_TERMS,
+  ANTICIPATORY_MAX_INTENTS,
+  generic_words: [...GENERIC_QUESTION_WORDS].sort(),
+  stem_suffixes: [...STEM_SUFFIXES],
+  retrieval_version: RETRIEVAL_VERSION,
+});
+
+export const CONFIG_VERSION = createHash('sha256')
+  .update(JSON.stringify(RETRIEVAL_CONFIG, Object.keys(RETRIEVAL_CONFIG).sort()))
+  .digest('hex').slice(0, 12);
 
 // Python's `re` module treats `\w` as [letters, digits, underscore]; the JS
 // equivalent needs the `u` flag plus explicit classes to include Cyrillic.
@@ -497,13 +530,13 @@ export function selectWithinBudget(ordered, diverse, overflow, { budget, maxEntr
 
   const neighbourIndex = new Map();
   for (const cand of [...diverse, ...overflow]) {
-    neighbourIndex.set(`${cand.unitId} ${cand.ord}`, cand);
+    neighbourIndex.set(`${cand.unitId}\u0000${cand.ord}`, cand);
   }
   const chosen = new Set(selected.map((cand) => cand.chunkId));
   let neighborsAdded = 0;
   for (const cand of [...selected]) {
     if (selected.length >= maxEntries) break;
-    const neighbour = neighbourIndex.get(`${cand.unitId} ${cand.ord + 1}`);
+    const neighbour = neighbourIndex.get(`${cand.unitId}\u0000${cand.ord + 1}`);
     if (!neighbour || chosen.has(neighbour.chunkId) || neighbour.overlapPrev <= 0
       || neighbour.score < NEIGHBOR_MIN_SCORE) continue;
     const cost = tokensOf(neighbour);
@@ -618,11 +651,23 @@ export function buildPack({ request, run, packRole, subqueries, packageVersion, 
         neighbors_added: run.neighborsAdded,
         budget_skipped: run.budgetSkipped,
       },
+      config_version: CONFIG_VERSION,
     },
     cache_trace: { cache_hit: false, cache_reason: null, topic_switch_detected: false },
     token_budget: { requested: request.max_context_tokens, used: run.usedTokens },
     latency_ms: 0,
   };
+}
+
+/**
+ * The unit a chunk belongs to. A chunk id is `<unit_id>:<section>:<ord>`, and
+ * unit ids themselves contain colons (`lesson:162630`), so the two trailing
+ * segments are dropped rather than the id split on the first colon.
+ */
+export function unitOfChunkId(chunkId) {
+  const parts = String(chunkId ?? '').split(':');
+  if (parts.length <= 2) return String(chunkId ?? '');
+  return parts.slice(0, parts.length - 2).join(':');
 }
 
 /** Empty run shape, so a gated question and a scored one produce the same pack fields. */

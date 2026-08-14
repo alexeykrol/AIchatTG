@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ANTICIPATORY_MAX_INTENTS,
+  applySchemaDefaults,
   CACHE_TTL_S,
   DOC_BONUS_MAX,
   DOC_LIMIT,
@@ -39,6 +42,8 @@ import {
   tailEligible,
   tailTerms,
   tokenize,
+  unitOfChunkId,
+  validateAgainstSchema,
   validateRewrite,
 } from '@aichattg/telegram-core';
 import { openReadOnlyRuntimeDatabase } from './database.mjs';
@@ -46,6 +51,12 @@ import { openReadOnlyRuntimeDatabase } from './database.mjs';
 const DEFAULT_DOMAIN_ID = 'ai';
 const DEFAULT_MAX_CONTEXT_TOKENS = 6_000;
 const DEFAULT_MAX_ENTRIES = 12;
+
+// The contracts travel inside the signed package (`contracts/` beside ai.db),
+// so the pack is checked against the schema the build published, not against a
+// copy in this repository that could drift away from the artefact.
+const PACK_SCHEMA_FILE = 'retrieval_pack.v1.schema.json';
+const REQUEST_SCHEMA_FILE = 'retrieval_request.v1.schema.json';
 
 function unavailable(reason) {
   return Object.freeze({ available: false, reason, pack: null });
@@ -78,13 +89,29 @@ const SQL_CHUNK_COLUMNS = `c.chunk_id, c.unit_id, c.content, c.token_count,
  * of throwing when a package is missing or malformed.
  */
 export function createRetrieverAdapter(
-  { databasePath, domainId = DEFAULT_DOMAIN_ID, rewriteEnabled = false } = {},
+  {
+    databasePath,
+    domainId = DEFAULT_DOMAIN_ID,
+    rewriteEnabled = false,
+    // The directory holding the package's own `contracts/*.schema.json`. When
+    // absent the schemas are looked up beside the database, which is where a
+    // v2 package puts them.
+    contractsRoot = null,
+    // Contract self-check. On by default: an invalid pack is a defect of this
+    // code, and it is cheaper to refuse before the answer model than to let a
+    // malformed projection reach a paid call. It stays switchable because a
+    // per-question validation of a large pack is the kind of thing that can
+    // become a latency problem in production, and then the operator needs an
+    // off switch that is not a code change.
+    validatePacks = true,
+  } = {},
   {
     openDatabase = openReadOnlyRuntimeDatabase,
     now = () => Date.now() / 1_000,
     // Step 5's only outside dependency. Absent by default, so the retriever
     // stays a pure local component and the gold harness spends nothing.
     rewriteQuestion = null,
+    readFile = readFileSync,
   } = {},
 ) {
   let db = null;
@@ -186,9 +213,42 @@ export function createRetrieverAdapter(
               AND c.state = 'canonical'
             ORDER BY bm25(chunks_fts) LIMIT 2`),
       };
+      // The lesson a chunk came from: its title and public URL. The answer is a
+      // funnel, so a citation the reader can open is part of the payload. It is
+      // prepared separately and tolerated as absent: a package whose units carry
+      // no public identity still answers correctly, only without links, and that
+      // must not take the whole retriever down.
+      try {
+        statements.unit = db.prepare(
+          'SELECT unit_id, title, canonical_url, url_state FROM units WHERE unit_id = ?');
+      } catch { statements.unit = null; }
     } catch {
       openReason = 'retriever_package_invalid';
       statements = null;
+    }
+  }
+
+  // Contracts live inside the signed package (`contracts/` beside ai.db), so the
+  // pack is judged by the schema its own build published.
+  //
+  // A package that ships no contracts is not an error and is not validated
+  // against a substitute copy: the absence is a property of that artefact, and
+  // the honest report is `not_run` rather than a pass we did not perform or a
+  // failure the pack did not cause. `contractStatus()` exposes which of the
+  // three it is, so a deployment can require `enforced` instead of assuming it.
+  let schemas = { pack: null, request: null, status: 'disabled' };
+  if (validatePacks === true && !openReason) {
+    const root = typeof contractsRoot === 'string' && contractsRoot
+      ? contractsRoot
+      : join(String(databasePath || '').replace(/[^/]*$/, ''), 'contracts');
+    try {
+      schemas = {
+        pack: JSON.parse(readFile(join(root, PACK_SCHEMA_FILE), 'utf8')),
+        request: JSON.parse(readFile(join(root, REQUEST_SCHEMA_FILE), 'utf8')),
+        status: 'enforced',
+      };
+    } catch {
+      schemas = { pack: null, request: null, status: 'not_run' };
     }
   }
 
@@ -408,6 +468,59 @@ export function createRetrieverAdapter(
   }
 
   /**
+   * The lesson identity behind every selected chunk, keyed by entry id. It is
+   * carried *beside* the contract pack rather than inside its entries: the
+   * package schema declares `entries` as exactly `{id, content}` with
+   * `additionalProperties: false`, so a citation folded into an entry would make
+   * the pack fail its own contract. The runtime merges the two just before the
+   * answer model, where the funnel needs the link.
+   */
+  function citationsFor(pack) {
+    const citations = {};
+    if (!statements?.unit) return citations;
+    const seen = new Map();
+    for (const entry of pack.entries) {
+      const unitId = unitOfChunkId(entry.id);
+      if (!unitId) continue;
+      if (!seen.has(unitId)) {
+        let row = null;
+        try { row = statements.unit.get(unitId) || null; } catch { row = null; }
+        seen.set(unitId, row);
+      }
+      const row = seen.get(unitId);
+      if (!row) continue;
+      const title = typeof row.title === 'string' && row.title.trim() ? row.title.trim() : null;
+      // A URL the mirror never confirmed is not published to a reader: a
+      // broken link in the answer costs more than a missing one.
+      const canonicalUrl = row.url_state === 'confirmed'
+        && typeof row.canonical_url === 'string' && row.canonical_url.startsWith('https://')
+        ? row.canonical_url : null;
+      if (!title && !canonicalUrl) continue;
+      citations[entry.id] = {
+        unitId,
+        ...(title == null ? {} : { title }),
+        ...(canonicalUrl == null ? {} : { canonicalUrl }),
+      };
+    }
+    return citations;
+  }
+
+  /**
+   * The pack must satisfy the contract shipped inside the package it was built
+   * from. A failure is our defect, not the user's, and it is reported as a
+   * reason code before any paid call rather than raised.
+   */
+  function validatePack(pack) {
+    if (!schemas.pack) return null;
+    // Fields the runtime attaches around the contract (`cache_trace` extras,
+    // `rewrite_trace`, citations) are validated as part of the pack only where
+    // the schema declares them; the contract projection is checked exactly.
+    const { rewrite_trace: rewriteTrace, citations, ...contract } = pack;
+    const checked = validateAgainstSchema(contract, schemas.pack);
+    return checked.valid ? null : 'retriever_pack_contract_invalid';
+  }
+
+  /**
    * One question in, one contract pack out. Unknown domains and unopened
    * packages return a reason code rather than an exception, so the runtime
    * can degrade to an ungrounded route without a try/catch at the call site.
@@ -439,6 +552,16 @@ export function createRetrieverAdapter(
       max_context_tokens: maxContextTokens,
       max_entries: maxEntries,
     };
+
+    // The request is assembled by this module, so its validation guards against
+    // our own drift (a caller passing an out-of-range budget, a contract field
+    // renamed by a new package) rather than against untrusted input. It is
+    // cheap — one small object — so it runs beside the pack check.
+    if (schemas.request) {
+      const checkedRequest = validateAgainstSchema(
+        applySchemaDefaults(request, schemas.request), schemas.request);
+      if (!checkedRequest.valid) return errorPack('retriever_request_contract_invalid');
+    }
 
     const sess = session(sessionId);
     const allTokens = tokenize(question);
@@ -485,6 +608,12 @@ export function createRetrieverAdapter(
     pack.cache_trace = {
       cache_hit: false, cache_reason: cacheReason, topic_switch_detected: topicSwitch,
     };
+
+    // Validate the contract projection before anything is attached to it or
+    // cached, so a malformed pack can never be served twice.
+    const invalid = validatePack(pack);
+    if (invalid) return errorPack(invalid);
+    pack.citations = citationsFor(pack);
 
     sess.packs.set(key, { pack: structuredClone(pack), at: now() });
     while (sess.packs.size > PACKS_PER_SESSION_MAX) {
@@ -579,6 +708,25 @@ export function createRetrieverAdapter(
     forQuestionWithRewrite,
 
     packageVersion() { return packageVersion; },
+
+    /** The reason the package could not be opened, or null when it is usable. */
+    unavailableReason() { return openReason; },
+
+    /**
+     * `enforced` | `not_run` | `disabled`. Stated explicitly so "the pack is
+     * valid" is never inferred from the absence of an error.
+     */
+    contractStatus() { return schemas.status; },
+
+    /**
+     * The concept dictionary this adapter already built from the package, in the
+     * shape `createDomainRegistry` expects. The domain veto and the entity
+     * search then measure the same terms by construction, and the dictionary is
+     * read from SQLite exactly once per process.
+     */
+    dictionary() {
+      return { domainId, concepts, conceptsStem, maxConceptLen };
+    },
 
     close() { if (db) db.close(); },
   });

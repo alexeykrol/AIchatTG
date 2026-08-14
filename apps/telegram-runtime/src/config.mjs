@@ -196,6 +196,26 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     // opt-in prevents a configured provider from treating an absent/unreviewed
     // source as permission to answer from general knowledge.
     assistantKnowledgeEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED', false),
+    // The retriever over the admitted v2 content package. Off by default like
+    // every other knowledge switch: enabling it is a cutover decision, not a
+    // deployment side effect.
+    assistantRetrieval: {
+      enabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_ENABLED', false),
+      maxContextTokens: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_CONTEXT_TOKENS', 6_000, { min: 500, max: 60_000 }),
+      // The provider hard-caps at 128; this is the working default the gold set
+      // was measured with, and it may be raised up to that ceiling.
+      maxEntries: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_ENTRIES', 12, { min: 1, max: 128 }),
+      // Input-layer step 5. Off by default: it is one extra model call per
+      // ungrounded question, so switching it on is a cost decision.
+      rewriteEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ENABLED', false),
+      // Contract self-check, on by default; the switch exists so an operator can
+      // drop it without a code change if it ever becomes a latency problem.
+      validatePacks: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_VALIDATE_PACKS', true),
+      rewrite: {
+        model: String(env.TELEGRAM_RUNTIME_REWRITE_MODEL || ''),
+        reasoningEffort: String(env.TELEGRAM_RUNTIME_REWRITE_REASONING_EFFORT || 'minimal'),
+      },
+    },
     assistantCooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20, 86_400),
     assistantDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20, 10_000),
     assistantDialogueTtlSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TTL_SEC', 604_800, 31_536_000),

@@ -416,3 +416,186 @@ test('Every retriever reason code is classified as a definitive routing exit', a
   assert.equal(classifier.includes('rewrite_provider'), false,
     'a code that can follow a paid model call must not be definitive');
 });
+
+// --- Contract self-validation and citations ----------------------------------
+
+/**
+ * A package's own `contracts/` directory, supplied through the filesystem port
+ * so the check can be proved without a package on disk.
+ */
+function contractPorts(schemas) {
+  return {
+    readFile(path) {
+      const name = String(path).split('/').pop();
+      if (!Object.hasOwn(schemas, name)) throw new Error(`ENOENT ${name}`);
+      return JSON.stringify(schemas[name]);
+    },
+  };
+}
+
+const MINIMAL_PACK_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schema_version', 'status', 'entries'],
+  properties: {
+    schema_version: { const: 'kb_retrieval_pack_v1' },
+    pack_id: { type: 'string' },
+    pack_role: { type: 'string' },
+    domain_id: { type: 'string' },
+    package_version: { type: 'string' },
+    status: { type: 'string' },
+    entries: { type: 'array' },
+    selected: { type: 'array' },
+    gaps: { type: 'array' },
+    contradictions: { type: 'array' },
+    confidence: { type: 'string' },
+    merge_hint: { type: 'object' },
+    retrieval_trace: { type: 'object' },
+    cache_trace: { type: 'object' },
+    token_budget: { type: 'object' },
+    latency_ms: { type: 'integer' },
+  },
+};
+
+function groundedDatabase() {
+  return fakeDatabase({
+    chunks: [chunk('lesson:1:a:001', 'ии-агент это программа которая сама решает задачи ии-агент работает циклом')],
+    concepts: [{ domain_id: 'ai', canonical: 'ии-агент', n_units: 3 }],
+    conceptUnits: [{ domain_id: 'ai', canonical: 'ии-агент', unit_id: 'lesson:1', role: 'defined', n_hits: 4 }],
+    meta: [{ scope: 'ai', source_signature: 'abc' }],
+  });
+}
+
+test('A pack is validated against the schema shipped inside the package', () => {
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/pkg/ai.db' },
+    {
+      openDatabase: () => groundedDatabase(),
+      ...contractPorts({
+        'retrieval_pack.v1.schema.json': MINIMAL_PACK_SCHEMA,
+        'retrieval_request.v1.schema.json': { type: 'object' },
+      }),
+    },
+  );
+  assert.equal(retriever.contractStatus(), 'enforced');
+  assert.equal(retriever.forQuestion({ question: 'что такое ии-агент?' }).pack.status, 'ready');
+});
+
+test('A pack that breaks its own contract is a reason code, not an answer', () => {
+  // The build published a schema this projection cannot satisfy: a defect of our
+  // code, caught before a paid call rather than sent to the model.
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/pkg/ai.db' },
+    {
+      openDatabase: () => groundedDatabase(),
+      ...contractPorts({
+        'retrieval_pack.v1.schema.json': {
+          ...MINIMAL_PACK_SCHEMA,
+          required: [...MINIMAL_PACK_SCHEMA.required, 'a_field_we_do_not_emit'],
+        },
+        'retrieval_request.v1.schema.json': { type: 'object' },
+      }),
+    },
+  );
+  const answer = retriever.forQuestion({ question: 'что такое ии-агент?' });
+  assert.deepEqual(answer, {
+    available: false, reason: 'retriever_pack_contract_invalid', pack: null,
+  });
+});
+
+test('A request that breaks its contract is refused before the search runs', () => {
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/pkg/ai.db' },
+    {
+      openDatabase: () => groundedDatabase(),
+      ...contractPorts({
+        'retrieval_pack.v1.schema.json': MINIMAL_PACK_SCHEMA,
+        'retrieval_request.v1.schema.json': {
+          type: 'object', required: ['schema_version', 'impossible_field'],
+        },
+      }),
+    },
+  );
+  assert.equal(retriever.forQuestion({ question: 'что такое ии-агент?' }).reason,
+    'retriever_request_contract_invalid');
+});
+
+test('A package that ships no contracts is not validated against a substitute', () => {
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/pkg/ai.db' },
+    { openDatabase: () => groundedDatabase(), ...contractPorts({}) },
+  );
+  // `not_run` rather than a pass we never performed or a failure the pack never
+  // caused: the contract lives in the artefact, and this artefact has none.
+  assert.equal(retriever.contractStatus(), 'not_run');
+  assert.equal(retriever.forQuestion({ question: 'что такое ии-агент?' }).pack.status, 'ready');
+});
+
+test('Validation can be switched off without touching code', () => {
+  let reads = 0;
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/pkg/ai.db', validatePacks: false },
+    { openDatabase: () => groundedDatabase(), readFile() { reads += 1; return '{}'; } },
+  );
+  assert.equal(retriever.contractStatus(), 'disabled');
+  assert.equal(reads, 0, 'a disabled check does not even read the schemas');
+  assert.equal(retriever.forQuestion({ question: 'что такое ии-агент?' }).pack.status, 'ready');
+});
+
+test('The pack carries the config version its own contract requires', () => {
+  const retriever = createRetrieverAdapter({ databasePath: '/ai.db' }, { openDatabase: () => groundedDatabase() });
+  const { pack } = retriever.forQuestion({ question: 'что такое ии-агент?' });
+  assert.match(pack.retrieval_trace.config_version, /^[a-f0-9]{12}$/);
+});
+
+test('Citations travel beside the contract pack, never inside its entries', () => {
+  const db = groundedDatabase();
+  const units = new Map([['lesson:1', {
+    unit_id: 'lesson:1', title: 'Урок про агентов',
+    canonical_url: 'https://alexeykrol.com/courses/ai_full/lessons/1/', url_state: 'confirmed',
+  }]]);
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => (sql.includes('canonical_url, url_state FROM units')
+    ? { get: (unitId) => units.get(unitId) }
+    : originalPrepare(sql));
+
+  const retriever = createRetrieverAdapter({ databasePath: '/ai.db' }, { openDatabase: () => db });
+  const { pack } = retriever.forQuestion({ question: 'что такое ии-агент?' });
+
+  // The schema declares entries as exactly {id, content}; a citation folded in
+  // would make the pack fail its own contract.
+  assert.deepEqual(Object.keys(pack.entries[0]).sort(), ['content', 'id']);
+  assert.deepEqual(pack.citations['lesson:1:a:001'], {
+    unitId: 'lesson:1',
+    title: 'Урок про агентов',
+    canonicalUrl: 'https://alexeykrol.com/courses/ai_full/lessons/1/',
+  });
+});
+
+test('An unconfirmed lesson URL is never offered as a citation', () => {
+  const db = groundedDatabase();
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => (sql.includes('canonical_url, url_state FROM units')
+    ? {
+      get: () => ({
+        unit_id: 'lesson:1', title: 'Урок про агентов',
+        canonical_url: 'https://alexeykrol.com/draft/', url_state: 'unconfirmed',
+      }),
+    }
+    : originalPrepare(sql));
+
+  const retriever = createRetrieverAdapter({ databasePath: '/ai.db' }, { openDatabase: () => db });
+  const { pack } = retriever.forQuestion({ question: 'что такое ии-агент?' });
+  // A broken link in an answer costs more than a missing one; the title still
+  // survives so the reader knows which lesson was used.
+  assert.deepEqual(pack.citations['lesson:1:a:001'], { unitId: 'lesson:1', title: 'Урок про агентов' });
+});
+
+test('The dictionary is exposed once so the veto and the search cannot disagree', () => {
+  const retriever = createRetrieverAdapter({ databasePath: '/ai.db' }, { openDatabase: () => groundedDatabase() });
+  const dictionary = retriever.dictionary();
+  assert.equal(dictionary.domainId, 'ai');
+  assert.ok(dictionary.concepts instanceof Map);
+  assert.equal(dictionary.concepts.has('ии-агент'), true);
+  assert.equal(retriever.unavailableReason(), null);
+});

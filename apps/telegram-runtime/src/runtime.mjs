@@ -1,6 +1,8 @@
 import {
   ASSISTANT_ROLE_ACTIONS,
+  ASSISTANT_SOURCE_PACKAGES,
   BOT_ROLES,
+  GROUNDING_REASONS,
   assistantDispositionForSafety,
   botIdFromToken,
   classifyTelegramUpdate,
@@ -19,7 +21,9 @@ import { createProviderAdapter, isProviderUnavailableError } from './provider-ad
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
+  assistantAbstentionReply,
   assistantDeterministicReply,
+  isAbstentionReason,
 } from './assistant-policy.mjs';
 
 function roleConfig(config, role) { return role === BOT_ROLES.MODERATOR ? config.moderator : config.assistant; }
@@ -122,6 +126,18 @@ function isDefinitiveAssistantRoutingExit(errorCode) {
     || code === 'retriever_package_invalid'
     || code === 'retriever_domain_unknown'
     || code === 'retriever_question_invalid'
+    || code === 'retriever_pack_missing'
+    // Contract self-validation (task B). Reading a schema shipped inside the
+    // package and checking our own projection against it happens entirely
+    // locally and always before the answer model, so a failure is our defect
+    // and the user's quota returns.
+    || code === 'retriever_pack_contract_invalid'
+    || code === 'retriever_request_contract_invalid'
+    // The pack→provider projection. `grounding_pack_missing` means the pack was
+    // absent or malformed before the answer call; the other two grounding
+    // reasons never arrive here at all, because an ungrounded question is
+    // answered with the abstention message instead of being skipped.
+    || code === GROUNDING_REASONS.PACK_MISSING
     // v2 binary package admission (input-layer step 1, task B). Each of these
     // is decided while validating a manifest and hashing local files, before
     // any provider call, so the reservation is released.
@@ -239,6 +255,10 @@ export function createTelegramRuntime({
   assistantTelegram,
   notifier,
   knowledge = unavailableKnowledge(),
+  // The retriever over the admitted v2 content package. Absent by default so a
+  // deployment that has not admitted a package keeps the previous snapshot
+  // behaviour instead of failing closed on a path it never enabled.
+  contentRetrieval = null,
   wait = sleep,
   // Test-only crash injection. Production bootstrap never supplies hooks.
   testHooks = null,
@@ -816,9 +836,44 @@ export function createTelegramRuntime({
       return { error: 'course_operations_route_required' };
     }
     if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) return { route, knowledge: null };
-    const sourceKnowledge = knowledge.forSource(route.sourceId);
-    if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
-    return { route, knowledge: sourceKnowledge.snapshot };
+
+    // Operations questions keep the v1 text path: that source is a reviewed
+    // snapshot of a handful of entries with no chunks, dictionary or domain, so
+    // there is nothing for the retriever to search and passing it whole is
+    // correct rather than a shortcut.
+    if (route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS) {
+      const sourceKnowledge = knowledge.forSource(route.sourceId);
+      if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
+      return { route, knowledge: sourceKnowledge.snapshot };
+    }
+
+    // The content domain goes through the retriever. The whole snapshot is no
+    // longer an option: the corpus is a package of tens of thousands of chunks,
+    // and the provider accepts 128 entries.
+    if (!contentRetrieval) {
+      const sourceKnowledge = knowledge.forSource(route.sourceId);
+      if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
+      return { route, knowledge: sourceKnowledge.snapshot };
+    }
+    if (!contentRetrieval.available) {
+      return { error: contentRetrieval.reason || 'knowledge_unavailable' };
+    }
+    const grounded = await contentRetrieval.forQuestion({
+      question: question.text,
+      // One retrieval session per user per chat: the pack cache and its topic
+      // switch detection are about one person's train of thought.
+      sessionId: `${question.chatId}:${question.userId}`,
+    });
+    // Abstention is an answer, not silence. A question the corpus cannot ground
+    // gets an honest deterministic reply, because a bot that says nothing reads
+    // as broken and invites the user to retry into the same wall.
+    if (!grounded.grounded) {
+      if (isAbstentionReason(grounded.reason)) {
+        return { route, knowledge: null, abstain: true, reason: grounded.reason, trace: grounded.trace || null };
+      }
+      return { error: grounded.reason || 'knowledge_unavailable' };
+    }
+    return { route, knowledge: grounded.knowledge, trace: grounded.trace || null };
   }
 
   async function sendAssistantTurn(eventId, question, answer, route = null) {
@@ -888,6 +943,16 @@ export function createTelegramRuntime({
         else store.markAssistantRequestUncertain(eventId);
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
         return { kind: 'skipped', reason: routing.error };
+      }
+      // The corpus cannot ground this question. The user is told so — the reply
+      // is delivered like any other, and the request is completed rather than
+      // released, because a delivered answer is what the quota pays for.
+      if (routing.abstain === true) {
+        const abstention = assistantAbstentionReply(routing.reason);
+        const delivered = await sendAssistantTurn(eventId, question, { text: abstention.text }, abstention.route);
+        store.completeAssistantRequest(eventId);
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        return { ...delivered, abstained: true, reason: routing.reason };
       }
       let answer;
       try {

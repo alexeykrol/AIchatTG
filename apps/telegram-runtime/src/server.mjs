@@ -2,6 +2,8 @@ import { loadRuntimeConfig } from './config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from './database.mjs';
 import { createProviderAdapter } from './provider-adapter.mjs';
 import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
+import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
+import { createRewriterAdapter } from './rewriter-adapter.mjs';
 import { createNotificationAdapter } from './notification-adapter.mjs';
 import { createTelegramAdapter } from './telegram-adapter.mjs';
 import { createGuardAdapter } from './guard-adapter.mjs';
@@ -25,11 +27,33 @@ const guard = createGuardAdapter({
     botIdFromToken(config.moderator.botToken),
   ].filter(Boolean),
 });
+const knowledge = createKnowledgeAdapter(config.knowledge);
+// The content retriever is built only when explicitly enabled. When it is off
+// the assistant keeps its previous path exactly, so this cutover is a switch,
+// not a rewrite of a running deployment.
+const contentRetrieval = config.assistantRetrieval.enabled === true
+  ? createKnowledgeRetrieval(config.assistantRetrieval, {
+    knowledge,
+    rewriteQuestion: config.assistantRetrieval.rewriteEnabled === true
+      ? createRewriterAdapter({
+        enabled: true,
+        endpoint: config.provider.endpoint,
+        apiKey: config.provider.apiKey,
+        model: config.assistantRetrieval.rewrite.model,
+        reasoningEffort: config.assistantRetrieval.rewrite.reasoningEffort,
+      })
+      : null,
+  })
+  : null;
+if (contentRetrieval && !contentRetrieval.available) {
+  console.error(`[telegram-runtime] content retrieval unavailable: ${contentRetrieval.reason}`);
+}
 const runtime = createTelegramRuntime({
   config,
   store: createRuntimeStore(database),
   provider: createProviderAdapter(config.provider),
-  knowledge: createKnowledgeAdapter(config.knowledge),
+  knowledge,
+  contentRetrieval,
   moderatorTelegram,
   guard,
   assistantTelegram: createTelegramAdapter(config.assistant),
