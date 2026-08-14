@@ -8,10 +8,18 @@
  * Usage:
  *   node apps/telegram-runtime/scripts/eval-gold.mjs \
  *     --db <package.db> --gold <ai.gold.jsonl> [--split dev|heldout|all]
- *     [--dump out.json]
+ *     [--dump out.json] [--rewrite] [--rewrite-fixture rewrites.json]
+ *
+ * Without --rewrite the harness performs exactly one local retrieval pass per
+ * question and spends nothing, so its numbers are the deterministic baseline
+ * that any change must reproduce. --rewrite additionally measures input-layer
+ * step 5; it needs either a recorded fixture or provider credentials in the
+ * environment, and it is never the default precisely because a paid, non
+ * deterministic default would make the baseline unfalsifiable.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRetrieverAdapter } from '../src/retriever-adapter.mjs';
+import { createRecordedRewriter, createRewriterAdapter } from '../src/rewriter-adapter.mjs';
 
 const GATES = Object.freeze([
   ['recall_at_5', 0.90],
@@ -26,10 +34,15 @@ const FORBIDDEN_K = 5;
 function parseArgs(argv) {
   const args = {
     split: 'dev', domain: 'ai', maxContextTokens: 6_000, maxEntries: 12, dump: null,
+    rewrite: false, rewriteFixture: null,
   };
-  for (let i = 0; i < argv.length; i += 2) {
+  // `--rewrite` is a bare flag, so the pairwise walk cannot assume every option
+  // consumes a value.
+  for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
+    if (key === '--rewrite') { args.rewrite = true; continue; }
     const value = argv[i + 1];
+    i += 1;
     if (key === '--db') args.db = value;
     else if (key === '--gold') args.gold = value;
     else if (key === '--split') args.split = value;
@@ -37,8 +50,31 @@ function parseArgs(argv) {
     else if (key === '--max-context-tokens') args.maxContextTokens = Number(value);
     else if (key === '--max-entries') args.maxEntries = Number(value);
     else if (key === '--dump') args.dump = value;
+    else if (key === '--rewrite-fixture') args.rewriteFixture = value;
   }
   return args;
+}
+
+/**
+ * The rewriter used by --rewrite. A fixture is preferred because a measurement
+ * that cannot be repeated is not a measurement; live credentials are the
+ * fallback for producing such a fixture in the first place.
+ */
+function buildRewriter(args, env) {
+  if (args.rewriteFixture) {
+    return {
+      rewriteQuestion: createRecordedRewriter(JSON.parse(readFileSync(args.rewriteFixture, 'utf8'))),
+      source: `fixture:${args.rewriteFixture}`,
+    };
+  }
+  const rewriteQuestion = createRewriterAdapter({
+    enabled: true,
+    endpoint: String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || ''),
+    apiKey: String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || ''),
+    model: String(env.TELEGRAM_RUNTIME_REWRITE_MODEL || ''),
+    reasoningEffort: String(env.TELEGRAM_RUNTIME_REWRITE_REASONING_EFFORT || 'minimal'),
+  });
+  return { rewriteQuestion, source: `provider:${env.TELEGRAM_RUNTIME_REWRITE_MODEL}` };
 }
 
 function unitOfChunk(chunkId) {
@@ -128,10 +164,10 @@ function aggregate(results) {
   };
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.db || !args.gold) {
-    console.error('usage: eval-gold.mjs --db <package.db> --gold <ai.gold.jsonl> [--split dev]');
+    console.error('usage: eval-gold.mjs --db <package.db> --gold <ai.gold.jsonl> [--split dev] [--rewrite]');
     return 2;
   }
 
@@ -140,25 +176,42 @@ function main() {
   const subset = args.split === 'all' ? records
     : records.filter((r) => (args.split === 'dev' ? !r.held_out : r.held_out));
 
-  const retriever = createRetrieverAdapter({
-    databasePath: args.db, domainId: args.domain,
-  });
+  const rewriter = args.rewrite ? buildRewriter(args, process.env) : null;
+  const retriever = createRetrieverAdapter(
+    { databasePath: args.db, domainId: args.domain, rewriteEnabled: args.rewrite },
+    rewriter ? { rewriteQuestion: rewriter.rewriteQuestion } : {},
+  );
 
   const results = [];
+  const rewriteStats = { attempted: 0, applied: 0, byReason: new Map() };
   const started = Date.now();
   for (const record of subset) {
-    const answer = retriever.forQuestion({
+    const input = {
       question: record.question,
       sessionId: `eval:${record.query_id}`,
       domainId: args.domain,
       maxContextTokens: args.maxContextTokens,
       maxEntries: args.maxEntries,
-    });
+    };
+    // Without --rewrite the harness takes exactly the original code path, so a
+    // baseline run cannot drift through the step-5 wrapper.
+    const answer = args.rewrite
+      ? await retriever.forQuestionWithRewrite(input)
+      : retriever.forQuestion(input);
     if (!answer.available) {
       console.error(`retriever unavailable: ${answer.reason}`);
       return 2;
     }
-    results.push(scoreQuestion(record, answer.pack));
+    const trace = answer.pack.rewrite_trace;
+    if (trace) {
+      if (trace.attempted) rewriteStats.attempted += 1;
+      if (trace.winner === 'second') rewriteStats.applied += 1;
+      const reason = String(trace.reason ?? 'none');
+      rewriteStats.byReason.set(reason, (rewriteStats.byReason.get(reason) || 0) + 1);
+    }
+    const scored = scoreQuestion(record, answer.pack);
+    if (trace) scored.rewrite = trace;
+    results.push(scored);
   }
   const elapsed = Date.now() - started;
   retriever.close();
@@ -178,8 +231,15 @@ function main() {
     console.log(`  ${name.padEnd(20)} ≥ ${threshold.toFixed(2)}  значение ${shown.padStart(7)}  ${status}`);
   }
   console.log(`forbidden_violations: ${overall.forbidden_violations}`);
+  if (args.rewrite) {
+    const reasons = [...rewriteStats.byReason.entries()]
+      .sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name}=${n}`).join(' ');
+    console.log(`переформулировка (${rewriter.source}): попыток ${rewriteStats.attempted}, `
+      + `принято вторых паков ${rewriteStats.applied}`);
+    console.log(`  причины: ${reasons}`);
+  }
   console.log(`время: ${(elapsed / 1_000).toFixed(1)} с`);
   return 0;
 }
 
-process.exit(main());
+process.exit(await main());

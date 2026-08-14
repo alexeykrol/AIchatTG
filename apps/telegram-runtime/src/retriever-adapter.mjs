@@ -13,11 +13,13 @@ import {
   NO_CONCEPT_MIN_UNITS,
   PACKS_PER_SESSION_MAX,
   PACK_SCHEMA_VERSION,
+  REWRITE_REASONS,
   SESSIONS_MAX,
   THRESHOLD_NOT_FOUND,
   TOPIC_SWITCH_MIN_OVERLAP,
   buildPack,
   buildTerms,
+  chooseBetterPack,
   createCandidate,
   createRun,
   decideStatus,
@@ -29,12 +31,15 @@ import {
   normalizeForm,
   normalizeText,
   notFoundGaps,
+  rewriteTrace,
   scoreAndRank,
   selectWithinBudget,
+  shouldRewrite,
   stemNgram,
   tailEligible,
   tailTerms,
   tokenize,
+  validateRewrite,
 } from '@aichattg/telegram-core';
 import { openReadOnlyRuntimeDatabase } from './database.mjs';
 
@@ -50,6 +55,19 @@ function errorPack(reason) {
   return Object.freeze({ available: false, reason, pack: null });
 }
 
+/**
+ * Attach the step-5 record to the returned pack. The pack object itself is
+ * copied rather than mutated: the session cache holds its own clone, and a
+ * trace from one call must not leak into a later cache hit.
+ */
+function withTrace(answer, trace) {
+  return Object.freeze({
+    available: answer.available,
+    reason: answer.reason,
+    pack: { ...answer.pack, rewrite_trace: trace },
+  });
+}
+
 const SQL_CHUNK_COLUMNS = `c.chunk_id, c.unit_id, c.content, c.token_count,
   c.section_path, c.ord, c.overlap_prev, c.content_sha256`;
 
@@ -60,8 +78,14 @@ const SQL_CHUNK_COLUMNS = `c.chunk_id, c.unit_id, c.content, c.token_count,
  * of throwing when a package is missing or malformed.
  */
 export function createRetrieverAdapter(
-  { databasePath, domainId = DEFAULT_DOMAIN_ID } = {},
-  { openDatabase = openReadOnlyRuntimeDatabase, now = () => Date.now() / 1_000 } = {},
+  { databasePath, domainId = DEFAULT_DOMAIN_ID, rewriteEnabled = false } = {},
+  {
+    openDatabase = openReadOnlyRuntimeDatabase,
+    now = () => Date.now() / 1_000,
+    // Step 5's only outside dependency. Absent by default, so the retriever
+    // stays a pure local component and the gold harness spends nothing.
+    rewriteQuestion = null,
+  } = {},
 ) {
   let db = null;
   let openReason = null;
@@ -383,96 +407,176 @@ export function createRetrieverAdapter(
     })).digest('hex');
   }
 
-  return Object.freeze({
-    /**
-     * One question in, one contract pack out. Unknown domains and unopened
-     * packages return a reason code rather than an exception, so the runtime
-     * can degrade to an ungrounded route without a try/catch at the call site.
-     */
-    forQuestion({
+  /**
+   * One question in, one contract pack out. Unknown domains and unopened
+   * packages return a reason code rather than an exception, so the runtime
+   * can degrade to an ungrounded route without a try/catch at the call site.
+   */
+  function forQuestion({
+    question,
+    sessionId = 'runtime',
+    domainId: requestDomain = domainId,
+    maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
+    maxEntries = DEFAULT_MAX_ENTRIES,
+    dialogueTail = null,
+  } = {}) {
+    if (openReason) return unavailable(openReason);
+    if (typeof question !== 'string' || !question.trim()) {
+      return errorPack('retriever_question_invalid');
+    }
+    if (!statements.domain.get(requestDomain)) {
+      return errorPack('retriever_domain_unknown');
+    }
+
+    const request = {
+      schema_version: 'kb_retrieval_request_v1',
+      invocation_mode: 'current_question',
+      session_id: sessionId,
+      domain_id: requestDomain,
       question,
-      sessionId = 'runtime',
-      domainId: requestDomain = domainId,
-      maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
-      maxEntries = DEFAULT_MAX_ENTRIES,
-      dialogueTail = null,
-    } = {}) {
-      if (openReason) return unavailable(openReason);
-      if (typeof question !== 'string' || !question.trim()) {
-        return errorPack('retriever_question_invalid');
+      retrieval_goal: 'answer_user_question',
+      grounding_policy: 'source_grounded',
+      max_context_tokens: maxContextTokens,
+      max_entries: maxEntries,
+    };
+
+    const sess = session(sessionId);
+    const allTokens = tokenize(question);
+    const significant = allTokens.filter((token) => isSignificant(token));
+    const eligible = tailEligible(question, significant);
+    const topicTokens = new Set(significant);
+
+    let topicSwitch = false;
+    if (!eligible && topicTokens.size && sess.topics !== null) {
+      let shared = 0;
+      for (const token of topicTokens) if (sess.topics.has(token)) shared += 1;
+      if (shared / topicTokens.size < TOPIC_SWITCH_MIN_OVERLAP) {
+        topicSwitch = true;
+        sess.packs.clear();
       }
-      if (!statements.domain.get(requestDomain)) {
-        return errorPack('retriever_domain_unknown');
+    }
+
+    const tail = eligible ? tailTerms(dialogueTail) : [];
+    const key = cacheKey(request, { q: allTokens.join(' ') }, tail);
+    let cacheReason = 'no_cached_pack';
+    const cached = sess.packs.get(key);
+    if (cached) {
+      if (now() - cached.at <= CACHE_TTL_S) {
+        const pack = structuredClone(cached.pack);
+        pack.cache_trace = {
+          cache_hit: true, cache_reason: 'session_repeat', topic_switch_detected: false,
+        };
+        return Object.freeze({ available: true, reason: null, pack });
       }
+      sess.packs.delete(key);
+      cacheReason = 'expired';
+    }
+    if (topicSwitch) cacheReason = 'topic_switch_reset';
 
-      const request = {
-        schema_version: 'kb_retrieval_request_v1',
-        invocation_mode: 'current_question',
-        session_id: sessionId,
-        domain_id: requestDomain,
-        question,
-        retrieval_goal: 'answer_user_question',
-        grounding_policy: 'source_grounded',
-        max_context_tokens: maxContextTokens,
-        max_entries: maxEntries,
-      };
+    const run = runQuery(question, tail, requestDomain, maxContextTokens, maxEntries);
+    const pack = buildPack({
+      request,
+      run,
+      packRole: 'fresh',
+      subqueries: 0,
+      packageVersion,
+      packId: randomUUID().replaceAll('-', ''),
+    });
+    pack.cache_trace = {
+      cache_hit: false, cache_reason: cacheReason, topic_switch_detected: topicSwitch,
+    };
 
-      const sess = session(sessionId);
-      const allTokens = tokenize(question);
-      const significant = allTokens.filter((token) => isSignificant(token));
-      const eligible = tailEligible(question, significant);
-      const topicTokens = new Set(significant);
+    sess.packs.set(key, { pack: structuredClone(pack), at: now() });
+    while (sess.packs.size > PACKS_PER_SESSION_MAX) {
+      sess.packs.delete(sess.packs.keys().next().value);
+    }
+    if (topicTokens.size) {
+      const base = (topicSwitch || sess.topics === null) ? new Set() : sess.topics;
+      sess.topics = new Set([...base, ...topicTokens]);
+    }
+    return Object.freeze({ available: true, reason: null, pack });
+  }
 
-      let topicSwitch = false;
-      if (!eligible && topicTokens.size && sess.topics !== null) {
-        let shared = 0;
-        for (const token of topicTokens) if (sess.topics.has(token)) shared += 1;
-        if (shared / topicTokens.size < TOPIC_SWITCH_MIN_OVERLAP) {
-          topicSwitch = true;
-          sess.packs.clear();
-        }
-      }
+  /**
+   * Step 5. The first pass runs exactly as before; only when its pack carries no
+   * usable grounding is the question restated once and searched again. The two
+   * packs are then compared by an explicit rule, so a rewrite that finds nothing
+   * better cannot make the answer worse than the user's own wording.
+   *
+   * A failed or degenerate rewrite is not an error: the first pack is returned
+   * with the reason recorded. The rewrite is not a retry of a paid call — it
+   * happens above retrieval and before the answer provider — so the runtime's
+   * no-retry transport invariant is unaffected.
+   */
+  async function forQuestionWithRewrite(input = {}) {
+    const first = forQuestion(input);
+    if (!first.available || !first.pack) return first;
 
-      const tail = eligible ? tailTerms(dialogueTail) : [];
-      const key = cacheKey(request, { q: allTokens.join(' ') }, tail);
-      let cacheReason = 'no_cached_pack';
-      const cached = sess.packs.get(key);
-      if (cached) {
-        if (now() - cached.at <= CACHE_TTL_S) {
-          const pack = structuredClone(cached.pack);
-          pack.cache_trace = {
-            cache_hit: true, cache_reason: 'session_repeat', topic_switch_detected: false,
-          };
-          return Object.freeze({ available: true, reason: null, pack });
-        }
-        sess.packs.delete(key);
-        cacheReason = 'expired';
-      }
-      if (topicSwitch) cacheReason = 'topic_switch_reset';
+    const gate = shouldRewrite(first.pack, { enabled: rewriteEnabled === true, attempts: 0 });
+    if (!gate.rewrite) return withTrace(first, rewriteTrace({
+      attempted: false, reason: gate.reason, firstStatus: first.pack.status,
+    }));
+    if (typeof rewriteQuestion !== 'function') {
+      return withTrace(first, rewriteTrace({
+        attempted: false,
+        reason: REWRITE_REASONS.PROVIDER_UNAVAILABLE,
+        firstStatus: first.pack.status,
+      }));
+    }
 
-      const run = runQuery(question, tail, requestDomain, maxContextTokens, maxEntries);
-      const pack = buildPack({
-        request,
-        run,
-        packRole: 'fresh',
-        subqueries: 0,
-        packageVersion,
-        packId: randomUUID().replaceAll('-', ''),
+    let candidate = null;
+    try {
+      candidate = await rewriteQuestion({
+        question: input.question,
+        domainId: input.domainId ?? domainId,
+        gaps: Array.isArray(first.pack.gaps) ? first.pack.gaps : [],
+        conceptMatches: first.pack.retrieval_trace?.concept_matches ?? [],
       });
-      pack.cache_trace = {
-        cache_hit: false, cache_reason: cacheReason, topic_switch_detected: topicSwitch,
-      };
+    } catch {
+      // A rewrite is an optimisation, never a precondition: its failure returns
+      // the first pack rather than propagating and denying the user an answer
+      // the original question already supports.
+      return withTrace(first, rewriteTrace({
+        attempted: true,
+        reason: REWRITE_REASONS.PROVIDER_FAILED,
+        firstStatus: first.pack.status,
+      }));
+    }
 
-      sess.packs.set(key, { pack: structuredClone(pack), at: now() });
-      while (sess.packs.size > PACKS_PER_SESSION_MAX) {
-        sess.packs.delete(sess.packs.keys().next().value);
-      }
-      if (topicTokens.size) {
-        const base = (topicSwitch || sess.topics === null) ? new Set() : sess.topics;
-        sess.topics = new Set([...base, ...topicTokens]);
-      }
-      return Object.freeze({ available: true, reason: null, pack });
-    },
+    const checked = validateRewrite(candidate, input.question);
+    if (!checked.valid) {
+      return withTrace(first, rewriteTrace({
+        attempted: true, reason: checked.reason, firstStatus: first.pack.status,
+      }));
+    }
+
+    const second = forQuestion({ ...input, question: checked.question });
+    if (!second.available || !second.pack) {
+      return withTrace(first, rewriteTrace({
+        attempted: true,
+        rewrittenQuestion: checked.question,
+        reason: second.reason || REWRITE_REASONS.PACK_MISSING,
+        firstStatus: first.pack.status,
+      }));
+    }
+
+    const chosen = chooseBetterPack(first.pack, second.pack);
+    return withTrace(
+      { available: true, reason: null, pack: chosen.pack },
+      rewriteTrace({
+        attempted: true,
+        rewrittenQuestion: checked.question,
+        reason: chosen.reason,
+        winner: chosen.winner,
+        firstStatus: first.pack.status,
+        secondStatus: second.pack.status,
+      }),
+    );
+  }
+
+  return Object.freeze({
+    forQuestion,
+    forQuestionWithRewrite,
 
     packageVersion() { return packageVersion; },
 
