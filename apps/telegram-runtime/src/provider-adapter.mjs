@@ -13,6 +13,8 @@ const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_OUTPUT_TOKENS = 4_096;
 const MAX_INPUT_CHARS = 60_000;
+const MAX_TITLE_CHARS = 200;
+const MAX_URL_CHARS = 2_048;
 
 const TUPLE_NAMES = Object.freeze({
   moderatorSafety: 'moderatorSafety',
@@ -32,7 +34,10 @@ const ROUTER_SYSTEM_PROMPT = [
 const ANSWER_SYSTEM_PROMPT = [
   'You are the AIchatTG Assistant. Answer the supplied question in the user\'s',
   'language using only the supplied admitted knowledge snapshot and dialogue.',
-  'Do not invent course facts, secrets, links, access, or actions. If the snapshot',
+  'Do not invent course facts, secrets, links, access, or actions. When an entry',
+  'you used carries title and canonicalUrl, cite that lesson by its title and its',
+  'exact canonicalUrl so the reader can open it; never alter such a URL and never',
+  'state a link for an entry that has none. If the snapshot',
   'does not support an answer, say so briefly and ask for a more specific question.',
 ].join(' ');
 
@@ -175,6 +180,39 @@ function questionText(value) {
   return text && text.length <= 8_192 ? text : null;
 }
 
+function entryTitle(value) {
+  const title = typeof value === 'string' ? value.trim() : '';
+  return title ? title.slice(0, MAX_TITLE_CHARS) : null;
+}
+
+/**
+ * Only an absolute https URL may reach the answer model as a citation. A
+ * relative path, another scheme or an overlong string would let the model
+ * publish a link the snapshot never admitted.
+ */
+function entryCanonicalUrl(value) {
+  if (typeof value !== 'string' || !value || value.length > MAX_URL_CHARS) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  return url.protocol === 'https:' ? url.toString() : null;
+}
+
+/**
+ * Entries keep the citation fields the admitted snapshot already carries. The
+ * answer is a funnel: without title and canonical URL the model cannot point a
+ * reader at the lesson it just summarised.
+ */
+function knowledgeEntry(entry) {
+  const title = entryTitle(entry?.title);
+  const canonicalUrl = entryCanonicalUrl(entry?.canonicalUrl);
+  return {
+    id: String(entry?.id || ''),
+    content: String(entry?.content || ''),
+    ...(title == null ? {} : { title }),
+    ...(canonicalUrl == null ? {} : { canonicalUrl }),
+  };
+}
+
 function userInput(operation, payload) {
   if (!plainObject(payload)) return null;
   if (operation === 'assistantRouter') {
@@ -189,7 +227,7 @@ function userInput(operation, payload) {
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',
     entries: Array.isArray(payload.knowledge.entries)
-      ? payload.knowledge.entries.map((entry) => ({ id: String(entry?.id || ''), content: String(entry?.content || '') })) : null,
+      ? payload.knowledge.entries.map((entry) => knowledgeEntry(entry)) : null,
   };
   if (!knowledge.sourceId || !knowledge.entries || knowledge.entries.length === 0 || knowledge.entries.length > 128) return null;
   return boundedJson({ question: text, route, dialogue, knowledge });

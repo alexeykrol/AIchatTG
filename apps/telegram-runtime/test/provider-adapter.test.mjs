@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { admitKnowledgeSnapshot, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import {
   createProviderAdapter,
@@ -239,4 +244,108 @@ test('transport errors have no automatic retry', async () => {
   await assert.rejects(adapter.moderate({ text: 'fixture' }), (error) => error instanceof ProviderRequestError
     && error.code === 'provider_transport_failed' && error.retryable === false);
   assert.equal(calls, 1);
+});
+
+function answerAdapter(responses) {
+  const requests = [];
+  const adapter = createProviderAdapter(providerConfig(), {
+    async fetchFn(_url, init) { requests.push(JSON.parse(init.body)); return responses.shift(); },
+  });
+  return { adapter, requests };
+}
+
+function answerEntries(request) {
+  return JSON.parse(request.messages[1].content).knowledge.entries;
+}
+
+test('citation title and canonical url reach the answer model with the entry', async () => {
+  const { adapter, requests } = answerAdapter([response(completion('Answer with a lesson link.'))]);
+  const answer = await adapter.answer({
+    ...answerPayload(),
+    knowledge: {
+      sourceId: 'course-content-v1',
+      entries: [{
+        id: 'lesson-1', content: 'Approved content.',
+        title: 'Урок 2.3. Архитектура агентов',
+        canonicalUrl: 'https://course.example.test/lesson-23',
+      }],
+    },
+  });
+  assert.equal(answer.text, 'Answer with a lesson link.');
+  assert.deepEqual(answerEntries(requests[0]), [{
+    id: 'lesson-1', content: 'Approved content.',
+    title: 'Урок 2.3. Архитектура агентов',
+    canonicalUrl: 'https://course.example.test/lesson-23',
+  }]);
+  // The answer prompt must license the admitted link, otherwise the standing
+  // "do not invent links" instruction suppresses the funnel the fields exist for.
+  const system = requests[0].messages[0].content;
+  assert.equal(system.includes('canonicalUrl'), true);
+  // The citation fields are data, not trace: the receipt stays content-free.
+  const receipt = JSON.stringify(answer.receipt);
+  assert.equal(receipt.includes('course.example.test'), false);
+  assert.equal(receipt.includes('Архитектура'), false);
+});
+
+test('an entry without citation fields sends neither key and still answers', async () => {
+  const { adapter, requests } = answerAdapter([response(completion('Answer without a link.'))]);
+  await adapter.answer(answerPayload());
+  const [entry] = answerEntries(requests[0]);
+  assert.deepEqual(entry, { id: 'lesson-1', content: 'Approved content.' });
+  assert.equal(Object.hasOwn(entry, 'title'), false);
+  assert.equal(Object.hasOwn(entry, 'canonicalUrl'), false);
+});
+
+test('only an absolute https canonical url is forwarded as a citation', async () => {
+  const rejected = [
+    '/courses/lesson-23', 'http://course.example.test/lesson-23',
+    'javascript:alert(1)', 'lesson-23', `https://course.example.test/${'x'.repeat(2_048)}`,
+  ];
+  const { adapter, requests } = answerAdapter(rejected.map(() => response(completion('Answer.'))));
+  for (const canonicalUrl of rejected) {
+    await adapter.answer({
+      ...answerPayload(),
+      knowledge: {
+        sourceId: 'course-content-v1',
+        entries: [{ id: 'lesson-1', content: 'Approved content.', title: 'Lesson', canonicalUrl }],
+      },
+    });
+  }
+  for (const request of requests) {
+    const [entry] = answerEntries(request);
+    assert.equal(Object.hasOwn(entry, 'canonicalUrl'), false, 'a non-https url must not become a citation');
+    assert.equal(entry.title, 'Lesson');
+  }
+});
+
+test('an admitted snapshot carries its citation fields to the model but no local paths', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-citation-'));
+  try {
+    const content = 'Lesson body about agents.';
+    writeFileSync(join(folder, 'lesson.md'), content);
+    const manifest = {
+      format: 'aichattg-knowledge-manifest-v1',
+      sourceId: 'course-content-v1',
+      entries: [{
+        id: 'lesson-1', path: 'lesson.md',
+        sha256: createHash('sha256').update(content).digest('hex'),
+        title: 'Урок 2.3', canonicalUrl: 'https://course.example.test/lesson-23',
+      }],
+    };
+    const admitted = admitKnowledgeSnapshot({
+      manifest, root: folder,
+      expectedIdentity: { sourceId: 'course-content-v1', manifestDigest: knowledgeManifestDigest(manifest) },
+    });
+    assert.equal(admitted.available, true);
+    const { adapter, requests } = answerAdapter([response(completion('Answer.'))]);
+    await adapter.answer({ ...answerPayload(), knowledge: admitted.snapshot });
+    assert.deepEqual(answerEntries(requests[0]), [{
+      id: 'lesson-1', content,
+      title: 'Урок 2.3', canonicalUrl: 'https://course.example.test/lesson-23',
+    }]);
+    // The snapshot's local filesystem identity is not the model's business.
+    const sent = requests[0].messages[1].content;
+    assert.equal(sent.includes('lesson.md'), false);
+    assert.equal(sent.includes(manifest.entries[0].sha256), false);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
 });
