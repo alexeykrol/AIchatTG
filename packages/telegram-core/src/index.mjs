@@ -9,6 +9,8 @@ export {
   validateKnowledgeManifest,
 } from './knowledge.mjs';
 
+export * from './retrieval.mjs';
+
 export const BOT_ROLES = Object.freeze({
   MODERATOR: 'moderator',
   ASSISTANT: 'assistant',
