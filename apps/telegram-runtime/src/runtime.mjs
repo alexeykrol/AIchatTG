@@ -841,13 +841,18 @@ export function createTelegramRuntime({
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
+    // Хинт — замеренная бухгалтерия кода (0 ложных на голд-сете); модельный
+    // роутер на хинтованном вопросе выбирает лишь «ответить или redirect».
+    // Когда модель спорит с хинтом (живой прогон: luna изредка отвечала teach
+    // на value-вопрос), побеждает код: маршрут принуждается к хинту. Прежний
+    // определённый отказ означал МОЛЧАНИЕ клиенту за недетерминизм модели.
     if (courseOperationsHint
       && ![ASSISTANT_ROLE_ACTIONS.SUPPORT, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
-      return { error: 'course_operations_route_required' };
+      route = { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS };
     }
     if (courseValueHint
       && ![ASSISTANT_ROLE_ACTIONS.ADVISE, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
-      return { error: 'course_value_route_required' };
+      route = { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
     }
     if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) return { route, knowledge: null };
 
@@ -1058,7 +1063,8 @@ export function createTelegramRuntime({
         if (!completed.completed) return { kind: 'uncertain_delivery', eventId, receiptId, reason: 'claim_fenced', recoveryId: null };
         store.completeEvent(eventId, result.kind === 'skipped' ? 'skipped' : 'completed', response);
         return response;
-      } catch {
+      } catch (error) {
+        console.error('[debug-tmp]', error?.code || error?.message, JSON.stringify(error?.receipt || null));
         const marked = store.markInboundDeliveryUncertain({ claim: inboundClaim.claim, errorCode: 'runtime_error' });
         return {
           kind: 'uncertain_delivery', eventId, receiptId,

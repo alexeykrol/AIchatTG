@@ -435,7 +435,11 @@ test('weak-abuse safety plans advance independently to warning, final warning an
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
-test('course-operations hints reject content routing and need the isolated operations snapshot', async () => {
+// Хинт — замеренная бухгалтерия кода: когда модельный роутер спорит с ним
+// (teach на операционный вопрос), маршрут принуждается к хинту и клиент
+// получает ответ из операционного снимка. Прежний определённый отказ означал
+// молчание клиенту за недетерминизм модели (живой прогон ent-01, ходы 4-5).
+test('course-operations hints coerce a disagreeing model route into the operations snapshot', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
@@ -445,15 +449,14 @@ test('course-operations hints reject content routing and need the isolated opera
   try {
     await runtime.handleUpdate('moderator', update(12, 70, '/ask В курсе как перейти к следующему уроку?'));
     const result = await runtime.handleUpdate('assistant', update(13, 70, '/ask В курсе как перейти к следующему уроку?'));
-    assert.equal(result.reason, 'course_operations_route_required');
-    assert.equal(actions.length, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:13'").get().count, 0);
+    assert.equal(result.kind, 'answered');
+    assert.deepEqual(result.route, { action: 'support', sourceId: 'course-operations-v1' });
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
 // Порядок доменов — контракт: операционный вопрос сильнее value-вопроса, а
 // value-вопрос не имеет права уезжать в содержательный маршрут молча.
-test('course-value hints reject content routing and answer from the isolated value snapshot', async () => {
+test('course-value hints coerce content routing and answer from the isolated value snapshot', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-value-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
@@ -465,12 +468,13 @@ test('course-value hints reject content routing and answer from the isolated val
   };
   const runtime = createTelegramRuntime({ config: config({ assistantKnowledgeEnabled: true }), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
   try {
-    // Value-вопрос с содержательным маршрутом от провайдера — определённый отказ.
+    // Value-вопрос с содержательным маршрутом от провайдера — принуждение к
+    // value-снимку и ответ, а не молчание.
     await runtime.handleUpdate('moderator', update(20, 80, '/ask зачем это мне как руководителю'));
-    const rejected = await runtime.handleUpdate('assistant', update(21, 80, '/ask зачем это мне как руководителю'));
-    assert.equal(rejected.reason, 'course_value_route_required');
+    const coerced = await runtime.handleUpdate('assistant', update(21, 80, '/ask зачем это мне как руководителю'));
+    assert.equal(coerced.kind, 'answered');
+    assert.deepEqual(coerced.route, { action: 'advise', sourceId: 'course-value-v1' });
     assert.deepEqual(hints.at(-1), { courseOperationsHint: false, courseValueHint: true });
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:21'").get().count, 0);
 
     // Операционный вопрос гасит value-подсказку: деньги и доступ сильнее.
     provider.routeAssistant = async ({ courseOperationsHint, courseValueHint }) => {

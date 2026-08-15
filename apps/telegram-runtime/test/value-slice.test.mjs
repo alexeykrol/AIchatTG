@@ -71,6 +71,21 @@ test('an all-dropped slice is unavailable rather than an admitted empty snapshot
   }
 });
 
+// Живой прогон ent-01: срез в 64.5k знаков превышал лимит входа провайдера
+// (60k), boundedJson молча давал null и клиент получал пустой ответ. Класс
+// ошибки закрыт на входе: негабаритный срез не допускается вовсе.
+test('an oversized slice is refused loudly instead of silently emptying the model request', () => {
+  const { folder, path } = writeSlice([{
+    id: 'гигант', kind: 'value', answer_text: 'х'.repeat(51_000),
+    links: ['https://alexeykrol.com/courses/ai_full/'],
+  }]);
+  try {
+    assert.equal(createValueSliceKnowledge(path).reason, 'value_slice_too_large');
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('the value slice replaces only the value source, never operations or content', () => {
   const { folder, path } = writeSlice([{
     id: 'v1', title: 'Польза', kind: 'value', answer_text: 'Минимальный трек.',

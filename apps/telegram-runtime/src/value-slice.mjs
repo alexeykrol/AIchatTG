@@ -77,6 +77,11 @@ export function createValueSliceKnowledge(
     entries.push(entry);
   }
   if (!entries.length) return unavailable('value_slice_empty');
+  // Снимок уходит в ОДИН запрос модели вместе с вопросом и диалогом; лимит
+  // входа провайдера — 60k знаков. Негабаритный срез раньше проваливался в
+  // молчаливую пустоту (boundedJson → null) — теперь отказ громкий и на входе.
+  const totalChars = entries.reduce((sum, entry) => sum + entry.content.length, 0);
+  if (totalChars > 50_000) return unavailable('value_slice_too_large');
 
   return Object.freeze({
     available: true,
