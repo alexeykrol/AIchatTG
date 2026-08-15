@@ -1,0 +1,491 @@
+#!/usr/bin/env node
+/**
+ * Локальный стенд ассистента: задать вопрос и получить ответ БЕЗ Telegram и без
+ * боевого сервера.
+ *
+ * Зачем: прогонять диалоги синтетического пользователя в лаборатории — дёшево,
+ * повторяемо и без риска для боевого чата. Это ПОТРЕБИТЕЛЬ боевых фабрик, а не
+ * их копия: путь ответа тот же самый (домен → вето → ретривер → гейт молчания →
+ * отбор фрагментов → модель), потому что вопрос входит через настоящий
+ * `runtime.handleUpdate('assistant', …)`, а не через сокращённую ветку.
+ *
+ * Подменены ровно три вещи на границах, и каждая помечена в отчёте как
+ * `substitutions`, чтобы никто не принял стенд за бой:
+ *   1. Telegram-транспорт — поддельный: пишет исходящее в память и возвращает
+ *      правдоподобную квитанцию вместо сети.
+ *   2. Модератор — лабораторный: безопасность живого чата здесь не измеряется,
+ *      а без вердикта `allowed` ассистент по конструкции молчит. Вызывается
+ *      настоящий `handleUpdate('moderator', …)`, вердикт выносит локальный
+ *      судья вместо safety-модели.
+ *   3. Хранилище — временная SQLite во временном каталоге: прогон не трогает
+ *      боевые данные и каждый запуск начинается с чистого листа.
+ *
+ * Всё остальное настоящее, включая допуск пакета знания с пересчётом sha256
+ * каждого файла (это гард, а не формальность: подменённый ai.db не пройдёт).
+ *
+ * Режимы провайдера:
+ *   --dry   (по умолчанию) модель НЕ вызывается. Показывает, что нашёл ретривер
+ *           и что ушло БЫ в модель. Бесплатно.
+ *   --live  настоящий вызов провайдера; ключ и эндпоинт из окружения. Без ключа
+ *           стенд честно говорит об этом и выходит, а не выдумывает ответ.
+ *
+ * Запуск:
+ *   node apps/telegram-runtime/scripts/local-assistant.mjs \
+ *     --package <dir с knowledge.manifest.json> --ask "Что такое промптинг?"
+ *   … --dialogue вопросы.txt --out стенограмма.json
+ *   … --live
+ */
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import {
+  ASSISTANT_ROLE_ACTIONS,
+  ASSISTANT_SOURCE_PACKAGES,
+} from '@aichattg/telegram-core';
+import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
+import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
+import { createKnowledgeRetrieval } from '../src/knowledge-retrieval.mjs';
+import { createProviderAdapter } from '../src/provider-adapter.mjs';
+import { createTelegramRuntime } from '../src/runtime.mjs';
+
+const LAB_CHAT_ID = '-100';
+const LAB_USER_ID = '7';
+const DEFAULT_MAX_ENTRIES = 12;
+const DEFAULT_MAX_CONTEXT_TOKENS = 6_000;
+
+export const LAB_SUBSTITUTIONS = Object.freeze([
+  'telegram_transport_recorded_in_memory',
+  'moderator_verdict_decided_locally_without_safety_model',
+  'store_is_a_temporary_sqlite_file',
+]);
+
+function parseArgs(argv) {
+  const args = {
+    mode: 'dry', questions: [], out: null, maxEntries: DEFAULT_MAX_ENTRIES,
+    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS, packageDir: null, json: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const [key, inline] = argv[i].split('=');
+    // Флаги без значения не должны съедать следующий аргумент — на этом ломался
+    // разбор `--dry --ask "…"`.
+    if (key === '--dry') { args.mode = 'dry'; continue; }
+    if (key === '--live') { args.mode = 'live'; continue; }
+    if (key === '--json') { args.json = true; continue; }
+    const value = inline ?? argv[i + 1];
+    if (inline === undefined) i += 1;
+    if (key === '--ask') args.questions.push(String(value ?? ''));
+    else if (key === '--dialogue') args.dialogue = value;
+    else if (key === '--package') args.packageDir = value;
+    else if (key === '--out') args.out = value;
+    else if (key === '--max-entries') args.maxEntries = Number(value);
+    else if (key === '--max-context-tokens') args.maxContextTokens = Number(value);
+  }
+  return args;
+}
+
+/** Один вопрос на строку; пустые строки и `#`-комментарии игнорируются. */
+export function parseDialogueFile(raw) {
+  return String(raw)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+}
+
+/**
+ * Поддельный Telegram: записывает исходящее и возвращает квитанцию той же формы,
+ * что настоящий адаптер (`{ ok, data.message_id }`), потому что рантайм читает
+ * из неё message_id и без него считает доставку несостоявшейся.
+ */
+export function createRecordingTelegram() {
+  const sent = [];
+  let nextMessageId = 1_000;
+  return {
+    sent,
+    async sendMessage(input) {
+      nextMessageId += 1;
+      sent.push({ ...input, messageId: String(nextMessageId) });
+      return { ok: true, data: { message_id: nextMessageId } };
+    },
+  };
+}
+
+/**
+ * Лабораторный модератор. Безопасность здесь не измеряется, но ассистент по
+ * конструкции не отвечает без терминального вердикта, поэтому конструкция его
+ * требует. Судья локальный и всегда `clean`: подменять его моделью значит
+ * платить за то, что стенд не проверяет.
+ */
+function createLabModeratorGuard() {
+  return {
+    async verifyEnforcement() { return { proven: true, status: 'administrator' }; },
+    async senderDisposition() { return { proven: true, exempt: false, reason: null }; },
+    async deleteMessage() { return { ok: true }; },
+    async unpinMessage() { return { ok: true }; },
+    async sendWarning() { return { ok: true }; },
+    async banAuthor() { return { ok: true }; },
+  };
+}
+
+/**
+ * Провайдер стенда. `routeAssistant` решается локально по тем же правилам, что
+ * закреплены в контракте роутера (teach → course-content-v1), поэтому маршрут
+ * не выдуман, а выведен из вопроса; в dry-режиме `answer` не вызывает сеть, но
+ * фиксирует ровно то, что ушло БЫ в модель.
+ */
+function createDryProvider({ captured }) {
+  return {
+    async moderate() {
+      return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
+    },
+    async routeAssistant({ courseOperationsHint }) {
+      return courseOperationsHint
+        ? { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS }
+        : { action: 'teach', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT };
+    },
+    async answer(input) {
+      const entries = input.knowledge?.entries || [];
+      captured.push({ question: input.text, route: input.route, entries, dialogue: input.dialogue || [] });
+      return {
+        // Ответа модели в dry-режиме не существует. Отдаём явную метку вместо
+        // правдоподобного текста: подделанный ответ обесценил бы весь прогон.
+        text: `[dry-run: модель не вызывалась; в неё ушло бы ${entries.length} записей]`,
+        modelId: 'dry-run',
+        receipt: null,
+      };
+    },
+  };
+}
+
+/**
+ * Живой режим. Роутер и ответ идут через настоящий провайдерский адаптер;
+ * модерацию по-прежнему судит лаборатория, чтобы прогон диалога не оплачивал
+ * safety-вызовы, которых он не измеряет.
+ */
+function createLiveProvider(env) {
+  const endpoint = String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || '');
+  const apiKey = String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || '');
+  const provider = createProviderAdapter({
+    enabled: true,
+    vendor: 'openai',
+    endpoint,
+    apiKey,
+    modelTuples: {
+      // Safety-кортеж обязан быть валидным для конструктора адаптера, но
+      // `moderate` ниже перехвачен лабораторным судьёй и никогда не вызывается.
+      moderatorSafety: { model: 'gpt-5.6-terra', reasoningEffort: 'medium', maxOutputTokens: 1_024 },
+      assistantRouter: {
+        model: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MODEL || 'gpt-5.6-terra'),
+        reasoningEffort: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_REASONING_EFFORT || 'low'),
+        maxOutputTokens: Number(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ROUTER_MAX_OUTPUT_TOKENS || 1_024),
+      },
+      assistantAnswer: {
+        model: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MODEL || 'gpt-5.6-terra'),
+        reasoningEffort: String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT || 'medium'),
+        maxOutputTokens: Number(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS || 2_048),
+      },
+    },
+  });
+  const receipts = [];
+  return {
+    receipts,
+    provider: {
+      async moderate() {
+        return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
+      },
+      async routeAssistant(payload) {
+        const route = await provider.routeAssistant(payload);
+        if (route?.receipt) receipts.push(route.receipt);
+        return route;
+      },
+      async answer(payload) {
+        const answer = await provider.answer(payload);
+        if (answer?.receipt) receipts.push(answer.receipt);
+        return answer;
+      },
+    },
+  };
+}
+
+function labConfig({ maxEntries, maxContextTokens, packageManifestPath, packageDigest, packageRoot }) {
+  return {
+    ingressEnabled: false,
+    moderationMode: 'shadow',
+    moderationBanLinks: false,
+    moderationAntichannelPin: false,
+    // Ноль ожидания: модератор в лаборатории отрабатывает синхронно до вопроса,
+    // поэтому опрос диспозиции не должен упираться в боевой 30-секундный таймаут.
+    assistantModerationWaitMs: 0,
+    assistantModerationPollMs: 1,
+    assistantKnowledgeEnabled: true,
+    // Лимиты боевого чата в лаборатории только мешают: синтетический диалог
+    // идёт подряд и упёрся бы в кулдаун на втором же вопросе.
+    assistantCooldownSec: 0,
+    assistantDailyPerUser: 10_000,
+    assistantDialogueTtlSec: 604_800,
+    assistantDialogueTurnLimit: 3,
+    assistantRetrieval: {
+      enabled: true, maxEntries, maxContextTokens, rewriteEnabled: false, validatePacks: true,
+    },
+    knowledge: {
+      root: packageRoot,
+      admissions: {
+        [ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE]: {
+          manifestPath: packageManifestPath,
+          packageRoot,
+          expectedIdentity: {
+            sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE,
+            packageDigest,
+          },
+        },
+      },
+    },
+    moderator: {
+      chatIds: [LAB_CHAT_ID], botToken: '', botUsername: '', webhookSecret: 'lab', exemptBotIds: [], syntheticBotIds: [],
+    },
+    assistant: {
+      chatIds: [LAB_CHAT_ID], botToken: '', botUsername: 'lab_assistant_bot', webhookSecret: 'lab',
+      exemptBotIds: [], syntheticBotIds: [],
+    },
+    moderatorRecoverySnapshotTtlSec: 604_800,
+    moderatorRecoveryLeaseSec: 90,
+    moderatorRecoveryMaxSafeRetries: 3,
+    moderatorRecoveryBackoffSec: 60,
+  };
+}
+
+function labUpdate(updateId, messageId, text) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: messageId,
+      chat: { id: Number(LAB_CHAT_ID) },
+      from: { id: Number(LAB_USER_ID), first_name: 'Lab', is_bot: false },
+      text,
+    },
+  };
+}
+
+/**
+ * Единицы (уроки) со ссылками — то, ради чего вообще нужен ретривер. Берутся из
+ * записей, которые ушли в модель, а не из всего пака: отчёт должен показывать
+ * то, что реально видела модель.
+ */
+function unitsOf(entries) {
+  const seen = new Map();
+  for (const entry of entries || []) {
+    const url = entry?.canonicalUrl || null;
+    const title = entry?.title || null;
+    if (!title && !url) continue;
+    const key = `${title}|${url}`;
+    if (!seen.has(key)) seen.set(key, { title, url });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Рантайм отдаёт маршрут двумя разными формами: строкой для детерминированных и
+ * граничных ответов (`boundary:not_in_materials:…`) и объектом роутера для
+ * содержательных (`{ action, sourceId }`). Отчёт для внешнего оценщика должен
+ * быть плоским, поэтому обе формы сводятся к одной строке здесь, а не у
+ * читателя стенограммы.
+ */
+function routeLabel(route) {
+  if (route == null) return null;
+  if (typeof route === 'string') return route;
+  const action = String(route.action || '');
+  const sourceId = route.sourceId == null ? '' : String(route.sourceId);
+  return sourceId ? `${action}:${sourceId}` : action;
+}
+
+function costOf(receipt) {
+  if (!receipt) return null;
+  return {
+    model: receipt.modelId || null,
+    reasoningEffort: receipt.reasoningEffort || null,
+    inputTokens: receipt.inputTokens ?? null,
+    outputTokens: receipt.outputTokens ?? null,
+    totalTokens: receipt.totalTokens ?? null,
+    // Провайдерская квитанция намеренно не считает деньги: цена зависит от
+    // тарифа, который рантайм не знает. Оставляем токены как измеренный факт.
+    costUsd: receipt.costUsd ?? null,
+  };
+}
+
+/**
+ * Один прогон стенда. Вынесен из main отдельной функцией, чтобы тест мог
+ * вызвать ровно то же самое без подмены аргументов процесса.
+ */
+export async function runLocalAssistant({
+  questions,
+  packageDir,
+  mode = 'dry',
+  maxEntries = DEFAULT_MAX_ENTRIES,
+  maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
+  env = process.env,
+} = {}) {
+  const packageRoot = resolve(packageDir);
+  const manifestPath = join(packageRoot, 'knowledge.manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-local-assistant-'));
+  const database = openRuntimeDatabase(join(folder, 'lab-runtime.db'));
+  const store = createRuntimeStore(database);
+  const captured = [];
+  const live = mode === 'live' ? createLiveProvider(env) : null;
+  const provider = live ? live.provider : createDryProvider({ captured });
+
+  const config = labConfig({
+    maxEntries,
+    maxContextTokens,
+    packageManifestPath: manifestPath,
+    packageDigest: String(manifest.packageDigest || ''),
+    packageRoot,
+  });
+
+  // Настоящий допуск: манифест читается, sha256 каждого файла пересчитывается.
+  const knowledge = createKnowledgeAdapter(config.knowledge);
+  const contentRetrieval = createKnowledgeRetrieval(config.assistantRetrieval, { knowledge });
+  const assistantTelegram = createRecordingTelegram();
+  const runtime = createTelegramRuntime({
+    config,
+    store,
+    provider,
+    knowledge,
+    contentRetrieval,
+    moderatorTelegram: createRecordingTelegram(),
+    guard: createLabModeratorGuard(),
+    assistantTelegram,
+    notifier: { async notify() { return { delivered: false, skipped: 'lab' }; } },
+  });
+
+  const transcript = {
+    dialogue_id: `lab:${Date.now()}`,
+    mode,
+    package: {
+      root: packageRoot,
+      domainId: manifest.domainId || null,
+      packageName: manifest.packageName || null,
+      packageDigest: manifest.packageDigest || null,
+      admitted: contentRetrieval.available === true,
+      admissionReason: contentRetrieval.reason || null,
+    },
+    substitutions: [...LAB_SUBSTITUTIONS],
+    turns: [],
+  };
+
+  if (!contentRetrieval.available) {
+    contentRetrieval.close?.();
+    database.close();
+    rmSync(folder, { recursive: true, force: true });
+    return transcript;
+  }
+
+  let updateId = 1;
+  let messageId = 1;
+  for (const [index, question] of questions.entries()) {
+    const askText = question.startsWith('/ask') ? question : `/ask ${question}`;
+    messageId += 1;
+    const capturedBefore = captured.length;
+    const receiptsBefore = live ? live.receipts.length : 0;
+    const sentBefore = assistantTelegram.sent.length;
+
+    // Настоящий путь: сперва модератор выносит терминальный вердикт по этому же
+    // сообщению, иначе ассистент по конструкции не отвечает.
+    await runtime.handleUpdate('moderator', labUpdate(updateId++, messageId, askText));
+    const result = await runtime.handleUpdate('assistant', labUpdate(updateId++, messageId, askText));
+
+    const sent = assistantTelegram.sent.slice(sentBefore);
+    const call = captured.slice(capturedBefore).at(-1) || null;
+    const receipt = live ? live.receipts.slice(receiptsBefore).at(-1) || null : null;
+    const entries = call?.entries || null;
+
+    transcript.turns.push({
+      n: index + 1,
+      question,
+      answer: sent.at(-1)?.text ?? null,
+      kind: result.kind,
+      route: routeLabel(result.route ?? null),
+      abstained: result.abstained === true,
+      reason: result.reason ?? null,
+      entries: entries == null ? 0 : entries.length,
+      // Сколько предыдущих ходов ушло в модель вместе с вопросом. Это
+      // наблюдаемое доказательство того, что диалоговая память работает: без
+      // него «одна сессия» осталась бы утверждением, а не фактом.
+      dialogueTurnsSent: call?.dialogue?.length ?? 0,
+      units: unitsOf(entries),
+      cost: costOf(receipt),
+      // В dry-режиме модели не было — null здесь означает «вызова не было», а не
+      // «модель неизвестна».
+      model: receipt?.modelId ?? null,
+    });
+  }
+
+  contentRetrieval.close?.();
+  database.close();
+  rmSync(folder, { recursive: true, force: true });
+  return transcript;
+}
+
+function printTranscript(transcript) {
+  console.log(`пакет: ${transcript.package.packageName} (домен ${transcript.package.domainId})`);
+  console.log(`допуск: ${transcript.package.admitted ? 'пройден (sha256 пересчитан)' : `ОТКАЗ — ${transcript.package.admissionReason}`}`);
+  console.log(`режим: ${transcript.mode}`);
+  console.log(`подменено: ${transcript.substitutions.join(', ')}`);
+  for (const turn of transcript.turns) {
+    console.log('');
+    console.log(`--- ход ${turn.n} ---`);
+    console.log(`вопрос:      ${turn.question}`);
+    console.log(`исход:       ${turn.kind}${turn.reason ? ` (${turn.reason})` : ''}`);
+    console.log(`маршрут:     ${turn.route ?? '—'}`);
+    console.log(`воздержание: ${turn.abstained ? 'ДА' : 'нет'}`);
+    console.log(`записей в модель: ${turn.entries}`);
+    for (const unit of turn.units) {
+      console.log(`  • ${unit.title ?? '(без заголовка)'}${unit.url ? ` — ${unit.url}` : ''}`);
+    }
+    if (turn.cost) {
+      console.log(`стоимость:   модель ${turn.cost.model} effort=${turn.cost.reasoningEffort} `
+        + `токены ${turn.cost.inputTokens}/${turn.cost.outputTokens} (всего ${turn.cost.totalTokens})`);
+    }
+    console.log(`ответ:       ${turn.answer ?? '—'}`);
+  }
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const packageDir = args.packageDir || process.env.AICHATTG_KNOWLEDGE_PACKAGE_DIR || '';
+  if (!packageDir) {
+    console.error('нужен --package <каталог с knowledge.manifest.json> (или AICHATTG_KNOWLEDGE_PACKAGE_DIR)');
+    return 2;
+  }
+  const questions = [
+    ...args.questions,
+    ...(args.dialogue ? parseDialogueFile(readFileSync(args.dialogue, 'utf8')) : []),
+  ];
+  if (!questions.length) {
+    console.error('нужен хотя бы один --ask "вопрос" или --dialogue <файл>');
+    return 2;
+  }
+  if (args.mode === 'live' && !String(process.env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || '').trim()) {
+    // Честный выход вместо выдуманного ответа: без ключа живого вызова нет.
+    console.error('режим --live требует TELEGRAM_RUNTIME_PROVIDER_API_KEY (и TELEGRAM_RUNTIME_PROVIDER_ENDPOINT вида https://host/v1)');
+    return 2;
+  }
+
+  const transcript = await runLocalAssistant({
+    questions, packageDir, mode: args.mode,
+    maxEntries: args.maxEntries, maxContextTokens: args.maxContextTokens,
+  });
+
+  if (args.json) console.log(JSON.stringify(transcript, null, 2));
+  else printTranscript(transcript);
+  if (args.out) {
+    writeFileSync(args.out, JSON.stringify(transcript, null, 2), 'utf8');
+    console.log(`\nстенограмма: ${args.out}`);
+  }
+  return transcript.package.admitted ? 0 : 1;
+}
+
+// Запуск как скрипта; при импорте из теста main не выполняется.
+if (process.argv[1] && process.argv[1].endsWith('local-assistant.mjs')) {
+  process.exit(await main());
+}
