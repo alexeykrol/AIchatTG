@@ -81,14 +81,24 @@ function knowledgePackageAdmission(env, cwd, root, { sourceId, pathName, digestN
   };
 }
 
-function roleConfig(env, role) {
+/**
+ * `syntheticBotIds` only survives when synthetic testing is explicitly enabled.
+ * A list left behind in a production env file must not silently let a bot talk
+ * to the Assistant, so the flag is checked here rather than at the call site.
+ */
+function roleConfig(env, role, { syntheticTestingEnabled = false } = {}) {
   const prefix = `TELEGRAM_RUNTIME_${role}`;
+  const syntheticBotIds = csv(env, `${prefix}_SYNTHETIC_BOT_IDS`);
+  if (syntheticBotIds.length && !syntheticTestingEnabled) {
+    throw new Error(`${prefix}_SYNTHETIC_BOT_IDS requires TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED=true`);
+  }
   return {
     chatIds: csv(env, `${prefix}_CHAT_IDS`),
     botToken: String(env[`${prefix}_BOT_TOKEN`] || ''),
     botUsername: String(env[`${prefix}_BOT_USERNAME`] || '').replace(/^@/, ''),
     webhookSecret: optionalSecret(env, `${prefix}_WEBHOOK_SECRET`),
     exemptBotIds: csv(env, `${prefix}_EXEMPT_BOT_IDS`),
+    syntheticBotIds,
   };
 }
 
@@ -112,8 +122,9 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
   const ingressEnabled = boolean(env, 'TELEGRAM_RUNTIME_INGRESS_ENABLED', false);
   const moderationMode = String(env.TELEGRAM_RUNTIME_MODERATION_MODE || 'shadow') === 'live' ? 'live' : 'shadow';
   const knowledgeRoot = resolve(cwd, String(env.TELEGRAM_RUNTIME_KNOWLEDGE_ROOT || 'data/knowledge'));
-  const moderator = roleConfig(env, 'MODERATOR');
-  const assistant = roleConfig(env, 'ASSISTANT');
+  const syntheticTestingEnabled = boolean(env, 'TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED', false);
+  const moderator = roleConfig(env, 'MODERATOR', { syntheticTestingEnabled });
+  const assistant = roleConfig(env, 'ASSISTANT', { syntheticTestingEnabled });
   if (ingressEnabled) {
     for (const role of roleNames) {
       const config = role === 'MODERATOR' ? moderator : assistant;

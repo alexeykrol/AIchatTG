@@ -200,6 +200,12 @@ function pinGovernanceAction(message) {
 /**
  * Preserve the two-bot structural split: an Assistant can never classify a
  * moderation comment and a Moderator can never classify an assistant question.
+ *
+ * `syntheticBotIds` is a separate list from `exemptBotIds` on purpose: the two
+ * carry opposite meanings (answer this bot vs. ignore this bot), and collapsing
+ * them once already produced a wrong classification. Own-bot and exempt checks
+ * run first so a synthetic id can never re-enable the Assistant's own echo or
+ * override an explicit ignore.
  */
 export function classifyTelegramUpdate({
   role,
@@ -208,6 +214,7 @@ export function classifyTelegramUpdate({
   botUsername = '',
   botId = null,
   exemptBotIds = [],
+  syntheticBotIds = [],
 }) {
   assertBotRole(role);
   const message = messageFromUpdate(update);
@@ -224,7 +231,9 @@ export function classifyTelegramUpdate({
     if (botId != null && String(message.from?.id) === String(botId)) {
       return { kind: 'skip', reason: 'own_bot' };
     }
-    if (message.from?.is_bot) return { kind: 'skip', reason: 'bot_sender' };
+    const isSyntheticSender = message.from?.is_bot
+      && new Set(syntheticBotIds.map(String)).has(String(message.from.id));
+    if (message.from?.is_bot && !isSyntheticSender) return { kind: 'skip', reason: 'bot_sender' };
     const question = detectAssistantQuestion(message, botUsername);
     if (!question.isQuestion) return { kind: 'skip', reason: 'not_assistant_command' };
     return {

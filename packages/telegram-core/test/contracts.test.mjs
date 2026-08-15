@@ -56,6 +56,27 @@ test('roles remain structurally isolated and message identities stay chat-scoped
   assert.throws(() => incomingEventId(BOT_ROLES.MODERATOR, { update_id: -1 }), /update_id/);
 });
 
+test('a named synthetic bot reaches the Assistant while stronger bot barriers still win', () => {
+  const fromBot = (id) => ({ update_id: 11, message: message('/ask question', { from: { id, first_name: 'Synthetic', is_bot: true } }) });
+  const classify = (extra) => classifyTelegramUpdate({
+    role: BOT_ROLES.ASSISTANT, acceptedChatIds: [-1001], botUsername: 'assistant_bot', ...extra,
+  });
+  const answered = classify({ update: fromBot(77), syntheticBotIds: ['77'] });
+  assert.equal(answered.kind, 'question');
+  assert.equal(answered.question.text, 'question');
+  assert.equal(classify({ update: fromBot(78), syntheticBotIds: ['77'] }).reason, 'bot_sender');
+  assert.equal(classify({ update: fromBot(77), syntheticBotIds: [], botId: null }).reason, 'bot_sender');
+  // own_bot and exempt_bot are evaluated first and are not overridable.
+  assert.equal(classify({ update: fromBot(77), syntheticBotIds: ['77'], botId: 77 }).reason, 'own_bot');
+  assert.equal(classify({ update: fromBot(77), syntheticBotIds: ['77'], exemptBotIds: ['77'] }).reason, 'exempt_bot');
+  // The Moderator side is untouched: a synthetic bot is still a plain comment.
+  const moderated = classifyTelegramUpdate({
+    role: BOT_ROLES.MODERATOR, update: fromBot(77), acceptedChatIds: [-1001], syntheticBotIds: ['77'],
+  });
+  assert.equal(moderated.kind, 'comment');
+  assert.equal(moderated.comment.isBot, true);
+});
+
 test('only the Moderator classifies guarded-chat automatic pins as housekeeping', () => {
   const forwarded = {
     update_id: 9,

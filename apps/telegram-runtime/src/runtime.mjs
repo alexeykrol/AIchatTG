@@ -996,6 +996,7 @@ export function createTelegramRuntime({
       const classified = classifyTelegramUpdate({
         role, update, acceptedChatIds: adapterConfig.chatIds, botUsername: adapterConfig.botUsername,
         botId: botIdFromToken(adapterConfig.botToken), exemptBotIds: adapterConfig.exemptBotIds,
+        syntheticBotIds: adapterConfig.syntheticBotIds,
       });
       const receiptId = eventId;
       const inboundClaim = store.claimInboundDelivery({

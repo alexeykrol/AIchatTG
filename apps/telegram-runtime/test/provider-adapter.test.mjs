@@ -114,6 +114,16 @@ test('loadRuntimeConfig keeps disabled default and requires the exact safety tup
   assert.throws(() => loadRuntimeConfig({ ...env, TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MAX_OUTPUT_TOKENS: '200' }, { cwd: '/tmp/aichattg-provider-test' }), /provider_safety_tuple_invalid/);
 });
 
+test('synthetic bot ids stay inert unless synthetic testing is explicitly enabled', () => {
+  const cwd = '/tmp/aichattg-provider-test';
+  const env = { TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_BOT_IDS: '77, 78' };
+  assert.throws(() => loadRuntimeConfig(env, { cwd }), /TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_BOT_IDS requires TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED=true/);
+  const enabled = loadRuntimeConfig({ ...env, TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED: 'true' }, { cwd });
+  assert.deepEqual(enabled.assistant.syntheticBotIds, ['77', '78']);
+  assert.deepEqual(enabled.moderator.syntheticBotIds, []);
+  assert.deepEqual(loadRuntimeConfig({}, { cwd }).assistant.syntheticBotIds, []);
+});
+
 test('clean Moderator makes exactly one fixed router request with no raw history', async () => {
   const calls = [];
   const adapter = createProviderAdapter(providerConfig(), {
