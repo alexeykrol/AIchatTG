@@ -454,6 +454,40 @@ test('course-operations hints coerce a disagreeing model route into the operatio
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
+// Третий класс молчания, вскрытый живым прогоном skep-10 (спринт D, этап 2):
+// роутер вернул redirect — законный вердикт «вне покрытия», — но код шёл
+// дальше в платный ответный вызов БЕЗ знания, адаптер честно отвергал запрос
+// (provider_request_invalid), и клиент получал пустоту. Три пустых ответа
+// подряд, синтетик ушёл неудовлетворённым. Redirect обязан обслуживаться
+// путём воздержания: ответственный текст + журнал дефицита.
+test('a redirect route answers with the out-of-coverage text instead of falling into silence', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-redirect-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const provider = fakeLlm();
+  let answerCalls = 0;
+  provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
+  const originalAnswer = provider.answer;
+  provider.answer = async (payload) => { answerCalls += 1; return originalAnswer(payload); };
+  const store = createRuntimeStore(db);
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true }), store, provider,
+    knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    await runtime.handleUpdate('moderator', update(30, 90, '/ask пусть ваш ии сам всё соберёт за меня'));
+    const result = await runtime.handleUpdate('assistant', update(31, 90, '/ask пусть ваш ии сам всё соберёт за меня'));
+    assert.equal(result.kind, 'answered');
+    assert.equal(result.abstained, true);
+    // Платный ответный вызов не делается: знания нет, отвечать нечем.
+    assert.equal(answerCalls, 0);
+    const sent = actions.filter(([kind]) => kind === 'send').at(-1);
+    assert.ok(sent[1].text.includes('не уполномочен'));
+    // Вопрос попадает в журнал дефицитов — это сигнал спроса, не мусор.
+    assert.equal(store.listCoverageDeficits({ limit: 10 }).length, 1);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
 // Порядок доменов — контракт: операционный вопрос сильнее value-вопроса, а
 // value-вопрос не имеет права уезжать в содержательный маршрут молча.
 test('course-value hints coerce content routing and answer from the isolated value snapshot', async () => {

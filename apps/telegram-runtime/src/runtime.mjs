@@ -2,6 +2,7 @@ import {
   ASSISTANT_ROLE_ACTIONS,
   ASSISTANT_SOURCE_PACKAGES,
   BOT_ROLES,
+  DOMAIN_ROUTE_REASONS,
   GROUNDING_REASONS,
   assistantDispositionForSafety,
   botIdFromToken,
@@ -854,7 +855,19 @@ export function createTelegramRuntime({
       && ![ASSISTANT_ROLE_ACTIONS.ADVISE, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
       route = { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
     }
-    if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) return { route, knowledge: null };
+    // Redirect — законный вердикт роутера «вопрос вне покрытия», а НЕ повод
+    // идти дальше без знания: ответный вызов без источника отвергается
+    // адаптером (provider_request_invalid) и превращается в молчание клиенту.
+    // Живой прогон skep-10 (пилюльный ход «пусть ваш ИИ сам всё соберёт»):
+    // три пустых ответа подряд, синтетик ушёл неудовлетворённым. Redirect
+    // обслуживается тем же путём, что воздержание: ответственный текст
+    // «не уполномочен» + журнал дефицита.
+    if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) {
+      return {
+        route, knowledge: null, abstain: true,
+        reason: DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+      };
+    }
 
     // Operations and value questions keep the v1 text path: each source is a
     // reviewed snapshot of a handful of entries with no chunks, dictionary or
@@ -1064,7 +1077,6 @@ export function createTelegramRuntime({
         store.completeEvent(eventId, result.kind === 'skipped' ? 'skipped' : 'completed', response);
         return response;
       } catch (error) {
-        console.error('[debug-tmp]', error?.code || error?.message, JSON.stringify(error?.receipt || null));
         const marked = store.markInboundDeliveryUncertain({ claim: inboundClaim.claim, errorCode: 'runtime_error' });
         return {
           kind: 'uncertain_delivery', eventId, receiptId,
