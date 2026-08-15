@@ -151,7 +151,7 @@ test('the export tool reads the journal read-only and treats a pre-journal datab
 // --- Acceptance against the real package and gold set ------------------------
 
 const PACKAGE_DIR = process.env.AICHATTG_KNOWLEDGE_PACKAGE_DIR
-  || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-887b1966234e';
+  || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-140310bf9472';
 const GOLD_PATH = process.env.AICHATTG_CONTENT_GOLD_PATH
   || join(PACKAGE_DIR, 'gold', 'ai.gold.jsonl');
 
@@ -162,7 +162,9 @@ const GOLD_PATH = process.env.AICHATTG_CONTENT_GOLD_PATH
  * только сокращаться (лаборатория добавляет алиасы в словарь пакета); новый
  * ложный вердикт вне списка — регрессия и падение теста.
  */
-const KNOWN_DICTIONARY_DEFICITS = new Set(['g2-014', 'g3-002', 'g3-006', 'g5-010', 'g5-026']);
+// Рэтчет пуст: словарные промахи g2-014/g3-002/g3-006/g5-010/g5-026 вылечены
+// алиасами лаборатории (пакет ai-140310bf9472). Список может только пустеть.
+const KNOWN_DICTIONARY_DEFICITS = new Set([]);
 
 test('gold-190: no answerable question outside the known deficits is refused as out of coverage', {
   skip: existsSync(PACKAGE_DIR) && existsSync(GOLD_PATH)

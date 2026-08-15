@@ -245,7 +245,7 @@ test('a methodological question about module order stays out of the value domain
 // Если файла нет, тест обязан сказать об этом вслух, а не позеленеть молча.
 test('the gold set of content questions produces zero false operations routings', (t) => {
   const goldPath = process.env.AICHATTG_CONTENT_GOLD_PATH
-    || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-887b1966234e/gold/ai.gold.jsonl';
+    || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-140310bf9472/gold/ai.gold.jsonl';
   if (!existsSync(goldPath)) {
     t.skip(`gold set is not available at ${goldPath}`);
     return;
