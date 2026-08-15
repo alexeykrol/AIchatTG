@@ -203,6 +203,18 @@ export function validateProviderRuntimeConfig(config) {
 
 export function isProviderUnavailableError(error) { return error instanceof ProviderUnavailableError; }
 
+/**
+ * Запрос отвергнут НАШЕЙ локальной проверкой и до сети: `provider_request_invalid`
+ * бросается в `moderate`/`invokeAssistant` перед `callOnce`, поэтому платного
+ * вызова не было и быть не могло. Все прочие коды рождаются на транспорте или
+ * после ответа — там вызов мог быть оплачен, и его исход неоднозначен. Класс
+ * решает, вернуть ли человеку квоту, поэтому он объявлен рядом с местами броска:
+ * новый код нельзя ввести, не решив его биллинговый класс.
+ */
+export function isProvenNoCallRequestError(error) {
+  return error instanceof ProviderRequestError && error.code === 'provider_request_invalid';
+}
+
 function responseHeader(response, name) {
   const value = typeof response?.headers?.get === 'function' ? response.headers.get(name) : null;
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,256}$/.test(value) ? value : null;
@@ -297,8 +309,16 @@ function userInput(operation, payload) {
   }
   const text = questionText(payload.text);
   if (!text || !plainObject(payload.route) || !Array.isArray(payload.dialogue) || !plainObject(payload.knowledge)) return null;
-  const dialogue = payload.dialogue.map((turn) => ({ question: questionText(turn?.question), answer: questionText(turn?.answer) }));
-  if (dialogue.length > 3 || dialogue.some((turn) => !turn.question || !turn.answer)) return null;
+  // История — вспомогательный контекст, а не условие ответа: из-за одного
+  // дефектного хода нельзя терять ответ на валидный вопрос. Негодные ходы
+  // (пустой вопрос или пустой ответ) отбрасываются поштучно, остальные едут
+  // дальше; пустая история — законное состояние (первый вопрос в диалоге).
+  // Живой прогон: служебный ход с пустым вопросом отравлял диалог целиком, и
+  // ВСЕ последующие вопросы человека молча падали в provider_request_invalid.
+  const dialogue = payload.dialogue
+    .map((turn) => ({ question: questionText(turn?.question), answer: questionText(turn?.answer) }))
+    .filter((turn) => turn.question && turn.answer)
+    .slice(-3);
   const route = { action: String(payload.route.action || ''), sourceId: payload.route.sourceId ?? null };
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',

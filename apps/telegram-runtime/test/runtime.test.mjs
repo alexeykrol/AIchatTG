@@ -11,7 +11,7 @@ import { ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
-import { createProviderAdapter, ProviderUnavailableError } from '../src/provider-adapter.mjs';
+import { createProviderAdapter, ProviderRequestError, ProviderUnavailableError } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramRuntimeHttpServer } from '../src/http-server.mjs';
 
@@ -802,6 +802,195 @@ test('only a successful final answer enters bounded dialogue memory and inbound 
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_turns').get().count, 0);
     assert.equal(db.prepare("SELECT status FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:222'").get().status, 'uncertain');
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Боевой дефект: одинокая `/ask` (клик по меню Telegram) писала в историю ход с
+// ПУСТЫМ вопросом, и дальше все вопросы этого человека в этом чате молча падали
+// в provider_request_invalid. История диалога — контекст беседы, а не журнал
+// доставок: служебный текст в неё попадать не должен.
+test('service replies are delivered but never enter dialogue history', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-service-turns-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const store = createRuntimeStore(db);
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
+    store, provider: fakeLlm(), knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const ask = async (id, messageId, text) => {
+    await runtime.handleUpdate('moderator', update(id, messageId, text));
+    return runtime.handleUpdate('assistant', update(id + 1, messageId, text));
+  };
+  const sends = () => actions.filter(([kind]) => kind === 'send');
+  try {
+    assert.equal((await ask(700, 700, '/help')).command, 'help');
+    assert.equal((await ask(710, 710, '/ask')).command, 'ask_empty');
+    assert.equal((await ask(720, 720, '/ai сколько стоит')).command, 'retired');
+    // Человек получил все три ответа: доставка и квитанция сохраняются.
+    assert.equal(sends().length, 3);
+    assert.equal(sends().at(-2)[1].text, ASSISTANT_EMPTY_ASK_TEXT);
+    // …но история осталась пустой, и ход с пустым вопросом в ней невозможен.
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_turns').get().count, 0);
+    assert.deepEqual(store.recentDialogue('-100', '7', { limit: 3 }), []);
+
+    // Настоящий вопрос — настоящий ход: он в историю попадает.
+    assert.equal((await ask(730, 730, '/ask что такое агент')).kind, 'answered');
+    assert.deepEqual(store.recentDialogue('-100', '7', { limit: 3 }).map((turn) => turn.question), ['что такое агент']);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Воздержание — НАСТОЯЩИЙ ответ на настоящий вопрос: «в материалах этого нет» —
+// это содержание беседы, а не реакция интерфейса на пустой ввод. Его нельзя
+// выплеснуть вместе со служебными ходами.
+test('an abstention answer stays in dialogue history because it answers a real question', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-abstention-memory-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const store = createRuntimeStore(db);
+  const provider = fakeLlm();
+  provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
+    store, provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    await runtime.handleUpdate('moderator', update(740, 740, '/ask посоветуйте crm для салона красоты'));
+    const result = await runtime.handleUpdate('assistant', update(741, 740, '/ask посоветуйте crm для салона красоты'));
+    assert.equal(result.abstained, true);
+    const remembered = store.recentDialogue('-100', '7', { limit: 3 });
+    assert.equal(remembered.length, 1);
+    assert.equal(remembered[0].question, 'посоветуйте crm для салона красоты');
+    assert.ok(remembered[0].answer.includes('не уполномочен'));
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Защита от уже отравленной боевой базы: негодный ход истории не имеет права
+// ронять ответ на валидный вопрос.
+test('a poisoned dialogue turn does not break the next answer', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-poisoned-history-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const store = createRuntimeStore(db);
+  // НАСТОЯЩИЙ адаптер провайдера поверх фальшивого fetch: именно он собирает
+  // вход ответа, поэтому только так тест доказывает сборку запроса, а не
+  // милосердие фикстуры.
+  const sentRequests = [];
+  const provider = createProviderAdapter(enabledProviderConfig(), {
+    async fetchFn(_url, init) {
+      const body = JSON.parse(init.body);
+      sentRequests.push(body);
+      const answer = body.model === 'router-model'
+        ? JSON.stringify({ action: 'teach', sourceId: 'course-content-v1' })
+        : 'answer:что такое агент';
+      return {
+        ok: true, status: 200,
+        headers: { get() { return null; } },
+        async json() {
+          return {
+            model: body.model,
+            choices: [{ message: { content: answer } }],
+            usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+          };
+        },
+      };
+    },
+  });
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
+    store, provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    // Ровно тот ход, что лежит в боевой базе: пустой вопрос, служебный ответ.
+    // Событие заводится настоящим путём — иначе внешний ключ хода не сойдётся.
+    store.claimEvent({ eventId: 'assistant:legacy', role: 'assistant', updateId: 749 });
+    store.recordBoundedAssistantTurn({
+      chatId: '-100', userId: '7', eventId: 'assistant:legacy', question: '',
+      answer: 'После /ask напишите ваш вопрос одним сообщением.', modelId: null, receipt: null, route: 'command:ask_empty',
+    }, { maxTurns: 3, ttlSeconds: 604_800 });
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_turns').get().count, 1);
+
+    // Модератор здесь не предмет теста: вердикт кладётся напрямую, чтобы
+    // настоящий провайдер обслуживал только маршрут и ответ.
+    store.upsertAssistantDisposition({
+      chatId: '-100', messageId: '750', status: 'allowed', verdict: 'clean', reason: 'fixture',
+      moderationMessageId: '-100:750', moderationEventId: 'moderator:750',
+    });
+    const answered = await runtime.handleUpdate('assistant', update(751, 750, '/ask что такое агент'));
+    assert.equal(answered.kind, 'answered');
+    // Отравленный ход отфильтрован при сборке запроса, а не «протащен» к модели
+    // и не уронил ответ: ответный вызов состоялся и человек получил текст.
+    const answerRequest = sentRequests.find((request) => request.model === 'answer-model');
+    assert.deepEqual(JSON.parse(answerRequest.messages[1].content).dialogue, []);
+    assert.equal(actions.filter(([kind]) => kind === 'send').at(-1)[1].text, 'answer:что такое агент');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Молчание — худший ответ: до фикса provider_request_invalid улетал наверх,
+// человек не получал НИЧЕГО, а событие навсегда оставалось processing.
+test('a locally rejected answer request returns quota, is logged and still answers the human', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-request-invalid-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const store = createRuntimeStore(db);
+  const provider = fakeLlm();
+  provider.answer = async () => { throw new ProviderRequestError('provider_request_invalid'); };
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
+    store, provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    await runtime.handleUpdate('moderator', update(760, 760, '/ask что такое агент'));
+    const result = await runtime.handleUpdate('assistant', update(761, 760, '/ask что такое агент'));
+    // Человек получил ответ, а не тишину.
+    assert.equal(result.kind, 'answered');
+    assert.equal(result.degraded, true);
+    assert.equal(result.reason, 'provider_request_invalid');
+    assert.ok(actions.filter(([kind]) => kind === 'send').at(-1)[1].text.includes('проверку'));
+    // Платного вызова не было (проверка локальная) — квота возвращается.
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:761'").get().count, 0);
+    // Служебный текст в историю не пишется — иначе дефект самовоспроизводится.
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_turns').get().count, 0);
+    // Событие терминально, а не вечное processing.
+    assert.equal(db.prepare("SELECT status FROM runtime_inbound_update_receipts WHERE receipt_id = 'assistant:761'").get().status, 'completed');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Падение обязано оставить след в обоих местах, где его будут искать.
+test('an unexpected runtime failure records its technical cause in the database and the log', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-error-text-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db);
+  const logged = [];
+  const originalError = console.error;
+  console.error = (line) => { logged.push(String(line)); };
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeLlm(), knowledge: availableKnowledge(),
+    moderatorTelegram: adapters([]).moderatorTelegram,
+    assistantTelegram: { async sendMessage() { throw new Error('delivery outcome unknown'); } },
+    notifier: adapters([]).notifier,
+  });
+  try {
+    store.upsertAssistantDisposition({
+      chatId: '-100', messageId: '770', status: 'allowed', verdict: 'clean', reason: 'fixture',
+      moderationMessageId: '-100:770', moderationEventId: 'moderator:770',
+    });
+    const failed = await runtime.handleUpdate('assistant', update(771, 770, '/help'));
+    assert.equal(failed.reason, 'runtime_error');
+    // Машинный код — прежний контракт; суть — в error_text рядом с ним.
+    const receipt = db.prepare("SELECT error_code, error_text FROM runtime_inbound_update_receipts WHERE receipt_id = 'assistant:771'").get();
+    assert.equal(receipt.error_code, 'runtime_error');
+    assert.ok(receipt.error_text.includes('delivery outcome unknown'));
+    const event = db.prepare("SELECT status, error_text FROM runtime_inbound_events WHERE event_id = 'assistant:771'").get();
+    assert.equal(event.status, 'error');
+    assert.ok(event.error_text.includes('delivery outcome unknown'));
+    // Лог получил ту же суть — и не получил полезной нагрузки сообщения.
+    assert.equal(logged.length, 1);
+    assert.ok(logged[0].includes('delivery outcome unknown'));
+    assert.equal(logged[0].includes('/help'), false);
+  } finally {
+    console.error = originalError;
+    db.close(); rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('a duplicate pending write cannot regress a terminal Moderator disposition', () => {

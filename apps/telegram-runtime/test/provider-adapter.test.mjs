@@ -249,6 +249,57 @@ test('router and answer retain their own tuples without identity leakage', async
   assert.equal(JSON.stringify(answer.receipt).includes('Approved content.'), false);
 });
 
+// История — вспомогательный контекст, а не условие ответа. Боевой дефект: один
+// ход с пустым вопросом (служебный ответ на одинокую /ask) отвергал ВЕСЬ запрос,
+// и человек молча переставал получать ответы.
+test('unusable dialogue turns are filtered out instead of failing the whole answer', async () => {
+  const { adapter, requests } = answerAdapter([
+    response(completion('Answer despite a poisoned turn.')),
+    response(completion('Answer without any history.')),
+  ]);
+  const answered = await adapter.answer({
+    ...answerPayload(),
+    dialogue: [
+      { question: '', answer: 'После /ask напишите ваш вопрос одним сообщением.' },
+      { question: 'Good question', answer: 'Good answer' },
+      { question: 'Orphan question', answer: '   ' },
+    ],
+  });
+  assert.equal(answered.text, 'Answer despite a poisoned turn.');
+  assert.deepEqual(JSON.parse(requests[0].messages[1].content).dialogue, [
+    { question: 'Good question', answer: 'Good answer' },
+  ]);
+  // Полностью пустая история — законное состояние (первый вопрос в диалоге).
+  await adapter.answer({ ...answerPayload(), dialogue: [] });
+  assert.deepEqual(JSON.parse(requests[1].messages[1].content).dialogue, []);
+});
+
+// Невалидна должна быть только САМА заявка: нет вопроса, маршрута или знания.
+// Это настоящая невозможность ответить, и она обязана остаться отказом.
+test('an invalid request itself still fails before any call is attempted', async () => {
+  let calls = 0;
+  const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; throw new Error('must not call'); } });
+  const rejected = [
+    { ...answerPayload(), text: '   ' },
+    { ...answerPayload(), route: null },
+    { ...answerPayload(), knowledge: { sourceId: 'course-content-v1', entries: [] } },
+    { ...answerPayload(), knowledge: { sourceId: '', entries: [{ id: 'a', content: 'b' }] } },
+    {
+      ...answerPayload(),
+      knowledge: {
+        sourceId: 'course-content-v1',
+        entries: Array.from({ length: 129 }, (_item, index) => ({ id: `entry-${index}`, content: 'Approved content.' })),
+      },
+    },
+  ];
+  for (const payload of rejected) {
+    await assert.rejects(adapter.answer(payload), (error) => error instanceof ProviderRequestError
+      && error.code === 'provider_request_invalid');
+  }
+  // Проверка локальная: ни одного запроса к провайдеру, значит платы не было.
+  assert.equal(calls, 0);
+});
+
 test('transport errors have no automatic retry', async () => {
   let calls = 0;
   const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; throw new Error('network detail'); } });

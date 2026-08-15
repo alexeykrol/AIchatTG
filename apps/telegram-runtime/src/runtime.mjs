@@ -19,11 +19,16 @@ import {
   WARNING_FIRST,
 } from '@aichattg/telegram-core';
 import { createHash } from 'node:crypto';
-import { createProviderAdapter, isProviderUnavailableError } from './provider-adapter.mjs';
+import {
+  createProviderAdapter,
+  isProvenNoCallRequestError,
+  isProviderUnavailableError,
+} from './provider-adapter.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
   ASSISTANT_RETIRED_COMMAND_TEXT,
+  ASSISTANT_UNAVAILABLE_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
   coverageDeficitCandidateLevel,
@@ -83,6 +88,21 @@ function replayInboundResult({ eventId, receiptId, existing, collision }) {
     kind: 'uncertain_delivery', eventId, receiptId,
     reason: existing?.error_code || 'recovery_required', recoveryId: existing?.recovery_id || null,
   };
+}
+
+/**
+ * Техническая суть падения — и только она. Молчаливое падение (пустой лог,
+ * `error_text = null`) стоило боевого расследования: событие навсегда оставалось
+ * `processing`, а причина не сохранялась нигде. Полезная нагрузка сообщения сюда
+ * НЕ попадает (персональные данные): класс, код, message и первая строка стека —
+ * этого достаточно, чтобы опознать дефект, и недостаточно, чтобы утечь тексту.
+ */
+function runtimeErrorSummary(error) {
+  const name = String(error?.name || error?.constructor?.name || 'Error');
+  const code = error?.code == null ? '' : ` code=${String(error.code)}`;
+  const message = String(error?.message || '').replace(/\s+/g, ' ').trim();
+  const frame = String(error?.stack || '').split('\n').slice(1, 2).join('').trim();
+  return `${name}${code}: ${message}${frame ? ` | at ${frame}` : ''}`.slice(0, 1_000);
 }
 
 function redactedActionResult(result, fallback) {
@@ -912,7 +932,19 @@ export function createTelegramRuntime({
     return { route, knowledge: grounded.knowledge, trace: grounded.trace || null };
   }
 
-  async function sendAssistantTurn(eventId, question, answer, route = null) {
+  /**
+   * История диалога — контекст беседы, а не журнал доставок. Служебный текст
+   * («после /ask напишите вопрос», справка, снятая команда) — реакция интерфейса
+   * на пустой или устаревший ввод, а не ход разговора: он ничего не добавляет к
+   * пониманию следующего вопроса. Поэтому такие ответы доставляются и квитуются,
+   * но в `runtime_assistant_turns` НЕ попадают (`persist: false`).
+   *
+   * Цена ошибки замерена на бою: служебный ход писался с пустым вопросом,
+   * отравлял историю, и все последующие вопросы этого человека молча падали.
+   * Ответ-воздержание («в материалах этого нет») сюда НЕ относится — это
+   * настоящий ответ на настоящий вопрос, он остаётся в истории.
+   */
+  async function sendAssistantTurn(eventId, question, answer, route = null, { persist = true } = {}) {
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
@@ -920,14 +952,21 @@ export function createTelegramRuntime({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
     });
     const receipt = assistantDeliveryReceipt(transport);
-    store.recordBoundedAssistantTurn({
-      ...question, eventId, question: question.text, answer: answer.text.trim(),
-      modelId: answer.modelId, receipt, route,
-    }, {
-      maxTurns: config.assistantDialogueTurnLimit,
-      ttlSeconds: config.assistantDialogueTtlSec,
-    });
+    if (persist) {
+      store.recordBoundedAssistantTurn({
+        ...question, eventId, question: question.text, answer: answer.text.trim(),
+        modelId: answer.modelId, receipt, route,
+      }, {
+        maxTurns: config.assistantDialogueTurnLimit,
+        ttlSeconds: config.assistantDialogueTtlSec,
+      });
+    }
     return { kind: 'answered', receipt, route };
+  }
+
+  /** Доставка служебного текста: человек получает ответ, история не трогается. */
+  function sendAssistantServiceReply(eventId, question, text, route) {
+    return sendAssistantTurn(eventId, question, { text }, route, { persist: false });
   }
 
   async function handleAssistant(eventId, question) {
@@ -943,19 +982,21 @@ export function createTelegramRuntime({
     if (!questionClaim.claimed) return { kind: 'duplicate_question', status: questionClaim.existing?.status || 'unknown' };
     try {
       if (question.command === 'help') {
-        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_HELP_TEXT }, 'command:help');
+        const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_HELP_TEXT, 'command:help');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'help' };
       }
       // `/ai` снята с вооружения. Ответ детерминированный и до резервирования
       // квоты: команда не доходит ни до модели, ни до платного пути.
       if (question.command === 'retired') {
-        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_RETIRED_COMMAND_TEXT }, 'command:retired');
+        const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_RETIRED_COMMAND_TEXT, 'command:retired');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'retired' };
       }
+      // Одинокая `/ask` (клик по меню Telegram) — самый массовый служебный ход и
+      // источник боевого дефекта: вопроса нет, писать в историю нечего.
       if (!question.text) {
-        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_EMPTY_ASK_TEXT }, 'command:ask_empty');
+        const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_EMPTY_ASK_TEXT, 'command:ask_empty');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'ask_empty' };
       }
@@ -1030,6 +1071,24 @@ export function createTelegramRuntime({
           store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
           return { kind: 'skipped', reason: error.code };
         }
+        // Наш собственный дефект сборки запроса: отвергла ЛОКАЛЬНАЯ проверка до
+        // сети, платного вызова не было — поэтому квота возвращается
+        // (releaseAssistantRequest), как на любом доказуемо-недошедшем выходе, а
+        // не фенсится как неоднозначная. Раньше эта ошибка летела наверх и
+        // становилась молчанием: человек не получал НИЧЕГО, и каждый следующий
+        // его вопрос падал так же. Молчание — худший из возможных ответов, оно
+        // читается как поломка и провоцирует повтор в ту же стену; поэтому
+        // здесь доставляется честный служебный текст «материалы проверяются».
+        // Служебный — значит в историю не пишется (иначе дефект самовоспроизводится).
+        if (isProvenNoCallRequestError(error)) {
+          store.releaseAssistantRequest(eventId);
+          console.error(`[runtime] assistant answer request rejected locally event=${eventId} ${runtimeErrorSummary(error)}`);
+          const delivered = await sendAssistantServiceReply(
+            eventId, question, ASSISTANT_UNAVAILABLE_TEXT, 'boundary:request_invalid',
+          );
+          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+          return { ...delivered, degraded: true, reason: error.code };
+        }
         throw error;
       }
       const result = await sendAssistantTurn(eventId, question, answer, routing.route);
@@ -1087,7 +1146,15 @@ export function createTelegramRuntime({
         store.completeEvent(eventId, result.kind === 'skipped' ? 'skipped' : 'completed', response);
         return response;
       } catch (error) {
-        const marked = store.markInboundDeliveryUncertain({ claim: inboundClaim.claim, errorCode: 'runtime_error' });
+        // Падение обязано оставить след в обоих местах, где его будут искать:
+        // в логе процесса и в базе. `error_code` остаётся машинным контрактом
+        // (`runtime_error`), а человекочитаемая суть уходит в `error_text`.
+        const summary = runtimeErrorSummary(error);
+        console.error(`[runtime] handleUpdate failed role=${role} event=${eventId} ${summary}`);
+        const marked = store.markInboundDeliveryUncertain({
+          claim: inboundClaim.claim, errorCode: 'runtime_error', errorText: summary,
+        });
+        store.completeEvent(eventId, 'error', null, summary);
         return {
           kind: 'uncertain_delivery', eventId, receiptId,
           reason: marked.marked ? 'runtime_error' : 'claim_fenced', recoveryId: null,

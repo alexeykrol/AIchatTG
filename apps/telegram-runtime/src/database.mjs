@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS runtime_inbound_update_receipts (
   status TEXT NOT NULL CHECK(status IN ('processing', 'completed', 'skipped', 'uncertain')),
   result_json TEXT,
   error_code TEXT,
+  -- Машинный код отказа отвечает на «какой это класс», но не на «что именно
+  -- сломалось». Молчаливое падение без этой строки стоило боевого
+  -- расследования, поэтому техническая суть (класс, код, message, кадр стека)
+  -- хранится рядом. Полезная нагрузка сообщения сюда не пишется.
+  error_text TEXT,
   recovery_id TEXT,
   received_at INTEGER NOT NULL,
   claimed_at INTEGER NOT NULL,
@@ -307,6 +312,10 @@ export function ensureRuntimeDatabaseSchema(db) {
   if (!columns.has('last_event_id')) db.exec('ALTER TABLE runtime_moderation_weak_strikes ADD COLUMN last_event_id TEXT');
   const messageColumns = new Set(db.prepare('PRAGMA table_info(runtime_moderation_message_ledger)').all().map((row) => row.name));
   if (!messageColumns.has('user_id')) db.exec('ALTER TABLE runtime_moderation_message_ledger ADD COLUMN user_id TEXT');
+  // Дописанный след падения (см. комментарий у колонки в схеме). Аддитивно:
+  // существующая боевая база открывается без перестройки таблицы.
+  const receiptColumns = new Set(db.prepare('PRAGMA table_info(runtime_inbound_update_receipts)').all().map((row) => row.name));
+  if (!receiptColumns.has('error_text')) db.exec('ALTER TABLE runtime_inbound_update_receipts ADD COLUMN error_text TEXT');
 }
 
 /**
@@ -389,7 +398,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     SET status = ?, result_json = ?, error_code = NULL, completed_at = ?
     WHERE receipt_id = ? AND claim_id = ? AND claim_generation = ? AND status = 'processing'`);
   const markInboundReceiptUncertain = db.prepare(`UPDATE runtime_inbound_update_receipts
-    SET status = 'uncertain', error_code = ?, completed_at = NULL
+    SET status = 'uncertain', error_code = ?, error_text = ?, completed_at = NULL
     WHERE receipt_id = ? AND claim_id = ? AND claim_generation = ? AND status = 'processing'`);
   const quarantineInboundReceipts = db.prepare(`UPDATE runtime_inbound_update_receipts
     SET status = 'uncertain', error_code = 'recovery_required', recovery_id = ?,
@@ -727,10 +736,17 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       ).changes === 1;
       return { completed, row: inboundReceipt.get(inboundClaim.receiptId) || null };
     },
-    markInboundDeliveryUncertain({ claim: inboundClaim, errorCode = 'runtime_error' }) {
+    /**
+     * `errorText` необязателен и аддитивен: прежние вызовы (без него) пишут
+     * NULL, как и раньше. Он существует, потому что машинный `errorCode` не
+     * говорит, ЧТО именно сломалось, — а без этого падение не расследуется.
+     */
+    markInboundDeliveryUncertain({ claim: inboundClaim, errorCode = 'runtime_error', errorText = null }) {
       if (!inboundClaim) return { marked: false, row: null };
       const marked = markInboundReceiptUncertain.run(
-        String(errorCode).slice(0, 120), inboundClaim.receiptId,
+        String(errorCode).slice(0, 120),
+        errorText == null ? null : String(errorText).slice(0, 1_000),
+        inboundClaim.receiptId,
         inboundClaim.claimId, inboundClaim.claimGeneration,
       ).changes === 1;
       return { marked, row: inboundReceipt.get(inboundClaim.receiptId) || null };
