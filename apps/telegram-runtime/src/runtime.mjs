@@ -842,17 +842,19 @@ export function createTelegramRuntime({
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
-    // Хинт — замеренная бухгалтерия кода (0 ложных на голд-сете); модельный
-    // роутер на хинтованном вопросе выбирает лишь «ответить или redirect».
-    // Когда модель спорит с хинтом (живой прогон: luna изредка отвечала teach
-    // на value-вопрос), побеждает код: маршрут принуждается к хинту. Прежний
-    // определённый отказ означал МОЛЧАНИЕ клиенту за недетерминизм модели.
-    if (courseOperationsHint
-      && ![ASSISTANT_ROLE_ACTIONS.SUPPORT, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
+    // Хинт — замеренная бухгалтерия кода (0 ложных на голд-190, 0 украденных
+    // операционных); детектор уже ДОКАЗАЛ, что вопрос покрыт своим доменом.
+    // Поэтому модельный роутер на хинтованном вопросе не решает «отвечать ли»
+    // вовсе: спор с хинтом любым действием, включая redirect, проигрывает коду.
+    // Прежде redirect был исключением — и живой прогон skep-10 показал цену:
+    // пилюльный ход «пусть ваш ИИ сам всё соберёт» (value-хинт есть) роутер
+    // отправил в redirect, клиент получил «эта тема за пределами курса» на
+    // вопрос, который является ЯДРОМ домена ценности. Ложное «не уполномочен»
+    // на покрытой теме — тот же дефект, что молчание, только вежливее.
+    if (courseOperationsHint && route.action !== ASSISTANT_ROLE_ACTIONS.SUPPORT) {
       route = { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS };
     }
-    if (courseValueHint
-      && ![ASSISTANT_ROLE_ACTIONS.ADVISE, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
+    if (courseValueHint && route.action !== ASSISTANT_ROLE_ACTIONS.ADVISE) {
       route = { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
     }
     // Redirect — законный вердикт роутера «вопрос вне покрытия», а НЕ повод

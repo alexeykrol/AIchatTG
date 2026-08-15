@@ -475,8 +475,11 @@ test('a redirect route answers with the out-of-coverage text instead of falling 
     knowledge: availableKnowledge(), ...adapters(actions),
   });
   try {
-    await runtime.handleUpdate('moderator', update(30, 90, '/ask пусть ваш ии сам всё соберёт за меня'));
-    const result = await runtime.handleUpdate('assistant', update(31, 90, '/ask пусть ваш ии сам всё соберёт за меня'));
+    // Вопрос НЕ хинтованный (ни ops, ни value): именно здесь redirect —
+    // законный вердикт. На хинтованном вопросе redirect невозможен по
+    // контракту принуждения выше, и это проверяет соседний тест.
+    await runtime.handleUpdate('moderator', update(30, 90, '/ask посоветуйте crm для салона красоты'));
+    const result = await runtime.handleUpdate('assistant', update(31, 90, '/ask посоветуйте crm для салона красоты'));
     assert.equal(result.kind, 'answered');
     assert.equal(result.abstained, true);
     // Платный ответный вызов не делается: знания нет, отвечать нечем.
@@ -518,6 +521,16 @@ test('course-value hints coerce content routing and answer from the isolated val
     await runtime.handleUpdate('moderator', update(22, 81, '/ask сколько стоит и какие тарифы'));
     await runtime.handleUpdate('assistant', update(23, 81, '/ask сколько стоит и какие тарифы'));
     assert.deepEqual(hints.at(-1), { courseOperationsHint: true, courseValueHint: false });
+
+    // Хинт побеждает и redirect: детектор уже доказал покрытие домена, поэтому
+    // «вне покрытия» от модели на хинтованном вопросе — ложное «не уполномочен»
+    // на ядровой теме (живой прогон skep-10, пилюльный ход).
+    provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
+    await runtime.handleUpdate('moderator', update(26, 83, '/ask а может проще нанять того кто умеет чем самой курсы проходить'));
+    const notRedirected = await runtime.handleUpdate('assistant', update(27, 83, '/ask а может проще нанять того кто умеет чем самой курсы проходить'));
+    assert.equal(notRedirected.kind, 'answered');
+    assert.deepEqual(notRedirected.route, { action: 'advise', sourceId: 'course-value-v1' });
+    assert.notEqual(notRedirected.abstained, true);
 
     // Маршрут advise отвечает из value-снимка тем же v1-путём, что операционный.
     provider.routeAssistant = async () => ({ action: 'advise', sourceId: 'course-value-v1' });
