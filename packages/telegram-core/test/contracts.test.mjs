@@ -33,13 +33,87 @@ const message = (text, extra = {}) => ({
   ...extra,
 });
 
-test('assistant command recognition keeps the legacy leading-command contract', () => {
-  assert.deepEqual(detectAssistantQuestion(message('/ask@assistant_bot  explain'), 'assistant_bot'), {
+test('/ask is accepted anywhere in a live message and the question is the rest of it', () => {
+  const detect = (text) => detectAssistantQuestion(message(text), 'assistant_bot');
+  assert.deepEqual(detect('/ask@assistant_bot  explain'), {
     isQuestion: true, reason: 'command', text: 'explain',
   });
-  assert.equal(detectAssistantQuestion(message('/ask@other_bot explain'), 'assistant_bot').isQuestion, false);
-  assert.equal(detectAssistantQuestion(message('before /ask explain'), 'assistant_bot').isQuestion, false);
+  // Начало / середина / конец — человек ставит команду там, где ему удобно.
+  assert.deepEqual(detect('/ask сколько стоит курс'), {
+    isQuestion: true, reason: 'command', text: 'сколько стоит курс',
+  });
+  assert.deepEqual(detect('а вот скажи /ask сколько стоит курс'), {
+    isQuestion: true, reason: 'command', text: 'а вот скажи сколько стоит курс',
+  });
+  assert.deepEqual(detect('а сколько стоит курс /ask'), {
+    isQuestion: true, reason: 'command', text: 'а сколько стоит курс',
+  });
+  // Суффикс @username принимается только если это имя ЭТОГО бота.
+  assert.equal(detect('/ask@other_bot explain').isQuestion, false);
+  // Границы слова: команда — это команда, а не подстрока.
+  assert.equal(detect('я /asking про курс').isQuestion, false);
+  assert.equal(detect('смотри path/ask внутри пути').isQuestion, false);
+});
+
+test('a lone /ask is a question with empty text, and /ai is answered as retired', () => {
+  const detect = (text) => detectAssistantQuestion(message(text), 'assistant_bot');
+  assert.deepEqual(detect('/ask'), { isQuestion: true, reason: 'command', text: '' });
+  assert.deepEqual(detect('/ask@assistant_bot'), { isQuestion: true, reason: 'command', text: '' });
+  // `/ai` вызовом не является, но и молчанием не отвечает: отдельный флаг ведёт
+  // к детерминированному ответу «команда больше не поддерживается».
+  assert.deepEqual(detect('/ai сколько стоит курс'), {
+    isQuestion: true, reason: 'command', text: '', isRetiredCommand: true,
+  });
+  assert.deepEqual(detect('/help'), { isQuestion: true, reason: 'command', text: '', isHelpCommand: true });
+});
+
+test('a mention of this bot is a full invocation, a foreign bot is not', () => {
+  const detect = (text) => detectAssistantQuestion(message(text), 'assistant_bot');
+  assert.deepEqual(detect('@assistant_bot а сколько уроков в курсе?'), {
+    isQuestion: true, reason: 'mention', text: 'а сколько уроков в курсе?',
+  });
+  assert.deepEqual(detect('а сколько уроков @assistant_bot в курсе?'), {
+    isQuestion: true, reason: 'mention', text: 'а сколько уроков в курсе?',
+  });
+  // Регистр имени Telegram не фиксирует.
+  assert.equal(detect('@Assistant_Bot привет').isQuestion, true);
+  // Только тег — тот же случай, что пустой /ask.
+  assert.deepEqual(detect('@assistant_bot'), { isQuestion: true, reason: 'mention', text: '' });
+  // Чужой бот — не наше обращение; человек говорит не с нами.
+  assert.equal(detect('@other_bot а сколько уроков в курсе?').isQuestion, false);
+  // Обращение к нам не теряется из-за чужого тега перед ним. Убирается только
+  // НАШ тег: чужой остаётся частью вопроса, потому что он часть смысла.
+  assert.equal(detect('@other_bot спроси @assistant_bot про курс').text, '@other_bot спроси про курс');
+  // Без известного имени бота упоминание вызовом быть не может.
+  assert.equal(detectAssistantQuestion(message('@assistant_bot привет'), '').isQuestion, false);
+});
+
+test('forwarded and literally quoted invocations never reach the Assistant', () => {
+  const quoted = (text, type) => ({
+    ...message(text),
+    entities: [{ type, offset: text.indexOf('/') >= 0 ? text.indexOf('/') : text.indexOf('@'), length: 30 }],
+  });
   assert.equal(detectAssistantQuestion(message('/ask copied', { forward_origin: {} }), 'assistant_bot').isQuestion, false);
+  assert.equal(detectAssistantQuestion(message('@assistant_bot copied', { forward_date: 1 }), 'assistant_bot').isQuestion, false);
+  // Цитирование инструкции про /ask не должно дёргать бота.
+  assert.equal(detectAssistantQuestion(quoted('/ask ваш вопрос', 'blockquote'), 'assistant_bot').isQuestion, false);
+  assert.equal(detectAssistantQuestion(quoted('/ask ваш вопрос', 'code'), 'assistant_bot').isQuestion, false);
+  assert.equal(detectAssistantQuestion(quoted('@assistant_bot ваш вопрос', 'blockquote'), 'assistant_bot').isQuestion, false);
+});
+
+test('a message that does not address the bot stays silent', () => {
+  const classify = (text) => classifyTelegramUpdate({
+    role: BOT_ROLES.ASSISTANT,
+    update: { update_id: 31, message: message(text) },
+    acceptedChatIds: [-1001],
+    botUsername: 'assistant_bot',
+  });
+  assert.equal(classify('ребята, а кто уже прошёл третий модуль?').reason, 'not_assistant_command');
+  assert.equal(classify('спасибо, всё получилось').reason, 'not_assistant_command');
+  // Обратились — классифицируется как вопрос, командой или тегом.
+  assert.equal(classify('а вот скажи /ask сколько стоит курс').question.text, 'а вот скажи сколько стоит курс');
+  assert.equal(classify('@assistant_bot сколько стоит курс').question.text, 'сколько стоит курс');
+  assert.equal(classify('/ai сколько стоит курс').question.command, 'retired');
 });
 
 test('roles remain structurally isolated and message identities stay chat-scoped', () => {

@@ -66,7 +66,15 @@ export const WARNING_FINAL =
 const ROLE_SET = new Set(Object.values(BOT_ROLES));
 const ASSISTANT_DISPOSITION_SET = new Set(ASSISTANT_DISPOSITION_STATUSES);
 const ASSISTANT_ROLE_ACTION_SET = new Set(Object.values(ASSISTANT_ROLE_ACTIONS));
-const ASSISTANT_CMD_RE = /^\s*\/(ask|help)(?:@([A-Za-z0-9_]+))?(?:\s+|$)/i;
+// Бот — участник чата, и обращаются к нему как к человеку: тегом или командой,
+// в любом месте живого сообщения. Требование «команда в начале» было снято
+// осознанно: человек пишет фразу и вставляет /ask там, где ему удобно.
+// Границы слева/справа держат класс ошибки закрытым: `/asking` и `path/ask`
+// вызовом не являются.
+const ASSISTANT_CMD_RE = /(?<![\p{L}\p{N}_/])\/(ask|ai|help)(?:@([A-Za-z0-9_]+))?(?![\p{L}\p{N}_])/iu;
+// Тег бота — такой же полноценный вызов, как команда. Регистронезависимо:
+// Telegram допускает любой регистр в @username.
+const MENTION_RE = /(?<![\p{L}\p{N}_])@([A-Za-z0-9_]{3,})(?![\p{L}\p{N}_])/gu;
 const QUOTED_LITERAL_ENTITY_TYPES = new Set([
   'blockquote', 'expandable_blockquote', 'code', 'pre', 'pre_code',
 ]);
@@ -110,28 +118,57 @@ function isLiteralEntityAt(message, offset) {
   ));
 }
 
+const NO_QUESTION = Object.freeze({ isQuestion: false, reason: null, text: '' });
+
+// Убрав вызов из текста, мы оставляем дырку и два пробела по краям — вопрос
+// собирается из остатка, поэтому пробелы схлопываются, а не тащатся в модель.
+function cutAt(raw, offset, length) {
+  return `${raw.slice(0, offset)} ${raw.slice(offset + length)}`.replace(/\s+/g, ' ').trim();
+}
+
 /**
- * Exact legacy invocation semantics, extracted from the immutable source object:
- * only leading /ask and /help commands are accepted, optional @bot suffixes must
- * name this bot, and forwarded or literal-quoted commands are ignored.
+ * Обращение к боту как к участнику чата: командой `/ask` (в любом месте
+ * сообщения) или тегом `@имя_бота`. Не обратились — молчим, обратились —
+ * отвечаем обязательно.
+ *
+ * Защиты сохранены и намеренно закрывают целые классы ошибок, а не отдельные
+ * случаи: пересланное сообщение не вызывает (человек делится чужим текстом,
+ * а не спрашивает), команда/тег внутри цитаты или кода не вызывает (иначе
+ * цитирование инструкции «пишите /ask ваш вопрос» дёргает бота), суффикс
+ * `@username` у команды принимается только если это имя ЭТОГО бота.
  */
 export function detectAssistantQuestion(message, botUsername = '') {
   const raw = message?.text || message?.caption || '';
-  if (!raw || isForwardedMessage(message)) return { isQuestion: false, reason: null, text: '' };
-  const command = raw.match(ASSISTANT_CMD_RE);
-  if (!command) return { isQuestion: false, reason: null, text: '' };
-  const commandOffset = raw.indexOf('/', command.index || 0);
-  if (isLiteralEntityAt(message, commandOffset)) return { isQuestion: false, reason: null, text: '' };
-
+  if (!raw || isForwardedMessage(message)) return NO_QUESTION;
   const expectedUsername = String(botUsername || '').replace(/^@/, '').toLowerCase();
-  const targetUsername = command[2] || null;
-  if (targetUsername && (!expectedUsername || targetUsername.toLowerCase() !== expectedUsername)) {
-    return { isQuestion: false, reason: null, text: '' };
+
+  const command = raw.match(ASSISTANT_CMD_RE);
+  if (command) {
+    const commandOffset = command.index;
+    if (isLiteralEntityAt(message, commandOffset)) return NO_QUESTION;
+    const targetUsername = command[2] || null;
+    if (targetUsername && (!expectedUsername || targetUsername.toLowerCase() !== expectedUsername)) {
+      return NO_QUESTION;
+    }
+    const verb = command[1].toLowerCase();
+    if (verb === 'help') return { isQuestion: true, reason: 'command', text: '', isHelpCommand: true };
+    // `/ai` вызовом больше не является, но и молчать на него нельзя: команда
+    // годами жила в меню и в чужих инструкциях. Явный детерминированный ответ
+    // о снятии команды дешевле молчания, которое читается как поломка бота.
+    if (verb === 'ai') return { isQuestion: true, reason: 'command', text: '', isRetiredCommand: true };
+    return { isQuestion: true, reason: 'command', text: cutAt(raw, commandOffset, command[0].length) };
   }
-  if (command[1].toLowerCase() === 'help') {
-    return { isQuestion: true, reason: 'command', text: '', isHelpCommand: true };
+
+  if (!expectedUsername) return NO_QUESTION;
+  // Тег ищется по всем упоминаниям, а не по первому: `@другой_бот, спроси
+  // @наш_бот` — обращение к нам, и первое совпадение здесь дало бы молчание.
+  MENTION_RE.lastIndex = 0;
+  for (const mention of raw.matchAll(MENTION_RE)) {
+    if (mention[1].toLowerCase() !== expectedUsername) continue;
+    if (isLiteralEntityAt(message, mention.index)) continue;
+    return { isQuestion: true, reason: 'mention', text: cutAt(raw, mention.index, mention[0].length) };
   }
-  return { isQuestion: true, reason: 'command', text: raw.slice(command[0].length).trim() };
+  return NO_QUESTION;
 }
 
 export function incomingEventId(role, update) {
@@ -248,7 +285,7 @@ export function classifyTelegramUpdate({
         ...identity,
         authorName: message.from?.first_name || null,
         username: message.from?.username || null,
-        command: question.isHelpCommand ? 'help' : 'ask',
+        command: question.isHelpCommand ? 'help' : question.isRetiredCommand ? 'retired' : 'ask',
         text: question.text,
       },
     };

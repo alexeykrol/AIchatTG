@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import { ASSISTANT_SOURCE_PACKAGES, knowledgeManifestDigest } from '@aichattg/telegram-core';
+import { ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
@@ -372,6 +373,66 @@ test('moderator safety result writes a matching allow disposition before an Assi
     assert.equal(actions.at(-1)[0], 'send');
     assert.equal(db.prepare('SELECT status, verdict FROM runtime_assistant_moderation_dispositions').get().status, 'allowed');
     assert.equal((await runtime.handleUpdate('assistant', update(3, 50, '/ask hello'))).kind, 'duplicate_question');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('the Assistant answers every address to it and stays out of every other conversation', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let answerCalls = 0;
+  const provider = fakeLlm();
+  const answer = provider.answer;
+  provider.answer = async (input) => { answerCalls++; return answer(input); };
+  // Знания включены намеренно: фикстура модели возвращает сам вопрос, и это
+  // единственный способ доказать, что из живого текста извлечён верный остаток.
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true }),
+    store: createRuntimeStore(db),
+    provider,
+    knowledge: availableKnowledge(),
+    ...adapters(actions),
+  });
+  const ask = async (id, text) => {
+    await runtime.handleUpdate('moderator', update(id, id, text));
+    return runtime.handleUpdate('assistant', update(id + 1, id, text));
+  };
+  const lastSent = () => actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
+  try {
+    // Живой текст с командой в середине: вопрос — весь остальной текст.
+    const midway = await ask(600, 'а вот скажи /ask сколько стоит курс');
+    assert.equal(midway.kind, 'answered');
+    assert.match(lastSent(), /а вот скажи сколько стоит курс/);
+
+    // Тег бота — такое же полноценное обращение, как команда.
+    const mentioned = await ask(610, '@assistant_bot а сколько уроков в курсе?');
+    assert.equal(mentioned.kind, 'answered');
+    assert.match(lastSent(), /а сколько уроков в курсе\?/);
+
+    // Одинокая команда — массовый штатный сценарий (клик по меню Telegram):
+    // ответ содержит готовый шаблон, а не объяснение формата.
+    const empty = await ask(620, '/ask');
+    assert.equal(empty.command, 'ask_empty');
+    assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
+    assert.equal(lastSent(), '✍️ Отправьте вопрос одним сообщением: /ask ваш вопрос');
+    // Один тег без текста — тот же случай.
+    assert.equal((await ask(630, '@assistant_bot')).command, 'ask_empty');
+    assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
+
+    // Снятая команда отвечает детерминированно и не доходит до модели.
+    const callsBeforeRetired = answerCalls;
+    const retired = await ask(640, '/ai сколько стоит курс');
+    assert.equal(retired.command, 'retired');
+    assert.equal(lastSent(), 'Команда /ai больше не поддерживается. Используйте /ask ваш вопрос.');
+    assert.equal(answerCalls, callsBeforeRetired);
+
+    // К боту не обратились — он не лезет в чужой разговор.
+    const sendsBefore = actions.filter(([kind]) => kind === 'send').length;
+    const ignored = await runtime.handleUpdate('assistant', update(650, 650, 'ребята, кто прошёл третий модуль?'));
+    assert.equal(ignored.reason, 'not_assistant_command');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, sendsBefore);
+    // Чужой бот — тоже не наше обращение.
+    assert.equal((await runtime.handleUpdate('assistant', update(651, 651, '@other_bot привет'))).reason, 'not_assistant_command');
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 

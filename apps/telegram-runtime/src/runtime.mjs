@@ -23,6 +23,7 @@ import { createProviderAdapter, isProviderUnavailableError } from './provider-ad
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
+  ASSISTANT_RETIRED_COMMAND_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
   coverageDeficitCandidateLevel,
@@ -945,6 +946,13 @@ export function createTelegramRuntime({
         const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_HELP_TEXT }, 'command:help');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'help' };
+      }
+      // `/ai` снята с вооружения. Ответ детерминированный и до резервирования
+      // квоты: команда не доходит ни до модели, ни до платного пути.
+      if (question.command === 'retired') {
+        const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_RETIRED_COMMAND_TEXT }, 'command:retired');
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        return { ...result, command: 'retired' };
       }
       if (!question.text) {
         const result = await sendAssistantTurn(eventId, question, { text: ASSISTANT_EMPTY_ASK_TEXT }, 'command:ask_empty');

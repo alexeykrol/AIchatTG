@@ -31,9 +31,14 @@ used by AIchatTG.
   Telegram delivery uncertainty are retained rather than blindly retried.
 - Dialogue turns are scoped to chat/user, bounded by a configurable TTL and
   turn cap, and are persisted only after a successful final Telegram receipt.
-- `/ask` and `/help` retain their leading-command contract. Public identity and
-  usage questions use a code-owned profile; internal implementation details are
-  not disclosed and do not call a provider.
+- The Assistant is addressed like any chat participant: `/ask` or an `@bot`
+  mention, accepted anywhere in the message, with the remaining text as the
+  question. Forwarded and literally quoted invocations are ignored, a foreign
+  `@bot` is not an address, and a message that does not address the bot stays
+  silent. `/help` prints the usage card; `/ai` is retired and answered with a
+  deterministic notice instead of silence. Public identity and usage questions
+  use a code-owned profile; internal implementation details are not disclosed
+  and do not call a provider.
 - Course routes remain disabled by default. Knowledge is a local manifest plus
   SHA-256-verified snapshot, but no course content or index is in this repo and
   no News path can be read.
