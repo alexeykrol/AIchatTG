@@ -58,7 +58,7 @@ function request(server, path, headers, body) {
 function availableKnowledge() {
   return {
     forSource(sourceId) {
-      return sourceId === 'course-content-v1' || sourceId === 'course-operations-v1'
+      return sourceId === 'course-content-v1' || sourceId === 'course-operations-v1' || sourceId === 'course-value-v1'
         ? { available: true, snapshot: { sourceId, entries: [{ id: 'test', content: 'offline fixture' }] } }
         : { available: false, reason: 'knowledge_source_unavailable' };
     },
@@ -448,6 +448,46 @@ test('course-operations hints reject content routing and need the isolated opera
     assert.equal(result.reason, 'course_operations_route_required');
     assert.equal(actions.length, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:13'").get().count, 0);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Порядок доменов — контракт: операционный вопрос сильнее value-вопроса, а
+// value-вопрос не имеет права уезжать в содержательный маршрут молча.
+test('course-value hints reject content routing and answer from the isolated value snapshot', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-value-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const provider = fakeLlm();
+  const hints = [];
+  provider.routeAssistant = async ({ courseOperationsHint, courseValueHint }) => {
+    hints.push({ courseOperationsHint, courseValueHint });
+    return { action: 'teach', sourceId: 'course-content-v1' };
+  };
+  const runtime = createTelegramRuntime({ config: config({ assistantKnowledgeEnabled: true }), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
+  try {
+    // Value-вопрос с содержательным маршрутом от провайдера — определённый отказ.
+    await runtime.handleUpdate('moderator', update(20, 80, '/ask зачем это мне как руководителю'));
+    const rejected = await runtime.handleUpdate('assistant', update(21, 80, '/ask зачем это мне как руководителю'));
+    assert.equal(rejected.reason, 'course_value_route_required');
+    assert.deepEqual(hints.at(-1), { courseOperationsHint: false, courseValueHint: true });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations WHERE event_id = 'assistant:21'").get().count, 0);
+
+    // Операционный вопрос гасит value-подсказку: деньги и доступ сильнее.
+    provider.routeAssistant = async ({ courseOperationsHint, courseValueHint }) => {
+      hints.push({ courseOperationsHint, courseValueHint });
+      return { action: 'support', sourceId: 'course-operations-v1' };
+    };
+    await runtime.handleUpdate('moderator', update(22, 81, '/ask сколько стоит и какие тарифы'));
+    await runtime.handleUpdate('assistant', update(23, 81, '/ask сколько стоит и какие тарифы'));
+    assert.deepEqual(hints.at(-1), { courseOperationsHint: true, courseValueHint: false });
+
+    // Маршрут advise отвечает из value-снимка тем же v1-путём, что операционный.
+    provider.routeAssistant = async () => ({ action: 'advise', sourceId: 'course-value-v1' });
+    await runtime.handleUpdate('moderator', update(24, 82, '/ask потяну ли я в 67 лет'));
+    const answered = await runtime.handleUpdate('assistant', update(25, 82, '/ask потяну ли я в 67 лет'));
+    assert.equal(answered.kind, 'answered');
+    const sent = actions.filter(([kind]) => kind === 'send').at(-1);
+    assert.match(sent[1].text, /:advise$/u);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 

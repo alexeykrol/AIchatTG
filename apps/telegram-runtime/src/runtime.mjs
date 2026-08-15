@@ -8,6 +8,7 @@ import {
   classifyTelegramUpdate,
   incomingEventId,
   isCourseOperationsSupportQuestion,
+  isCourseValueQuestion,
   isDefinitiveDomainRouteReason,
   normalizeAssistantDisposition,
   normalizeAssistantRoleRoute,
@@ -115,6 +116,7 @@ function isDefinitiveAssistantRoutingExit(errorCode) {
   const code = String(errorCode || '');
   return code === 'assistant_route_invalid'
     || code === 'course_operations_route_required'
+    || code === 'course_value_route_required'
     || code === 'knowledge_unavailable'
     || code === 'knowledge_adapter_missing'
     || code === 'knowledge_source_invalid'
@@ -818,30 +820,41 @@ export function createTelegramRuntime({
   }
 
   async function routeAssistantQuestion(question) {
+    // Порядок доменов — контракт: операционный детектор первый (деньги, доступ,
+    // документы сильнее), value — второй, содержание — по умолчанию. Приоритет
+    // вшит в сами подсказки, чтобы провайдер не мог его переиграть.
+    const courseOperationsHint = isCourseOperationsSupportQuestion(question.text);
+    const courseValueHint = !courseOperationsHint && isCourseValueQuestion(question.text);
     let route;
     try {
       route = normalizeAssistantRoleRoute(await modelProvider.routeAssistant({
         text: question.text,
         chatId: question.chatId,
         userId: question.userId,
-        courseOperationsHint: isCourseOperationsSupportQuestion(question.text),
+        courseOperationsHint,
+        courseValueHint,
       }));
     } catch (error) {
       if (isProviderUnavailableError(error)) return { error: error.code };
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
-    if (isCourseOperationsSupportQuestion(question.text)
+    if (courseOperationsHint
       && ![ASSISTANT_ROLE_ACTIONS.SUPPORT, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
       return { error: 'course_operations_route_required' };
     }
+    if (courseValueHint
+      && ![ASSISTANT_ROLE_ACTIONS.ADVISE, ASSISTANT_ROLE_ACTIONS.REDIRECT].includes(route.action)) {
+      return { error: 'course_value_route_required' };
+    }
     if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) return { route, knowledge: null };
 
-    // Operations questions keep the v1 text path: that source is a reviewed
-    // snapshot of a handful of entries with no chunks, dictionary or domain, so
-    // there is nothing for the retriever to search and passing it whole is
-    // correct rather than a shortcut.
-    if (route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS) {
+    // Operations and value questions keep the v1 text path: each source is a
+    // reviewed snapshot of a handful of entries with no chunks, dictionary or
+    // domain, so there is nothing for the retriever to search and passing it
+    // whole is correct rather than a shortcut.
+    if (route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS
+      || route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE) {
       const sourceKnowledge = knowledge.forSource(route.sourceId);
       if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
       return { route, knowledge: sourceKnowledge.snapshot };

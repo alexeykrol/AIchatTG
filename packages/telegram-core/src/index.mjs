@@ -33,6 +33,10 @@ export const ASSISTANT_DISPOSITION_STATUSES = Object.freeze([
 export const ASSISTANT_SOURCE_PACKAGES = Object.freeze({
   COURSE_CONTENT: 'course-content-v1',
   COURSE_OPERATIONS: 'course-operations-v1',
+  // Продукт и польза для роли: «зачем это мне», «подойдёт ли», «с чего начать».
+  // Идёт тем же v1-путём снимка, что и операционный источник: срез мал и не
+  // имеет ни чанков, ни словаря, поэтому ретриверу в нём искать нечего.
+  COURSE_VALUE: 'course-value-v1',
   // Binary knowledge package (v2 manifest). It is admitted as a verified
   // database path, not as inlined entries, and the router never names it: the
   // domain veto decides whether a question may reach it.
@@ -43,6 +47,8 @@ export const ASSISTANT_ROLE_ACTIONS = Object.freeze({
   TEACH: 'teach',
   NAVIGATE: 'navigate',
   SUPPORT: 'support',
+  // Совет о пригодности и выборе: единственное действие с доступом к value-срезу.
+  ADVISE: 'advise',
   REDIRECT: 'redirect',
 });
 
@@ -381,26 +387,112 @@ export function normalizeAssistantRoleRoute(value) {
   const sourceId = value.sourceId ?? value.source_id ?? null;
   const requiredSource = action === ASSISTANT_ROLE_ACTIONS.SUPPORT
     ? ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS
-    : action === ASSISTANT_ROLE_ACTIONS.TEACH || action === ASSISTANT_ROLE_ACTIONS.NAVIGATE
-      ? ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT
-      : null;
+    : action === ASSISTANT_ROLE_ACTIONS.ADVISE
+      ? ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE
+      : action === ASSISTANT_ROLE_ACTIONS.TEACH || action === ASSISTANT_ROLE_ACTIONS.NAVIGATE
+        ? ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT
+        : null;
   if (requiredSource == null) return sourceId == null ? { action, sourceId: null } : null;
   return sourceId === requiredSource ? { action, sourceId: requiredSource } : null;
 }
 
 /**
- * This deliberately narrow pre-router identifies questions about operating a
- * course rather than questions about its teaching material. It is a safety
- * boundary: an ambiguous sentence stays with the provider route and is never
- * silently granted access to course content.
+ * Кириллица не покрывается `\b` — он ASCII-only, поэтому `/\bооо\b/` не находит
+ * «ООО» и правило тихо мертво. Границы слова задаются явно, иначе подстроки
+ * ловят чужие слова: «почем» в «почему», «списан» в «расписаны», «договор» в
+ * «договорились» — ровно так рождаются ложные срабатывания.
+ */
+const OPS_LETTER = '[a-zа-я0-9]';
+const OPS_BEFORE = `(?<!${OPS_LETTER})`;
+const OPS_AFTER = `(?!${OPS_LETTER})`;
+const opsRx = (body) => new RegExp(body, 'u');
+
+// Собственный биллинг и документы: этих слов не бывает в вопросе про материал.
+const OPS_BILLING = opsRx(`(?:юрлиц|юр\\.? ?лиц|${OPS_BEFORE}ооо${OPS_AFTER}|${OPS_BEFORE}ип${OPS_AFTER}|бухгалтер|счет-фактур|${OPS_BEFORE}счет[а-я]*(?: |$)|выставить счет|${OPS_BEFORE}акт(?:ом|а|ы)?${OPS_AFTER}|${OPS_BEFORE}договор(?:а|у|ом|е|ы|ов)?${OPS_AFTER}|инвойс|реквизит|безнал|оферт|промокод|рассрочк|автопродлен|автоплатеж|трибьют|tribute|${OPS_BEFORE}списал[а-я]*${OPS_AFTER}|${OPS_BEFORE}списан[а-я]*${OPS_AFTER}|вернуть деньг|возврат[а-я]*${OPS_AFTER}|рефанд|${OPS_BEFORE}чек(?:а|и|ом)?${OPS_AFTER}(?=[^.!?]{0,40}(?:оплат|платеж|курс|покупк|заказ|подписк))|(?:оплат|платеж|покупк|заказ|подписк)[а-я]{0,20}[^.!?]{0,20}${OPS_BEFORE}чек(?:а|и|ом)?${OPS_AFTER})`);
+const OPS_SUBSCRIPTION = opsRx('(?:подписк|тариф|на сколько (?:даетс|дают|выдаетс).{0,25}доступ|надолго ли доступ|доступ навсегда|автопродлен|продлен|отмен(?:ить|а|у) (?:подписк|автоплат)|на паузу|паузу|приостанов|заморозить|срок доступ|пожизненн)');
+const OPS_ACCOUNT = opsRx(`(?:личн(?:ый|ом|ого) кабинет|${OPS_BEFORE}кабинет[а-я]*${OPS_AFTER}|мои курсы|мой аккаунт|аккаунт|логин|пароль|залогин|перелогин|мой email|каким email|каком email)`);
+const OPS_ACCESS = opsRx('(?:пропал доступ|нет доступа|потерял доступ|доступ (?:закрыт|заблокирован|не открыл|не появил)|не могу (?:войти|зайти|попасть)|не пускает|заблокирован|оплатил.{0,40}(?:курса нет|нет курса|не открыл|не появил|не пришл|не дали))');
+const OPS_HUMAN = opsRx(`(?:живо(?:го|му|й) (?:человек|агент|оператор|специалист|поддержк)|переключит[ье]|соединит[ье]|связаться с поддержк|написать в поддержк|контакт[ыа]? поддержк|техподдержк|саппорт|служб[аыу] поддержк|${OPS_BEFORE}поддержк[аиуе]${OPS_AFTER})`);
+const OPS_CERTIFICATE = opsRx('(?:сертификат|диплом|удостоверен|отметк[аи] о прохожден|проверя(?:ет|ют).{0,25}(?:домашн|задан)|куратор)');
+const OPS_POST_PURCHASE = opsRx('(?:оплатил|оплатила|купил|купила|приобрел).{0,40}(?:куда|где|как|что дальше|не |нет )|на какой email (?:покупал|регистрир)|каким email (?:покупал|регистрир)|где (?:открывается|открыть) (?:купленн|оплаченн)|куда теперь (?:заходить|идти)');
+// Сбой самой платформы обучения. «Тормозит» требует названного объекта: без него
+// это чаще про чужую сессию или инструмент, а не про наш плеер.
+const OPS_PLATFORM_FAULT = opsRx(`(?:ошибка 404|${OPS_BEFORE}404${OPS_AFTER}|не открывается|не открывает|не грузит|не загружает|не играет|не воспроизвод|не работает (?:плеер|видео|урок|ссылк|кнопк|сайт)|(?:видео|плеер|урок|сайт|страница).{0,20}тормозит|битая ссылк|битые ссылк|нет звука|буферизу|${OPS_BEFORE}плеер|не срабатывает отметк|прогресс не сохран|не сохраняется прогресс)`);
+const OPS_COMMUNITY = opsRx('(?:чат участник|есть чат|где чат|общий чат|телеграм-канал|телеграм канал|дискорд|discord|сообществ|(?:где|как).{0,20}(?:скачать|взять|найти|лежат).{0,20}материал|материал[ыа]? к уроку|блюпринт|запис[ьи].{0,15}(?:вебинар|эфир|стрим)|когда появится запись|рассылк|письмо не приход|не приходит письм|попадает в спам|на каком языке)');
+const OPS_PRICE = opsRx(`(?:сколько сто|скольк[оа].{0,25}по деньгам|по деньгам|как(?:ая|ие|ой|ую) цен|${OPS_BEFORE}цен[аыу]${OPS_AFTER}|стоимост|${OPS_BEFORE}прайс|расценк|сколько платить|сколько это будет|во сколько обойдет|${OPS_BEFORE}оплат[аиуеы]${OPS_AFTER}|оплатить|заплатить|${OPS_BEFORE}платеж|скидк|предоплат|доплат)`);
+const OPS_DURATION = opsRx('(?:сколько (?:по )?времени|как долго|сколько (?:длит|занимает|идет|часов|недел|месяц)|за какой срок|срок обучен)');
+const OPS_VENDOR_ADDRESSED = opsRx(`(?:${OPS_BEFORE}у вас${OPS_AFTER}|${OPS_BEFORE}у тебя${OPS_AFTER}|${OPS_BEFORE}ваш[а-я]*${OPS_AFTER}|${OPS_BEFORE}вам${OPS_AFTER})`);
+// Названный чужой сервис снимает вопрос с нашей операционки: «сколько стоит
+// Claude Code» — учебная тема, а не наш прайс.
+const OPS_THIRD_PARTY = opsRx(`(?:chatgpt|chat ?gpt|джипити|${OPS_BEFORE}gpt${OPS_AFTER}|клод|claude|grok|грок|sora|midjourney|ollama|${OPS_BEFORE}make${OPS_AFTER}|мейк|мэйк|n8n|н8н|airtable|zapier|openai|антропик|anthropic|${OPS_BEFORE}api${OPS_AFTER}|paypal|github|гитхаб|reddit|сабреддит|perplexity|gemini|джемини|deepseek|яндекс|алис[аеу]|copilot|cursor|vercel|netlify|supabase|firebase|нейросет|локальн[а-я]* модел|витамин|двигател|масло|выложить (?:первый )?сайт)`);
+const OPS_CONTENT_INTENT = opsRx('(?:что такое|чем отличается|в чем разница|как работает|как устроен|объясни|расскажи про|зачем нужен|что лучше|как настроить|как сделать|как собрать|как написать|посоветуй|где (?:в курсе|в уроке|разбирается|показыв|рассказыв|скачивать|найти)|в каком (?:уроке|модуле|порядке)|как понять|почему)');
+const OPS_IN_COURSE = opsRx('(?:(?:^|[^а-я])(?:в|на) курсе|(?:^|[^а-я])в курс[а-я]*(?![а-я]))');
+const OPS_COURSE_MECHANICS = opsRx('(?:как (?:перейти|переходить|открыть|открывать)|следующ(?:ий|ему) урок|между урок|какие кнопки|куда нажать|куда нажимать|интерфейс|с чего начать|как проходить|как фиксируется прогресс|где чат|чат участник|сообществ|как пользоваться сайтом)');
+const OPS_COURSE_MECHANICS_BARE = opsRx('(?:как проходить курс|как (?:мне )?проходить(?: этот)? курс|переходить между урок|перейти между урок|не могу понять интерфейс|не понимаю интерфейс|как проходить обучение)');
+
+/**
+ * Разделяет вопрос об эксплуатации курса (деньги, доступ, аккаунт, подписка,
+ * документы, сбой платформы, просьба о человеке) и вопрос об учебном материале.
+ * Критерии взяты из проверенного в бою орг-реестра (7 тем), а не выдуманы;
+ * порог настроен по факту: восемь боевых операционных вопросов распознаются,
+ * на голд-сете из 190 содержательных — ноль ложных срабатываний.
+ * Это граница безопасности: неоднозначная фраза остаётся у маршрутизатора
+ * провайдера и не получает доступ к содержанию курса молча.
  */
 export function isCourseOperationsSupportQuestion(text) {
-  const normalized = String(text || '').toLowerCase().replace(/ё/g, 'е');
-  if (!normalized.includes('курс')) return false;
+  const normalized = String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
   // A requested order for studying named modules is a methodological/content
   // question, not a support request about operating the course interface.
   if (/в каком порядке.{0,80}(?:изуч|проход).{0,80}модул/u.test(normalized)) return false;
-  return /(?:как|где|не приходит|не могу|не работает|проблем).{0,80}(?:войти|вход|урок|уроки|модул|кнопк|переход|оплат|цен|чат|сообществ|старт|начат)/u.test(normalized)
-    || /(?:оплат|цен|доступ|логин|письм|аккаунт|кабинет|урок|модул|кнопк|переход).{0,80}(?:курс)/u.test(normalized)
-    || /(?:в|на) курсе.{0,80}(?:оплат|цен|доступ|логин|письм|аккаунт|кабинет|чат|сообществ|с чего начать)/u.test(normalized);
+
+  const ourBusiness = OPS_BILLING.test(normalized) || OPS_ACCOUNT.test(normalized)
+    || OPS_ACCESS.test(normalized) || OPS_HUMAN.test(normalized)
+    || OPS_CERTIFICATE.test(normalized) || OPS_POST_PURCHASE.test(normalized)
+    || OPS_PLATFORM_FAULT.test(normalized);
+  const mechanics = (OPS_IN_COURSE.test(normalized) && OPS_COURSE_MECHANICS.test(normalized))
+    || OPS_COURSE_MECHANICS_BARE.test(normalized);
+  const community = OPS_COMMUNITY.test(normalized);
+  const subscription = OPS_SUBSCRIPTION.test(normalized);
+  const money = OPS_PRICE.test(normalized);
+  const duration = OPS_DURATION.test(normalized) && OPS_VENDOR_ADDRESSED.test(normalized);
+
+  if (!ourBusiness && !mechanics && !community && !subscription && !money && !duration) return false;
+  if (OPS_THIRD_PARTY.test(normalized)) return false;
+  if (mechanics || ourBusiness) return true;
+  // Вопрос одновременно о цене и о содержании остаётся операционным по денежной
+  // части — это ровно та поломка, из-за которой оргвопрос уезжал в смежный урок.
+  if (money) return true;
+  // Ссылка на чат, материалы и рассылку лежит в самих материалах курса, поэтому
+  // такой вопрос отдаётся содержанию, кроме явной механики «в курсе где чат».
+  if (community) return OPS_IN_COURSE.test(normalized) && !OPS_CONTENT_INTENT.test(normalized);
+  if (OPS_CONTENT_INTENT.test(normalized)) return false;
+  return true;
+}
+
+// Пригодность вопрошающему лично: «подойдёт ли МНЕ», не «подойдёт ли GitHub» —
+// без себя-референции это содержательный вопрос об инструменте (голд-сет).
+const VALUE_SUITABILITY = opsRx(`(?:подойдет ли (?:мне|нам|для меня)|(?:мне|для меня) (?:это |такое |он |она )?подойдет|для меня ли|потяну ли|справлюсь ли|осилю ли|смогу ли я (?:освоить|пройти|потянуть|справиться|осилить)|мне \\d{2,3} (?:лет|год(?:а|ов)?)|в моем возрасте|не поздно ли (?:мне )?(?:начинать|учиться|осваивать))`);
+const VALUE_BENEFIT = opsRx('(?:зачем (?:это |оно |все это )?мне|что я (?:получу|буду уметь)|что (?:мне|это мне|мне это) (?:даст|дает)|что даст (?:мне|этот курс мне)|что (?:я )?получу на выходе|в чем (?:смысл|польза) (?:этого )?для меня|какая (?:мне|для меня) (?:от этого )?польза)');
+// Выбор курса и старт обучения. «Курсы», не «модули»: порядок модулей внутри
+// курса закреплён как содержательный вопрос, и сюда он попадать не должен.
+const VALUE_CHOICE = opsRx('(?:какой курс (?:мне |нам |лучше |из них )?(?:выбрать|подойдет|подходит|взять|брать|нужен)|с какого курса (?:мне |нам )?начать|в каком порядке (?:мне |нам )?(?:проходить|изучать|брать) (?:ваши )?курсы|с чего (?:мне |нам )?начать (?:обучение|учиться|учебу))');
+// Вера в волшебную пилюлю: «учиться некогда, но хочу понимать». Ловится сама
+// формула отказа от учёбы при желании контролировать — ядро value-диалога.
+const VALUE_NO_TIME = opsRx('(?:(?:мне |сам(?:ому|ой) |совсем |вообще )*некогда (?:мне )?учиться|учиться (?:мне |сам(?:ому|ой) |совсем |вообще )*некогда|нет времени (?:на )?(?:курс|обучение|учебу|учиться)|(?:нет|ноль) времени[^.!?]{0,25}(?:учит|курс|обучен)|не хочу (?:сам[аи]? )?(?:учиться|разбираться|проходить курс)[^.!?]{0,40}(?:но|а) (?:хочу|надо|нужно)|понимать[^.!?]{0,40}лучше (?:своих|моих)|лапшу не вешали|не вешали лапшу|не (?:вешал[аи]?|навешал[аи]?) (?:мне )?лапшу)');
+
+/**
+ * Третий домен: продукт и польза для роли. Отделяет вопрос о ПРИГОДНОСТИ И
+ * ПОЛЬЗЕ («зачем мне», «потяну ли», «какой курс выбрать», «некогда учиться, но
+ * хочу понимать») от учебного материала. Контракт порядка: операционный
+ * детектор сильнее (деньги/доступ/документы), поэтому маршрутизатор обязан
+ * спросить `isCourseOperationsSupportQuestion` первым; этот детектор — вторым;
+ * содержание — по умолчанию. Порог настроен по факту: на голд-сете из 190
+ * содержательных вопросов — ноль ложных срабатываний.
+ */
+export function isCourseValueQuestion(text) {
+  const normalized = String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  return VALUE_SUITABILITY.test(normalized) || VALUE_BENEFIT.test(normalized)
+    || VALUE_CHOICE.test(normalized) || VALUE_NO_TIME.test(normalized);
 }

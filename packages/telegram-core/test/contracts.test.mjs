@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -14,6 +14,7 @@ import {
   detectTelegramLink,
   incomingEventId,
   isCourseOperationsSupportQuestion,
+  isCourseValueQuestion,
   knowledgeManifestDigest,
   loadKnowledgeSnapshot,
   normalizeAssistantRoleRoute,
@@ -140,12 +141,120 @@ test('course operations and course content use disjoint closed routing packages'
     action: 'support', sourceId: 'course-operations-v1',
   });
   assert.equal(normalizeAssistantRoleRoute({ action: 'support', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT }), null);
+  // Третий домен замкнут так же жёстко: advise открывает только value-срез.
+  assert.deepEqual(normalizeAssistantRoleRoute({ action: 'advise', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE }), {
+    action: 'advise', sourceId: 'course-value-v1',
+  });
+  assert.equal(normalizeAssistantRoleRoute({ action: 'advise', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT }), null);
+  assert.equal(normalizeAssistantRoleRoute({ action: 'teach', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE }), null);
   assert.deepEqual(normalizeAssistantRoleRoute({ action: 'redirect', sourceId: null }), { action: 'redirect', sourceId: null });
   assert.equal(isCourseOperationsSupportQuestion('В курсе как перейти к следующему уроку?'), true);
   assert.equal(isCourseOperationsSupportQuestion('В курсе какая цена?'), true);
   assert.equal(isCourseOperationsSupportQuestion('В курсе где чат участников?'), true);
   assert.equal(isCourseOperationsSupportQuestion('В курсе с чего начать?'), true);
   assert.equal(isCourseOperationsSupportQuestion('В курсе в каком порядке изучать модули по агентам?'), false);
+});
+
+// Восемь боевых вопросов, на которых прежний детектор молчал: он требовал
+// буквального слова «курс», а операционный вопрос его почти никогда не содержит.
+const OPERATIONS_QUESTIONS = [
+  'есть у вас счёт для юрлица и акт потом. я через ООО плачу',
+  'а если пятерых послать это сколько по деньгам',
+  'у меня пропал доступ, что делать',
+  'деньги с Трибьют списали, а подписка заблокирована',
+  'переключите меня на живого агента поддержки',
+  'сколько стоит и какие тарифы',
+  'как поставить подписку на паузу',
+  'какой у вас курс это закрывает и сколько по времени займёт',
+];
+
+test('operations questions are recognised without the literal word "курс"', () => {
+  for (const question of OPERATIONS_QUESTIONS) {
+    assert.equal(isCourseOperationsSupportQuestion(question), true, question);
+  }
+});
+
+test('a methodological question about module order stays with course content', () => {
+  assert.equal(isCourseOperationsSupportQuestion('в каком порядке изучать модули'), false);
+  assert.equal(isCourseOperationsSupportQuestion('В каком порядке проходить модули по агентам?'), false);
+});
+
+test('teaching questions never reach the operations route', () => {
+  for (const question of [
+    'Что такое промптинг',
+    'как работает RAG',
+    'чем отличается агент от бота',
+    'Где в курсе разбирается RAG?',
+    // Названный чужой сервис: деньги в вопросе есть, но прайс не наш.
+    'скок стоит клод код и можно ли им пользоваться без подписки на антропик?',
+    'Я из России, как вообще зарегистрироваться в ChatGPT и оплатить подписку?',
+  ]) {
+    assert.equal(isCourseOperationsSupportQuestion(question), false, question);
+  }
+});
+
+// Вопросы третьего домена — пригодность, польза, выбор, «некогда учиться».
+// Формулировки взяты из живого диалога, а не выдуманы.
+const VALUE_QUESTIONS = [
+  'мне самой учиться некогда вообще ноль времени но я хочу понимать это лучше своих админов чтобы они мне лапшу не вешали',
+  'зачем это мне как руководителю',
+  'подойдёт ли мне ваш курс',
+  'потяну ли я в 67 лет',
+  'мне 67 лет, справлюсь ли',
+  'с чего мне начать обучение',
+  'какой курс выбрать для начала',
+  'что я получу на выходе',
+  'в каком порядке проходить курсы',
+];
+
+test('value questions about fit, benefit and course choice are recognised', () => {
+  for (const question of VALUE_QUESTIONS) {
+    assert.equal(isCourseValueQuestion(question), true, question);
+  }
+});
+
+// Контракт порядка доменов: операционный детектор сильнее. Ни один из восьми
+// боевых операционных вопросов не должен перехватываться value-детектором —
+// ни на уровне самого детектора, ни в эффективной маршрутизации (ops первым).
+test('the value detector never intercepts an operations question', () => {
+  for (const question of OPERATIONS_QUESTIONS) {
+    assert.equal(isCourseValueQuestion(question), false, question);
+    assert.equal(
+      isCourseValueQuestion(question) && !isCourseOperationsSupportQuestion(question),
+      false,
+      question,
+    );
+  }
+});
+
+test('a methodological question about module order stays out of the value domain too', () => {
+  assert.equal(isCourseValueQuestion('в каком порядке изучать модули'), false);
+  assert.equal(isCourseValueQuestion('В курсе в каком порядке изучать модули по агентам?'), false);
+  // Пригодность инструмента — не пригодность себе: это содержательный вопрос.
+  assert.equal(isCourseValueQuestion('подойдёт ли гит хаб для книги или статей, если я вообще не программист?'), false);
+});
+
+// Голд-сет — независимый источник истины: 190 заведомо содержательных вопросов.
+// Если файла нет, тест обязан сказать об этом вслух, а не позеленеть молча.
+test('the gold set of content questions produces zero false operations routings', (t) => {
+  const goldPath = process.env.AICHATTG_CONTENT_GOLD_PATH
+    || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-887b1966234e/gold/ai.gold.jsonl';
+  if (!existsSync(goldPath)) {
+    t.skip(`gold set is not available at ${goldPath}`);
+    return;
+  }
+  const questions = readFileSync(goldPath, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line).question)
+    .filter(Boolean);
+  assert.ok(questions.length >= 150, `gold set looks truncated: ${questions.length} questions`);
+  const falsePositives = questions.filter((question) => isCourseOperationsSupportQuestion(question));
+  assert.deepEqual(falsePositives, [], `content questions routed to operations: ${falsePositives.length}`);
+  // Тот же независимый замер для третьего домена: содержательный вопрос не
+  // имеет права уезжать в value-срез.
+  const valueFalsePositives = questions.filter((question) => isCourseValueQuestion(question));
+  assert.deepEqual(valueFalsePositives, [], `content questions routed to value: ${valueFalsePositives.length}`);
 });
 
 test('knowledge snapshots reject path escapes and accept only matching local digests', () => {

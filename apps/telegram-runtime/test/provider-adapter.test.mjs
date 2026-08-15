@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { admitKnowledgeSnapshot, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import {
+  answerSystemPrompt,
   createProviderAdapter,
   ProviderRequestError,
   ProviderUnavailableError,
@@ -358,4 +359,35 @@ test('an admitted snapshot carries its citation fields to the model but no local
     assert.equal(sent.includes('lesson.md'), false);
     assert.equal(sent.includes(manifest.entries[0].sha256), false);
   } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Решение владельца: условия формулирует сайт, а не бот. Операционный промпт
+// обязан требовать ссылку и запрещать цифру, иначе модель назовёт цену сама.
+test('the operations answer prompt forbids restating terms and demands the link', () => {
+  const operations = answerSystemPrompt({ knowledge: { sourceId: 'course-operations-v1', entries: [] } });
+  const content = answerSystemPrompt({ knowledge: { sourceId: 'course-content-v1', entries: [] } });
+  assert.notEqual(operations, content);
+  assert.match(operations, /never state, quote, estimate, recalculate or infer any price/u);
+  assert.match(operations, /tariff/u);
+  assert.match(operations, /refund window/u);
+  assert.match(operations, /canonicalUrl/u);
+  // Содержательный промпт остаётся прежним для всего, что не операционный источник.
+  assert.equal(answerSystemPrompt({ knowledge: { sourceId: 'course-knowledge-v2' } }), content);
+  assert.equal(answerSystemPrompt(null), content);
+});
+
+// Решение владельца: «понимать без учёбы» — вера в волшебную пилюлю. Value-промпт
+// обязан запрещать подтверждение этой посылки и требовать честную цену в усилиях.
+test('the value answer prompt refuses the magic-pill premise and demands the honest track', () => {
+  const value = answerSystemPrompt({ knowledge: { sourceId: 'course-value-v1', entries: [] } });
+  const content = answerSystemPrompt({ knowledge: { sourceId: 'course-content-v1', entries: [] } });
+  const operations = answerSystemPrompt({ knowledge: { sourceId: 'course-operations-v1', entries: [] } });
+  assert.notEqual(value, content);
+  assert.notEqual(value, operations);
+  assert.match(value, /Never validate the premise that learning is unnecessary/u);
+  assert.match(value, /"you do not need a course"/u);
+  assert.match(value, /does not exist without a minimal immersion/u);
+  assert.match(value, /minimal track with its real cost in effort/u);
+  assert.match(value, /name lessons by their title/u);
+  assert.match(value, /Do not invent prices, dates, discounts or promises of results/u);
 });

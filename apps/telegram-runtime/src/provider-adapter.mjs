@@ -25,10 +25,13 @@ const TUPLE_NAMES = Object.freeze({
 const ROUTER_SYSTEM_PROMPT = [
   'You route an AIchatTG Assistant question without granting access yourself.',
   'Return exactly one JSON object with action and sourceId. action is exactly one',
-  'of teach, navigate, support, redirect. teach and navigate require sourceId',
-  'course-content-v1. support requires sourceId course-operations-v1. redirect',
-  'requires sourceId null. Respect courseOperationsHint: an operations question',
-  'may only be support or redirect. Do not add Markdown.',
+  'of teach, navigate, support, advise, redirect. teach and navigate require',
+  'sourceId course-content-v1. support requires sourceId course-operations-v1.',
+  'advise requires sourceId course-value-v1 and covers personal fit, benefit and',
+  'course choice questions ("is this for me", "why do I need it", "which course',
+  'to pick"). redirect requires sourceId null. Respect courseOperationsHint: an',
+  'operations question may only be support or redirect. Respect courseValueHint:',
+  'a value question may only be advise or redirect. Do not add Markdown.',
 ].join(' ');
 
 const ANSWER_SYSTEM_PROMPT = [
@@ -39,6 +42,58 @@ const ANSWER_SYSTEM_PROMPT = [
   'exact canonicalUrl so the reader can open it; never alter such a URL and never',
   'state a link for an entry that has none. If the snapshot',
   'does not support an answer, say so briefly and ask for a more specific question.',
+].join(' ');
+
+// Тот же идентификатор, что в контракте источников telegram-core. Он объявлен
+// здесь строкой, потому что адаптер провайдера намеренно не зависит от ядра.
+const OPERATIONS_SOURCE_ID = 'course-operations-v1';
+
+/**
+ * Операционный ответ отличается от содержательного одним запретом: условия
+ * (цены, тарифы, размеры скидок, сроки возврата) формулирует сайт, а не бот — у
+ * сайта есть Terms, у бота нет. Поэтому промпт требует отдать ссылку и прямо
+ * запрещает называть цифру, даже если модель считает, что знает её.
+ */
+const OPERATIONS_ANSWER_SYSTEM_PROMPT = [
+  'You are the AIchatTG Assistant answering a course operations question',
+  '(payment, access, account, subscription, documents, platform faults, support).',
+  'Answer in the user\'s language using only the supplied admitted knowledge',
+  'snapshot and dialogue. Follow a supplied procedure text step by step.',
+  'You must never state, quote, estimate, recalculate or infer any price, tariff,',
+  'amount, discount size, percentage, refund window or other contractual term,',
+  'even if you believe you know it: the website states the terms, you do not.',
+  'For any such question give the referral exactly as the entry words it and cite',
+  'its canonicalUrl so the reader opens the page; never alter such a URL and never',
+  'state a link for an entry that has none. If the snapshot does not support an',
+  'answer, say so briefly and point to the support contact page.',
+].join(' ');
+
+// Тот же идентификатор, что в контракте источников telegram-core (см. выше про
+// намеренную независимость адаптера от ядра).
+const VALUE_SOURCE_ID = 'course-value-v1';
+
+/**
+ * Решение владельца: клиент, который «хочет понимать, но учиться некогда»,
+ * верит в волшебную пилюлю. Ответ обязан НЕ подтверждать посылку «учиться не
+ * надо», честно назвать цену в усилиях и предложить минимальный трек из среза —
+ * иначе бот продаёт иллюзию контроля вместо пользы.
+ */
+const VALUE_ANSWER_SYSTEM_PROMPT = [
+  'You are the AIchatTG Assistant answering a question about personal fit,',
+  'benefit or course choice ("is this for me", "why do I need it as a manager",',
+  '"I have no time to study but want to understand"). Answer in the user\'s',
+  'language using only the supplied admitted knowledge snapshot and dialogue.',
+  'Never validate the premise that learning is unnecessary: phrases like "you do',
+  'not need a course", "you will figure it out without studying" or "just',
+  'understanding is enough" are forbidden. State honestly that the ability to',
+  'tell real work from nonsense does not exist without a minimal immersion in',
+  'the subject. Offer the honest minimal track with its real cost in effort',
+  '(which modules, how much time) using only what the snapshot states, never an',
+  'invented estimate. Point the reader to course pages: when an entry carries a',
+  'canonicalUrl, cite it exactly and never alter it; name lessons by their title',
+  'without inventing links, and never state a link for an entry that has none.',
+  'Do not invent prices, dates, discounts or promises of results. If the',
+  'snapshot does not support an answer, say so briefly.',
 ].join(' ');
 
 export class ProviderUnavailableError extends Error {
@@ -217,7 +272,11 @@ function userInput(operation, payload) {
   if (!plainObject(payload)) return null;
   if (operation === 'assistantRouter') {
     const text = questionText(payload.text);
-    return text ? boundedJson({ question: text, courseOperationsHint: Boolean(payload.courseOperationsHint) }) : null;
+    return text ? boundedJson({
+      question: text,
+      courseOperationsHint: Boolean(payload.courseOperationsHint),
+      courseValueHint: Boolean(payload.courseValueHint),
+    }) : null;
   }
   const text = questionText(payload.text);
   if (!text || !plainObject(payload.route) || !Array.isArray(payload.dialogue) || !plainObject(payload.knowledge)) return null;
@@ -231,6 +290,17 @@ function userInput(operation, payload) {
   };
   if (!knowledge.sourceId || !knowledge.entries || knowledge.entries.length === 0 || knowledge.entries.length > 128) return null;
   return boundedJson({ question: text, route, dialogue, knowledge });
+}
+
+/**
+ * Промпт выбирается по источнику знания, а не по догадке о тексте вопроса:
+ * операционный снимок — единственное, что даёт право на операционный ответ.
+ */
+export function answerSystemPrompt(payload) {
+  const sourceId = plainObject(payload) && plainObject(payload.knowledge)
+    ? payload.knowledge.sourceId : null;
+  if (sourceId === OPERATIONS_SOURCE_ID) return OPERATIONS_ANSWER_SYSTEM_PROMPT;
+  return sourceId === VALUE_SOURCE_ID ? VALUE_ANSWER_SYSTEM_PROMPT : ANSWER_SYSTEM_PROMPT;
 }
 
 function requestFor({ tuple, system, input, maxOutputTokens, responseFormat }) {
@@ -314,7 +384,9 @@ export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {
     const input = userInput(operation, payload);
     if (!input) throw new ProviderRequestError('provider_request_invalid');
     const tuple = validated.config.modelTuples[operation];
-    const system = operation === 'assistantRouter' ? ROUTER_SYSTEM_PROMPT : ANSWER_SYSTEM_PROMPT;
+    const system = operation === 'assistantRouter'
+      ? ROUTER_SYSTEM_PROMPT
+      : answerSystemPrompt(payload);
     const raw = await callOnce({
       config: validated.config, fetchFn, operation, tuple, system, input,
       maxOutputTokens: tuple.maxOutputTokens, responseFormat: operation === 'assistantRouter',

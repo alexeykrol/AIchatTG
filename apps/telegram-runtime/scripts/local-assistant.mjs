@@ -34,6 +34,8 @@
  *     --package <dir с knowledge.manifest.json> --ask "Что такое промптинг?"
  *   … --dialogue вопросы.txt --out стенограмма.json
  *   … --live
+ *   … --org-slice <org_slice.json>   операционный домен (или AICHATTG_ORG_SLICE_PATH)
+ *   … --value-slice <value_slice.json>   домен пользы (или AICHATTG_VALUE_SLICE_PATH)
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,6 +47,8 @@ import {
 import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
 import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
 import { createKnowledgeRetrieval } from '../src/knowledge-retrieval.mjs';
+import { createOrgSliceKnowledge, withOrgSlice } from '../src/org-slice.mjs';
+import { createValueSliceKnowledge, withValueSlice } from '../src/value-slice.mjs';
 import { createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 
@@ -76,6 +80,8 @@ function parseArgs(argv) {
     if (key === '--ask') args.questions.push(String(value ?? ''));
     else if (key === '--dialogue') args.dialogue = value;
     else if (key === '--package') args.packageDir = value;
+    else if (key === '--org-slice') args.orgSlicePath = value;
+    else if (key === '--value-slice') args.valueSlicePath = value;
     else if (key === '--out') args.out = value;
     else if (key === '--max-entries') args.maxEntries = Number(value);
     else if (key === '--max-context-tokens') args.maxContextTokens = Number(value);
@@ -137,10 +143,14 @@ function createDryProvider({ captured }) {
     async moderate() {
       return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
     },
-    async routeAssistant({ courseOperationsHint }) {
-      return courseOperationsHint
-        ? { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS }
-        : { action: 'teach', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT };
+    async routeAssistant({ courseOperationsHint, courseValueHint }) {
+      if (courseOperationsHint) {
+        return { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS };
+      }
+      if (courseValueHint) {
+        return { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
+      }
+      return { action: 'teach', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT };
     },
     async answer(input) {
       const entries = input.knowledge?.entries || [];
@@ -318,6 +328,8 @@ function costOf(receipt) {
 export async function runLocalAssistant({
   questions,
   packageDir,
+  orgSlicePath = null,
+  valueSlicePath = null,
   mode = 'dry',
   maxEntries = DEFAULT_MAX_ENTRIES,
   maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
@@ -343,8 +355,14 @@ export async function runLocalAssistant({
   });
 
   // Настоящий допуск: манифест читается, sha256 каждого файла пересчитывается.
-  const knowledge = createKnowledgeAdapter(config.knowledge);
-  const contentRetrieval = createKnowledgeRetrieval(config.assistantRetrieval, { knowledge });
+  const baseKnowledge = createKnowledgeAdapter(config.knowledge);
+  // Каждый срез подменяет ровно свой источник (org — операционный, value —
+  // пользу); содержательный пакет и его ретривер остаются нетронутыми, и оба
+  // среза могут быть подключены одновременно.
+  const orgSlice = orgSlicePath ? createOrgSliceKnowledge(orgSlicePath) : null;
+  const valueSlice = valueSlicePath ? createValueSliceKnowledge(valueSlicePath) : null;
+  const knowledge = withValueSlice(withOrgSlice(baseKnowledge, orgSlice), valueSlice);
+  const contentRetrieval = createKnowledgeRetrieval(config.assistantRetrieval, { knowledge: baseKnowledge });
   const assistantTelegram = createRecordingTelegram();
   const runtime = createTelegramRuntime({
     config,
@@ -369,6 +387,22 @@ export async function runLocalAssistant({
       admitted: contentRetrieval.available === true,
       admissionReason: contentRetrieval.reason || null,
     },
+    org_slice: orgSlicePath
+      ? {
+        path: orgSlicePath,
+        admitted: orgSlice?.available === true,
+        admissionReason: orgSlice?.reason || null,
+        entries: orgSlice?.snapshot?.entries?.length ?? 0,
+      }
+      : null,
+    value_slice: valueSlicePath
+      ? {
+        path: valueSlicePath,
+        admitted: valueSlice?.available === true,
+        admissionReason: valueSlice?.reason || null,
+        entries: valueSlice?.snapshot?.entries?.length ?? 0,
+      }
+      : null,
     substitutions: [...LAB_SUBSTITUTIONS],
     turns: [],
   };
@@ -429,6 +463,16 @@ export async function runLocalAssistant({
 function printTranscript(transcript) {
   console.log(`пакет: ${transcript.package.packageName} (домен ${transcript.package.domainId})`);
   console.log(`допуск: ${transcript.package.admitted ? 'пройден (sha256 пересчитан)' : `ОТКАЗ — ${transcript.package.admissionReason}`}`);
+  if (transcript.org_slice) {
+    console.log(`орг-срез: ${transcript.org_slice.admitted
+      ? `подключён, записей ${transcript.org_slice.entries}`
+      : `ОТКАЗ — ${transcript.org_slice.admissionReason}`} (${transcript.org_slice.path})`);
+  }
+  if (transcript.value_slice) {
+    console.log(`value-срез: ${transcript.value_slice.admitted
+      ? `подключён, записей ${transcript.value_slice.entries}`
+      : `ОТКАЗ — ${transcript.value_slice.admissionReason}`} (${transcript.value_slice.path})`);
+  }
   console.log(`режим: ${transcript.mode}`);
   console.log(`подменено: ${transcript.substitutions.join(', ')}`);
   for (const turn of transcript.turns) {
@@ -473,6 +517,8 @@ async function main() {
 
   const transcript = await runLocalAssistant({
     questions, packageDir, mode: args.mode,
+    orgSlicePath: args.orgSlicePath || process.env.AICHATTG_ORG_SLICE_PATH || null,
+    valueSlicePath: args.valueSlicePath || process.env.AICHATTG_VALUE_SLICE_PATH || null,
     maxEntries: args.maxEntries, maxContextTokens: args.maxContextTokens,
   });
 

@@ -99,6 +99,40 @@ test('a course question retrieves a non-empty pack and an off-domain question ab
   assert.ok(offDomain.answer.includes('Не нашёл ответа в материалах курса'));
 });
 
+test('a value question routes to the value slice while operations and content stay untouched', {
+  skip: PACKAGE_DIR ? false : 'AICHATTG_KNOWLEDGE_PACKAGE_DIR is not set',
+}, async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-lab-value-'));
+  try {
+    const slicePath = join(folder, 'value_slice.json');
+    writeFileSync(slicePath, JSON.stringify({
+      schema: 'value_slice.v1',
+      fetched_at: '2026-08-14T00:00:00+00:00',
+      situations: [{
+        id: 'некогда-учиться-1', title: 'Некогда учиться, но хочу понимать', kind: 'value',
+        question_forms: ['мне некогда учиться, но я хочу понимать'],
+        answer_text: 'Способность отличать реальную работу от лапши не появляется без минимального погружения: честный минимальный трек — вводный модуль.',
+        links: ['https://alexeykrol.com/courses/'], source_file: 'value/некогда-учиться.md',
+      }],
+    }), 'utf8');
+    const transcript = await runLocalAssistant({
+      questions: ['мне самой учиться некогда вообще ноль времени но я хочу понимать это лучше своих админов чтобы они мне лапшу не вешали'],
+      packageDir: PACKAGE_DIR,
+      valueSlicePath: slicePath,
+    });
+    assert.equal(transcript.value_slice.admitted, true);
+    assert.equal(transcript.value_slice.entries, 1);
+    const [turn] = transcript.turns;
+    // Вопрос о пользе не молчит и не уезжает в уроки: он отвечен из value-среза.
+    assert.equal(turn.kind, 'answered');
+    assert.equal(turn.route, 'advise:course-value-v1');
+    assert.equal(turn.abstained, false);
+    assert.equal(turn.entries, 1);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test('dialogue memory carries earlier turns inside one session', {
   skip: PACKAGE_DIR ? false : 'AICHATTG_KNOWLEDGE_PACKAGE_DIR is not set',
 }, async () => {
