@@ -1,6 +1,7 @@
 import {
   ASSISTANT_SOURCE_PACKAGES,
   DOMAIN_OUT_OF_SCOPE,
+  DOMAIN_ROUTE_REASONS,
   createDomainRegistry,
   groundingFromPack,
   routeQuestionDomain,
@@ -105,7 +106,17 @@ export function createKnowledgeRetrieval(
   async function forQuestion({ question, sessionId = 'runtime', dialogueTail = null } = {}) {
     const decision = routeQuestionDomain(
       { question, claimedDomainId: pkg.domainId }, { registry });
-    if (!decision.accepted) {
+    // No-signal is the one refusal the search may overrule. The dictionary
+    // measures named concepts, and a gold-set run proved that a served, in-domain
+    // question can look exactly like a foreign one at this layer (9 of 23
+    // no-signal gold questions were answerable — dictionary blindness, not
+    // topic). So no-signal alone never abstains: the retriever looks anyway
+    // (local and free), and only when its own coverage gate also finds nothing
+    // do both layers agree on the out-of-coverage verdict. Every other refusal
+    // (unknown claim, empty registry, unreadable dictionary) stays terminal.
+    const noSignal = !decision.accepted
+      && decision.reason === DOMAIN_ROUTE_REASONS.NO_SIGNAL;
+    if (!decision.accepted && !noSignal) {
       return Object.freeze({
         grounded: false,
         reason: decision.reason,
@@ -116,12 +127,15 @@ export function createKnowledgeRetrieval(
       });
     }
 
-    const answer = rewriteEnabled === true
+    // The rewrite step may call a paid provider. A no-signal question has not
+    // yet earned one: its confirmation pass stays purely local, preserving the
+    // veto's original guarantee that no money is spent before a positive signal.
+    const answer = rewriteEnabled === true && !noSignal
       ? await retriever.forQuestionWithRewrite({
-        question, sessionId, domainId: decision.domainId, maxContextTokens, maxEntries, dialogueTail,
+        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail,
       })
       : retriever.forQuestion({
-        question, sessionId, domainId: decision.domainId, maxContextTokens, maxEntries, dialogueTail,
+        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail,
       });
 
     if (!answer.available || !answer.pack) {
@@ -129,12 +143,31 @@ export function createKnowledgeRetrieval(
     }
 
     const projected = groundingFromPack(answer.pack, { sourceId: pkg.sourceId, maxEntries });
+    // Both layers refused: the question names no domain concept AND the corpus
+    // holds nothing for it. That pair is the positive out-of-coverage verdict,
+    // surfaced as the domain reason so the reply layer can tell "topic not
+    // covered" apart from "hole inside a covered topic" (grounding_not_found).
+    if (noSignal && !projected.grounded) {
+      return Object.freeze({
+        grounded: false,
+        reason: DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+        knowledge: null,
+        pack: answer.pack,
+        domainId: DOMAIN_OUT_OF_SCOPE,
+        trace: Object.freeze({
+          domain: decision.reason,
+          evidence: decision.evidence,
+          status: answer.pack.status,
+          grounding: projected.trace,
+        }),
+      });
+    }
     return Object.freeze({
       grounded: projected.grounded,
       reason: projected.reason,
       knowledge: projected.knowledge,
       pack: answer.pack,
-      domainId: decision.domainId,
+      domainId: pkg.domainId,
       trace: Object.freeze({
         domain: decision.reason,
         status: answer.pack.status,

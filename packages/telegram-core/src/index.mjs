@@ -502,3 +502,19 @@ export function isCourseValueQuestion(text) {
     || VALUE_CHOICE.test(normalized) || VALUE_NO_TIME.test(normalized)
     || VALUE_DELEGATION.test(normalized);
 }
+
+// «Не хочу разбираться/вникать» без продолжения «но хочу» — VALUE_NO_TIME такое
+// не ловит намеренно (для маршрутизации нужна полная формула отказа+желания),
+// а для метки в журнале дефицитов достаточно самой посылки.
+const PILL_REFUSAL = opsRx('(?:не хочу (?:сам[аи]? |ничего |в это )?(?:учиться|разбираться|вникать)|без (?:учебы|обучения|курсов)[^.!?]{0,30}(?:хочу|можно|обойтись))');
+
+/**
+ * Узкий сигнал «пилюли» (некогда/не хочу учиться, но хочу результат) для метки
+ * Л3 в журнале дефицитов. Это НЕ маршрутизатор: value-детектор выше перехватит
+ * такие вопросы раньше; сюда доходят только непойманные формулировки.
+ */
+export function isNoTimeToLearnSignal(text) {
+  const normalized = String(text || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  return VALUE_NO_TIME.test(normalized) || PILL_REFUSAL.test(normalized);
+}

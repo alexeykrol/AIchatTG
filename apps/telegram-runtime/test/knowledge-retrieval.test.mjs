@@ -126,15 +126,31 @@ test('the domain is taken from the admitted package, never from the model', asyn
   assert.equal(retriever.asked[0].domainId, 'ai');
 });
 
-test('a question naming no concept of the domain is vetoed before any search', async () => {
-  const retriever = fakeRetriever();
+test('a question naming no concept is out of coverage only when the corpus also finds nothing', async () => {
+  const retriever = fakeRetriever({ status: 'not_found' });
   const layer = retrieval({}, { retriever });
   const refused = await layer.forQuestion({ question: 'как приготовить борщ' });
 
   assert.equal(refused.grounded, false);
   assert.equal(refused.reason, 'domain_no_signal');
   assert.equal(refused.domainId, 'out_of_scope');
-  assert.equal(retriever.asked.length, 0, 'the veto runs before the retriever, not after it');
+  // The dictionary's no-signal is a hypothesis, not a verdict: the search runs
+  // anyway (free and local) and only its agreeing refusal makes out-of-coverage.
+  assert.equal(retriever.asked.length, 1, 'the corpus is consulted before the verdict');
+  assert.equal(refused.trace.domain, 'domain_no_signal');
+  assert.equal(refused.trace.status, 'not_found');
+});
+
+test('a no-signal question the corpus can serve is answered, not refused', async () => {
+  // Dictionary blindness, measured on the gold set: an in-domain question can
+  // name zero dictionary concepts ("что такое репозиторий") and still retrieve.
+  const retriever = fakeRetriever();
+  const layer = retrieval({}, { retriever });
+  const served = await layer.forQuestion({ question: 'как приготовить борщ' });
+
+  assert.equal(served.grounded, true);
+  assert.equal(served.domainId, 'ai');
+  assert.equal(served.trace.domain, 'domain_no_signal');
 });
 
 test('an empty dictionary is a deployment defect, not an out-of-domain verdict', async () => {
@@ -145,6 +161,25 @@ test('an empty dictionary is a deployment defect, not an out-of-domain verdict',
   assert.equal(refused.grounded, false);
   assert.equal(refused.reason, 'domain_evidence_unavailable');
   assert.equal(retriever.asked.length, 0);
+});
+
+test('a no-signal confirmation pass stays local: the paid rewrite step is never invoked', async () => {
+  const retriever = fakeRetriever({ status: 'not_found' });
+  let rewriteCalls = 0;
+  const adapter = {
+    ...retriever.adapter,
+    forQuestionWithRewrite(input) { rewriteCalls += 1; return retriever.adapter.forQuestionWithRewrite(input); },
+  };
+  const layer = createKnowledgeRetrieval({ rewriteEnabled: true }, {
+    knowledge: admittedKnowledge(),
+    buildRetriever: () => adapter,
+  });
+  const refused = await layer.forQuestion({ question: 'как приготовить борщ' });
+  assert.equal(refused.reason, 'domain_no_signal');
+  assert.equal(rewriteCalls, 0, 'no money is spent before a positive domain signal');
+  // A question with a signal keeps the rewrite-enabled path.
+  await layer.forQuestion({ question: 'что такое ии-агент' });
+  assert.equal(rewriteCalls, 1);
 });
 
 test('a not_found pack is reported as an abstention, not as a failure', async () => {
@@ -262,7 +297,10 @@ async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300 }
     const reservation = db.prepare(
       'SELECT status FROM runtime_assistant_request_reservations WHERE event_id = ?',
     ).get(`assistant:${messageId + 1}`) || null;
-    return { result, actions, answers, reservation };
+    const deficits = db.prepare(
+      'SELECT question, reason, candidate_level FROM runtime_assistant_coverage_deficits ORDER BY created_at',
+    ).all();
+    return { result, actions, answers, reservation, deficits };
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 }
 
@@ -287,9 +325,12 @@ test('a course question reaches the model with retrieved entries carrying title 
   assert.equal(actions.at(-1)[0], 'send');
 });
 
-test('a question outside the domain is answered honestly and never reaches the answer model', async () => {
-  const layer = retrieval({}, { retriever: fakeRetriever() });
-  const { result, answers, actions, reservation } = await runOnce({
+test('a question outside the domain gets the out-of-coverage reply and a journal entry', async () => {
+  // Both layers refuse: no dictionary signal and an empty search. The fixture
+  // states the corpus verdict; a ready pack here would mean the corpus can
+  // serve the question and the runtime would answer it instead.
+  const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
+  const { result, answers, actions, reservation, deficits } = await runOnce({
     question: '/ask посоветуй рецепт борща',
     contentRetrieval: layer,
     messageId: 320,
@@ -300,15 +341,38 @@ test('a question outside the domain is answered honestly and never reaches the a
   assert.equal(result.reason, 'domain_no_signal');
   assert.equal(answers.length, 0, 'an ungrounded question costs no answer call');
   // Silence would read as a broken bot; the user gets a delivered, honest reply.
+  // "Переформулируйте" is deliberately absent: no rephrasing brings an
+  // uncovered topic into the corpus, so the reply points elsewhere instead.
   assert.equal(actions.at(-1)[0], 'send');
-  assert.match(actions.at(-1)[1].text, /Не нашёл ответа в материалах курса/);
+  assert.match(actions.at(-1)[1].text, /не уполномочен/);
+  assert.doesNotMatch(actions.at(-1)[1].text, /переформулировать/);
+  assert.match(result.route, /^boundary:out_of_coverage:/);
   // A delivered answer is what the quota pays for, so the reservation completes.
   assert.equal(reservation.status, 'completed');
+  // Every out-of-coverage answer is also a deficit signal for the lab.
+  assert.equal(deficits.length, 1);
+  assert.equal(deficits[0].question, 'посоветуй рецепт борща');
+  assert.equal(deficits[0].reason, 'domain_no_signal');
+  assert.equal(deficits[0].candidate_level, null);
+});
+
+test('an out-of-coverage business question is journaled with the L2 candidate label', async () => {
+  const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
+  const { result, deficits } = await runOnce({
+    question: '/ask как поднять продажи в моем салоне',
+    contentRetrieval: layer,
+    messageId: 330,
+  });
+
+  assert.equal(result.abstained, true);
+  assert.equal(deficits.length, 1);
+  // The label is a queue marker for the lab, never a routing decision.
+  assert.equal(deficits[0].candidate_level, 'L2');
 });
 
 test('a question the corpus cannot ground is abstained rather than answered from nothing', async () => {
   const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
-  const { result, answers, actions } = await runOnce({
+  const { result, answers, actions, deficits } = await runOnce({
     question: '/ask что такое ии-агент',
     contentRetrieval: layer,
     messageId: 340,
@@ -317,7 +381,11 @@ test('a question the corpus cannot ground is abstained rather than answered from
   assert.equal(result.abstained, true);
   assert.equal(result.reason, GROUNDING_REASONS.NOT_FOUND);
   assert.equal(answers.length, 0);
+  // A hole inside the domain keeps the rephrase advice and stays out of the
+  // deficits journal: the domain is covered, the corpus just missed here.
   assert.match(actions.at(-1)[1].text, /не буду угадывать/);
+  assert.match(result.route, /^boundary:not_in_materials:/);
+  assert.equal(deficits.length, 0);
 });
 
 test('an operations question keeps the v1 snapshot path and never touches the retriever', async () => {

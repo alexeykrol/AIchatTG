@@ -24,7 +24,9 @@ import {
   ASSISTANT_HELP_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
+  coverageDeficitCandidateLevel,
   isAbstentionReason,
+  isOutOfCoverageReason,
 } from './assistant-policy.mjs';
 
 function roleConfig(config, role) { return role === BOT_ROLES.MODERATOR ? config.moderator : config.assistant; }
@@ -962,6 +964,17 @@ export function createTelegramRuntime({
       // released, because a delivered answer is what the quota pays for.
       if (routing.abstain === true) {
         const abstention = assistantAbstentionReply(routing.reason);
+        // An uncovered topic is logged as a deficit before delivery: the signal
+        // is the question itself, and it stays valuable even if the send fails.
+        if (isOutOfCoverageReason(routing.reason)) {
+          store.recordCoverageDeficit({
+            chatId: question.chatId,
+            userId: question.userId,
+            question: question.text,
+            reason: routing.reason,
+            candidateLevel: coverageDeficitCandidateLevel(question.text),
+          });
+        }
         const delivered = await sendAssistantTurn(eventId, question, { text: abstention.text }, abstention.route);
         store.completeAssistantRequest(eventId);
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });

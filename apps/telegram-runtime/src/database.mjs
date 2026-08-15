@@ -208,6 +208,21 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_owner_pins (
   source_event_id TEXT NOT NULL REFERENCES runtime_inbound_events(event_id),
   remembered_at INTEGER NOT NULL
 );
+-- The coverage-deficits journal: every out-of-coverage abstention is a signal
+-- of interest and the queue for future domains. It accumulates passively; the
+-- lab reads it as an export file. candidate_level is a crude queue label
+-- ('L2' business gap, 'L3' worldview gap), never a routing decision.
+CREATE TABLE IF NOT EXISTS runtime_assistant_coverage_deficits (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  user_id TEXT,
+  question TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  candidate_level TEXT CHECK(candidate_level IN ('L2', 'L3')),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_coverage_deficits_time
+  ON runtime_assistant_coverage_deficits(created_at);
 `;
 
 const MIGRATION_RECEIPT_SCHEMA = `
@@ -480,6 +495,11 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     SET status = 'uncertain', completed_at = ? WHERE event_id = ? AND status = 'reserved'`);
   const releaseAssistantRequest = db.prepare(`DELETE FROM runtime_assistant_request_reservations
     WHERE event_id = ? AND status = 'reserved'`);
+  const insertCoverageDeficit = db.prepare(`INSERT INTO runtime_assistant_coverage_deficits
+    (id, chat_id, user_id, question, reason, candidate_level, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const listCoverageDeficitRows = db.prepare(`SELECT id, chat_id, user_id, question, reason, candidate_level, created_at
+    FROM runtime_assistant_coverage_deficits ORDER BY created_at DESC, id DESC LIMIT ?`);
   const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
   const deleteExpiredDialogues = db.prepare('DELETE FROM runtime_assistant_dialogues WHERE last_activity_at <= ?');
@@ -1040,6 +1060,30 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     },
     releaseAssistantRequest(eventId) {
       return { released: releaseAssistantRequest.run(String(eventId)).changes === 1 };
+    },
+    /**
+     * One row per out-of-coverage abstention. The journal is a passive sensor:
+     * writing never fails the answer path over a label, so an unknown
+     * candidate level degrades to null instead of throwing.
+     */
+    recordCoverageDeficit({ chatId, userId = null, question, reason, candidateLevel = null }) {
+      const level = ['L2', 'L3'].includes(String(candidateLevel)) ? String(candidateLevel) : null;
+      insertCoverageDeficit.run(
+        randomUUID(), String(chatId), userId == null || String(userId) === '' ? null : String(userId),
+        String(question), String(reason), level, now(),
+      );
+    },
+    listCoverageDeficits({ limit = 100 } = {}) {
+      const boundedLimit = Math.max(1, Math.min(10_000, Number.parseInt(limit, 10) || 100));
+      return listCoverageDeficitRows.all(boundedLimit).map((row) => ({
+        id: row.id,
+        chatId: row.chat_id,
+        userId: row.user_id,
+        question: row.question,
+        reason: row.reason,
+        candidateLevel: row.candidate_level,
+        createdAt: row.created_at,
+      }));
     },
     recentDialogue(chatId, userId, { limit = 3, ttlSeconds = 604_800 } = {}) {
       const at = now();

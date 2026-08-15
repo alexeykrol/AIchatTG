@@ -1,4 +1,4 @@
-import { DOMAIN_ROUTE_REASONS, GROUNDING_REASONS } from '@aichattg/telegram-core';
+import { DOMAIN_ROUTE_REASONS, GROUNDING_REASONS, isNoTimeToLearnSignal } from '@aichattg/telegram-core';
 
 const TOKEN_BOUNDARY = (words) => new RegExp(
   `(?:^|[^\\p{L}\\p{N}_])(?:${words})(?=$|[^\\p{L}\\p{N}_])`,
@@ -34,6 +34,21 @@ export const ASSISTANT_NOT_IN_MATERIALS_TEXT = [
   'Не нашёл ответа в материалах курса, поэтому не буду угадывать.',
   'Попробуйте переформулировать вопрос конкретнее — назвать термин, тему или урок,',
   'о котором идёт речь.',
+].join(' ');
+
+/**
+ * The second abstention, for a question outside the covered domain. It is
+ * deliberately different from the not-in-materials text: "переформулируйте"
+ * is honest advice for a hole inside the domain, but for an uncovered topic it
+ * sends the user into the same wall again (a live run proved it: three
+ * rephrasings, three identical refusals). This reply names the boundary warmly
+ * and points somewhere that can actually help.
+ */
+export const ASSISTANT_OUT_OF_COVERAGE_TEXT = [
+  'Хороший вопрос, но эта тема за пределами курса, и отвечать на неё я не уполномочен.',
+  'Такой вопрос лучше задать универсальному чату — ChatGPT или Claude — или профильному консультанту.',
+  'А со всем, что касается курса, помогу с радостью: материал уроков, организация обучения,',
+  'выбор курса и подойдёт ли он именно вам.',
 ].join(' ');
 
 export const ASSISTANT_PROFILE_TEXT = [
@@ -86,15 +101,60 @@ const ABSTENTION_REASONS = new Set([
   GROUNDING_REASONS.EMPTY,
 ]);
 
+/**
+ * Which abstentions mean "the topic is outside the covered domain" rather than
+ * "the domain has a hole here". Only the domain veto's no-signal verdict
+ * qualifies: the question names not a single concept of the domain dictionary,
+ * so no rephrasing can find material that is not there. `CLAIM_*` stay in the
+ * not-in-materials class: on the live path the claimed domain is derived from
+ * the package manifest and those codes signal a routing anomaly, not a fact
+ * about the question's topic.
+ */
+const OUT_OF_COVERAGE_REASONS = new Set([
+  DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+]);
+
 export function isAbstentionReason(reason) {
   return ABSTENTION_REASONS.has(String(reason || ''));
 }
 
+export function isOutOfCoverageReason(reason) {
+  return OUT_OF_COVERAGE_REASONS.has(String(reason || ''));
+}
+
 export function assistantAbstentionReply(reason) {
+  if (isOutOfCoverageReason(reason)) {
+    return {
+      route: `boundary:out_of_coverage:${String(reason)}`.slice(0, 120),
+      text: ASSISTANT_OUT_OF_COVERAGE_TEXT,
+    };
+  }
   return {
     route: `boundary:not_in_materials:${String(reason || 'unknown')}`.slice(0, 120),
     text: ASSISTANT_NOT_IN_MATERIALS_TEXT,
   };
+}
+
+// Грубые бизнес-маркеры для метки Л2 в журнале дефицитов. Это метка очереди
+// для лаборатории, не маршрутизация: ложное срабатывание стоит одну строку в
+// журнале, поэтому детектор сознательно широкий.
+const BUSINESS_MARKERS = TOKEN_BOUNDARY(
+  'бизнес\\p{L}*|монетизир\\p{L}*|клиент\\p{L}*|продаж\\p{L}*|прибыл\\p{L}*'
+  + '|стартап\\p{L}*|маркетинг\\p{L}*|выручк\\p{L}*|заработ\\p{L}*|доход\\p{L}*',
+);
+
+/**
+ * A crude, code-owned label for the deficits journal: which future domain this
+ * uncovered question is a candidate for. 'L2' — a business-model gap, 'L3' — a
+ * worldview gap (the magic-pill premise; the value detector usually intercepts
+ * these earlier, so this catches only formulations it missed), null — neither.
+ */
+export function coverageDeficitCandidateLevel(text) {
+  const value = String(text || '').toLowerCase().replace(/ё/g, 'е');
+  if (!value.trim()) return null;
+  if (BUSINESS_MARKERS.test(value)) return 'L2';
+  if (isNoTimeToLearnSignal(value)) return 'L3';
+  return null;
 }
 
 export function assistantDeterministicReply(text) {

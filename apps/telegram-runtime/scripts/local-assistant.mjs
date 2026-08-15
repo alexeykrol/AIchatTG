@@ -307,6 +307,19 @@ function routeLabel(route) {
   return sourceId ? `${action}:${sourceId}` : action;
 }
 
+/**
+ * Два разных вердикта воздержания — не одна метка: out_of_coverage (домен не
+ * покрыт, «переформулируйте» бесполезен) и not_in_materials (дыра внутри
+ * домена). Оценщик стенограммы должен видеть различие явно, а не выводить его
+ * из префикса маршрута.
+ */
+function abstentionVerdict(routeString) {
+  if (typeof routeString !== 'string') return null;
+  if (routeString.startsWith('boundary:out_of_coverage:')) return 'out_of_coverage';
+  if (routeString.startsWith('boundary:not_in_materials:')) return 'not_in_materials';
+  return null;
+}
+
 function costOf(receipt) {
   if (!receipt) return null;
   return {
@@ -405,6 +418,7 @@ export async function runLocalAssistant({
       : null,
     substitutions: [...LAB_SUBSTITUTIONS],
     turns: [],
+    coverage_deficits: [],
   };
 
   if (!contentRetrieval.available) {
@@ -433,13 +447,15 @@ export async function runLocalAssistant({
     const receipt = live ? live.receipts.slice(receiptsBefore).at(-1) || null : null;
     const entries = call?.entries || null;
 
+    const turnRoute = routeLabel(result.route ?? null);
     transcript.turns.push({
       n: index + 1,
       question,
       answer: sent.at(-1)?.text ?? null,
       kind: result.kind,
-      route: routeLabel(result.route ?? null),
+      route: turnRoute,
       abstained: result.abstained === true,
+      verdict: abstentionVerdict(turnRoute),
       reason: result.reason ?? null,
       entries: entries == null ? 0 : entries.length,
       // Сколько предыдущих ходов ушло в модель вместе с вопросом. Это
@@ -453,6 +469,10 @@ export async function runLocalAssistant({
       model: receipt?.modelId ?? null,
     });
   }
+
+  // Журнал дефицитов из tmp-БД прогона: рантайм записал его тем же кодом, что
+  // и бой, а стенограмма выносит его наружу, потому что сама БД сейчас умрёт.
+  transcript.coverage_deficits = store.listCoverageDeficits({ limit: 1_000 });
 
   contentRetrieval.close?.();
   database.close();
@@ -481,7 +501,7 @@ function printTranscript(transcript) {
     console.log(`вопрос:      ${turn.question}`);
     console.log(`исход:       ${turn.kind}${turn.reason ? ` (${turn.reason})` : ''}`);
     console.log(`маршрут:     ${turn.route ?? '—'}`);
-    console.log(`воздержание: ${turn.abstained ? 'ДА' : 'нет'}`);
+    console.log(`воздержание: ${turn.abstained ? `ДА (${turn.verdict ?? 'без вердикта'})` : 'нет'}`);
     console.log(`записей в модель: ${turn.entries}`);
     for (const unit of turn.units) {
       console.log(`  • ${unit.title ?? '(без заголовка)'}${unit.url ? ` — ${unit.url}` : ''}`);
@@ -491,6 +511,13 @@ function printTranscript(transcript) {
         + `токены ${turn.cost.inputTokens}/${turn.cost.outputTokens} (всего ${turn.cost.totalTokens})`);
     }
     console.log(`ответ:       ${turn.answer ?? '—'}`);
+  }
+  if (transcript.coverage_deficits.length) {
+    console.log('');
+    console.log(`журнал дефицитов (${transcript.coverage_deficits.length}):`);
+    for (const deficit of transcript.coverage_deficits) {
+      console.log(`  • [${deficit.candidateLevel ?? '—'}] ${deficit.question} (${deficit.reason})`);
+    }
   }
 }
 

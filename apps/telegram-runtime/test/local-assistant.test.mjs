@@ -88,15 +88,24 @@ test('a course question retrieves a non-empty pack and an off-domain question ab
   const [course, offDomain] = transcript.turns;
   // Вопрос по курсу: ретривер нашёл материал, воздержания нет, уроки названы.
   assert.equal(course.abstained, false);
+  assert.equal(course.verdict, null);
   assert.ok(course.entries > 0, 'вопрос по курсу должен дать непустой пак');
   assert.ok(course.units.length > 0, 'у найденного материала должны быть уроки');
   assert.equal(course.route, 'teach:course-content-v1');
 
-  // Вопрос вне домена: вето срабатывает до модели, ответ — честное воздержание.
+  // Вопрос вне покрытого домена: вето срабатывает до модели, ответ — тёплое
+  // «не уполномочен» вместо вредного «переформулируйте», и вопрос попадает в
+  // журнал дефицитов как сигнал интереса.
   assert.equal(offDomain.abstained, true);
   assert.equal(offDomain.entries, 0);
-  assert.match(offDomain.route, /^boundary:not_in_materials:/);
-  assert.ok(offDomain.answer.includes('Не нашёл ответа в материалах курса'));
+  assert.equal(offDomain.verdict, 'out_of_coverage');
+  assert.match(offDomain.route, /^boundary:out_of_coverage:/);
+  assert.ok(offDomain.answer.includes('не уполномочен'));
+  assert.ok(!offDomain.answer.includes('переформулировать'));
+
+  assert.equal(transcript.coverage_deficits.length, 1);
+  assert.equal(transcript.coverage_deficits[0].question, 'Как приготовить шашлык?');
+  assert.equal(transcript.coverage_deficits[0].candidateLevel, null);
 });
 
 test('a value question routes to the value slice while operations and content stay untouched', {
