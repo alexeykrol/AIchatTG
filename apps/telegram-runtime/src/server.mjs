@@ -2,6 +2,7 @@ import { loadRuntimeConfig } from './config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from './database.mjs';
 import { createProviderAdapter } from './provider-adapter.mjs';
 import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
+import { assertSlicesAdmitted, composeKnowledgeSlices } from './knowledge-slices.mjs';
 import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
 import { createRewriterAdapter } from './rewriter-adapter.mjs';
 import { createNotificationAdapter } from './notification-adapter.mjs';
@@ -27,13 +28,27 @@ const guard = createGuardAdapter({
     botIdFromToken(config.moderator.botToken),
   ].filter(Boolean),
 });
-const knowledge = createKnowledgeAdapter(config.knowledge);
+// Срезы подключаются поверх пакета уроков тем же порядком, что и на стенде:
+// в ответы уходит склеенное знание, а ретривер строится от БАЗОВОГО адаптера —
+// иначе поиск по урокам увидел бы записи срезов. Заданный, но не принятый срез
+// роняет старт (см. assertSlicesAdmitted): дефект конфигурации должен всплыть
+// здесь, а не молчаливой дырой в домене на живом вопросе.
+const composed = composeKnowledgeSlices(createKnowledgeAdapter(config.knowledge), {
+  orgSlicePath: config.knowledge.slices.orgPath,
+  valueSlicePath: config.knowledge.slices.valuePath,
+});
+for (const slice of composed.slices) {
+  // Только путь, флаг и код причины: содержимое среза в лог не попадает.
+  console.log(`[telegram-runtime] knowledge slice ${slice.name}: configured=${slice.configured}; admitted=${slice.admitted}; reason=${slice.reason || 'none'}; entries=${slice.entries}; path=${slice.path || 'none'}`);
+}
+assertSlicesAdmitted(composed.slices);
+const knowledge = composed.knowledge;
 // The content retriever is built only when explicitly enabled. When it is off
 // the assistant keeps its previous path exactly, so this cutover is a switch,
 // not a rewrite of a running deployment.
 const contentRetrieval = config.assistantRetrieval.enabled === true
   ? createKnowledgeRetrieval(config.assistantRetrieval, {
-    knowledge,
+    knowledge: composed.baseKnowledge,
     rewriteQuestion: config.assistantRetrieval.rewriteEnabled === true
       ? createRewriterAdapter({
         enabled: true,

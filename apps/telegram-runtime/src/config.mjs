@@ -82,6 +82,19 @@ function knowledgePackageAdmission(env, cwd, root, { sourceId, pathName, digestN
 }
 
 /**
+ * Путь к срезу знания (операционному или value). Пустая/отсутствующая
+ * переменная — законная конфигурация: срез просто не подключается, и сервер
+ * работает на одном пакете уроков, как до врезки. А вот заданный путь обязан
+ * лежать ПОД корнем знаний — тот же гард, что у манифестов: конфигурация не
+ * должна уметь показать загрузчику произвольный файл на хосте.
+ */
+function knowledgeSlicePath(env, cwd, root, name) {
+  const raw = String(env[name] || '').trim();
+  if (!raw) return null;
+  return pathWithin(root, resolve(cwd, raw), name);
+}
+
+/**
  * `syntheticBotIds` only survives when synthetic testing is explicitly enabled.
  * A list left behind in a production env file must not silently let a bot talk
  * to the Assistant, so the flag is checked here rather than at the call site.
@@ -180,6 +193,14 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
           digestName: 'TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256',
           defaultPath: 'data/knowledge/package/knowledge.manifest.json',
         }),
+      },
+      // Срезы подменяют ровно свой источник поверх пакета уроков: org —
+      // операционный (оплата, запись, доступ), value — пользу для роли. У них
+      // нет ни digest, ни манифеста: срез мал, читается целиком и проверяется
+      // собственной схемой при допуске, поэтому здесь только путь.
+      slices: {
+        orgPath: knowledgeSlicePath(env, cwd, knowledgeRoot, 'TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH'),
+        valuePath: knowledgeSlicePath(env, cwd, knowledgeRoot, 'TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH'),
       },
     },
     ingressEnabled,
