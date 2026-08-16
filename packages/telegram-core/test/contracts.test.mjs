@@ -364,6 +364,26 @@ test('a methodological question about module order stays out of the value domain
   assert.equal(isCourseValueQuestion('кто должен утверждать промпт в этой архитектуре'), false);
 });
 
+// Три формулировки из ПЕРВОГО боевого прогона журнала анализатора (тестовый чат,
+// 2026-08-16): модель уверенно ставила value, булев детектор молчал, и вопрос
+// уезжал в содержание. Здесь они закреплены дословно — вместе с соседями, на
+// которых детектор срабатывать не имеет права.
+test('value formulations found by the live analyzer journal now route to value', () => {
+  const found = [
+    'чем ваш курс отличается от бесплатных роликов на youtube?',
+    'у меня бизнес, я не программист. разве нельзя просто нанять человека и вообще не вникать?',
+    'я уже пробовал разобраться — там всё меняется каждый месяц. какой смысл это учить?',
+  ];
+  for (const question of found) {
+    assert.equal(isCourseValueQuestion(question), true, question);
+  }
+  // Соседи по словам, но содержательные по сути.
+  assert.equal(isCourseValueQuestion('чем поиск по своим документам отличается от дообучения модели?'), false);
+  assert.equal(isCourseValueQuestion('зачем изучать эмбеддинги, если есть полнотекстовый поиск'), false);
+  assert.equal(isCourseValueQuestion('кого нанять на позицию ml-инженера в маленькую команду'), false);
+  assert.equal(isCourseValueQuestion('в чем смысл разделения на чанки'), false);
+});
+
 // Голд-сет — независимый источник истины: 190 заведомо содержательных вопросов.
 // Если файла нет, тест обязан сказать об этом вслух, а не позеленеть молча.
 test('the gold set of content questions produces zero false operations routings', (t) => {
