@@ -944,12 +944,18 @@ export function createTelegramRuntime({
    * Ответ-воздержание («в материалах этого нет») сюда НЕ относится — это
    * настоящий ответ на настоящий вопрос, он остаётся в истории.
    */
-  async function sendAssistantTurn(eventId, question, answer, route = null, { persist = true } = {}) {
+  async function sendAssistantTurn(eventId, question, answer, route = null,
+    { persist = true, markup = false } = {}) {
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
+    // Разметка включается только там, где текст ПИСАЛА модель: её промпты
+    // требуют структуры, и без разбора читатель видел `**жирный**` буквально.
+    // Служебные и детерминированные ответы — код-owned плоский текст, им
+    // рендер не нужен и добавил бы класс ошибок на ровном месте.
     const transport = await assistantTelegram.sendMessage({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
+      markup,
     });
     const receipt = assistantDeliveryReceipt(transport);
     if (persist) {

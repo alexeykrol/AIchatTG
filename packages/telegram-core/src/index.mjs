@@ -17,6 +17,7 @@ export {
 
 export * from './domain.mjs';
 export * from './grounding.mjs';
+export * from './markup.mjs';
 export * from './retrieval.mjs';
 export * from './rewrite.mjs';
 export * from './schema.mjs';
