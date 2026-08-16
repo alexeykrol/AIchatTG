@@ -32,6 +32,33 @@ function csv(env, name) {
   return String(env[name] || '').split(',').map((value) => value.trim()).filter(Boolean);
 }
 
+const ANALYZER_MODES = new Set(['off', 'observe']);
+
+/**
+ * Анализатор запроса. Умолчание — `off`: выкат не меняет ни одного боевого
+ * чата, пока чат не назван явно.
+ *
+ * Пустой список чатов при включённом режиме — ошибка старта, а не «включить
+ * везде». Разница между «наблюдаем в тестовом чате» и «наблюдаем за всеми
+ * клиентами» слишком велика, чтобы возникать из забытой переменной.
+ */
+function analyzerConfig(env, cwd) {
+  const mode = String(env.TELEGRAM_RUNTIME_ANALYZER_MODE || 'off').trim().toLowerCase();
+  if (!ANALYZER_MODES.has(mode)) {
+    throw new Error(`TELEGRAM_RUNTIME_ANALYZER_MODE must be one of ${[...ANALYZER_MODES].join(', ')}`);
+  }
+  const chatIds = csv(env, 'TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS');
+  if (mode !== 'off' && chatIds.length === 0) {
+    throw new Error('TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS requires at least one chat when the analyzer is enabled');
+  }
+  const specPath = String(env.TELEGRAM_RUNTIME_ANALYZER_SPEC_PATH || '').trim();
+  return {
+    mode,
+    chatIds,
+    specPath: specPath ? resolve(cwd, specPath) : resolve(dirname(new URL(import.meta.url).pathname), 'analyzer-spec.json'),
+  };
+}
+
 function optionalSecret(env, name) {
   const value = String(env[name] || '');
   if (value && (value.length > 256 || !/^[A-Za-z0-9_-]+$/.test(value))) {
@@ -252,6 +279,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     assistantDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20, 10_000),
     assistantDialogueTtlSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TTL_SEC', 604_800, 31_536_000),
     assistantDialogueTurnLimit: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT', 3, { min: 1, max: 100 }),
+    analyzer: analyzerConfig(env, cwd),
     moderator,
     assistant,
     provider: provider.enabled ? validatedProvider.config : provider,

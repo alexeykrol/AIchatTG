@@ -228,6 +228,33 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_coverage_deficits (
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_assistant_coverage_deficits_time
   ON runtime_assistant_coverage_deficits(created_at);
+-- Журнал наблюдений анализатора. Отдельная таблица, а не квитанция хода:
+-- runtime_assistant_turns — ОГРАНИЧЕННАЯ память диалога (последние N ходов,
+-- TTL), её строки удаляются по ходу разговора. Замер, живущий в такой памяти,
+-- исчезал бы вместе с ней, и «данных нет» читалось бы как «ничего не
+-- происходило». Здесь строка живёт, пока её не убрали намеренно.
+CREATE TABLE IF NOT EXISTS runtime_assistant_analyzer_observations (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL UNIQUE,
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  question TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('ok', 'invalid', 'error')),
+  topics TEXT,
+  level TEXT,
+  level_confidence TEXT,
+  intent TEXT,
+  intent_confidence TEXT,
+  hints TEXT,
+  route_action TEXT,
+  route_source_id TEXT,
+  verdict_json TEXT,
+  model_id TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_analyzer_observations_time
+  ON runtime_assistant_analyzer_observations(created_at);
 `;
 
 const MIGRATION_RECEIPT_SCHEMA = `
@@ -509,6 +536,20 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
   const listCoverageDeficitRows = db.prepare(`SELECT id, chat_id, user_id, question, reason, candidate_level, created_at
     FROM runtime_assistant_coverage_deficits ORDER BY created_at DESC, id DESC LIMIT ?`);
+  // OR IGNORE — повтор события (перевыдача апдейта Telegram) не должен
+  // задваивать наблюдение: замер по журналу считает ходы, а не доставки.
+  const insertAnalyzerObservation = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_analyzer_observations
+    (id, event_id, chat_id, user_id, question, status, topics, level, level_confidence,
+     intent, intent_confidence, hints, route_action, route_source_id, verdict_json, model_id, error, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const listAnalyzerObservationRows = db.prepare(`SELECT id, event_id, chat_id, user_id, question, status,
+      topics, level, level_confidence, intent, intent_confidence, hints, route_action, route_source_id,
+      verdict_json, model_id, error, created_at
+    FROM runtime_assistant_analyzer_observations ORDER BY created_at DESC, id DESC LIMIT ?`);
+  const listUserAnalyzerLevelRows = db.prepare(`SELECT level, level_confidence, created_at
+    FROM runtime_assistant_analyzer_observations
+    WHERE chat_id = ? AND user_id = ? AND status = 'ok' AND created_at >= ?
+    ORDER BY created_at DESC LIMIT ?`);
   const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
   const deleteExpiredDialogues = db.prepare('DELETE FROM runtime_assistant_dialogues WHERE last_activity_at <= ?');
@@ -1100,6 +1141,63 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         candidateLevel: row.candidate_level,
         createdAt: row.created_at,
       }));
+    },
+    /**
+     * Наблюдение анализатора. Пишется на КАЖДОМ ходу, где анализатор включён, —
+     * и когда ответ дан, и когда рантайм воздержался, и когда сам анализатор
+     * сломался. Журнал только удачных ходов показывал бы систему лучше, чем она
+     * есть, а нужен обратный эффект.
+     */
+    recordAnalyzerObservation({
+      eventId, chatId, userId, question, status, verdict = null, hints = [],
+      route = null, modelId = null, error = null,
+    }) {
+      const level = verdict?.level || null;
+      const intent = verdict?.intent || null;
+      insertAnalyzerObservation.run(
+        randomUUID(), String(eventId), String(chatId), String(userId), String(question), String(status),
+        Array.isArray(verdict?.topics) ? verdict.topics.join(',') : null,
+        level?.hypothesis || null, level?.confidence || null,
+        intent?.kind || null, intent?.confidence || null,
+        Array.isArray(hints) && hints.length ? hints.join(',') : null,
+        route?.action || null, route?.sourceId || null,
+        verdict ? JSON.stringify(verdict) : null,
+        modelId == null ? null : String(modelId),
+        error == null ? null : String(error).slice(0, 500),
+        now(),
+      );
+    },
+    listAnalyzerObservations({ limit = 100 } = {}) {
+      const boundedLimit = Math.max(1, Math.min(10_000, Number.parseInt(limit, 10) || 100));
+      return listAnalyzerObservationRows.all(boundedLimit).map((row) => ({
+        id: row.id,
+        eventId: row.event_id,
+        chatId: row.chat_id,
+        userId: row.user_id,
+        question: row.question,
+        status: row.status,
+        topics: row.topics ? row.topics.split(',') : [],
+        level: row.level,
+        levelConfidence: row.level_confidence,
+        intent: row.intent,
+        intentConfidence: row.intent_confidence,
+        hints: row.hints ? row.hints.split(',') : [],
+        route: { action: row.route_action, sourceId: row.route_source_id },
+        // Полный вердикт с уликами: без цитаты диагноз нечем проверить, а
+        // непроверяемый диагноз — мнение, а не данные.
+        verdict: row.verdict_json ? JSON.parse(row.verdict_json) : null,
+        modelId: row.model_id,
+        error: row.error,
+        createdAt: row.created_at,
+      }));
+    },
+    /** Ходы одного человека для накопления уровня (траектория). */
+    recentAnalyzerLevels(chatId, userId, { limit = 20, ttlSeconds = 604_800 } = {}) {
+      const ttl = Math.max(0, Number.parseInt(ttlSeconds, 10) || 0);
+      const since = ttl > 0 ? now() - ttl : 0;
+      const boundedLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 20));
+      return listUserAnalyzerLevelRows.all(String(chatId), String(userId), since, boundedLimit)
+        .map((row) => ({ level: { hypothesis: row.level, confidence: row.level_confidence } }));
     },
     recentDialogue(chatId, userId, { limit = 3, ttlSeconds = 604_800 } = {}) {
       const at = now();

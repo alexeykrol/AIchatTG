@@ -13,6 +13,9 @@ const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_OUTPUT_TOKENS = 4_096;
 const MAX_INPUT_CHARS = 60_000;
+// Потолок вывода анализатора: вердикт с тремя цитатами не помещается в
+// роутерный лимит, а обрезанный JSON неотличим от плохого суждения.
+const ANALYZER_MIN_OUTPUT_TOKENS = 1_536;
 const MAX_TITLE_CHARS = 200;
 const MAX_URL_CHARS = 2_048;
 
@@ -458,10 +461,41 @@ export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {
     return parseStructuredResult(raw.text, raw.receipt);
   }
 
+  /**
+   * Вызов анализатора запроса. Системный промпт приходит снаружи, потому что
+   * он КОМПИЛИРУЕТСЯ из спецификации-данных (`analyzer-spec.mjs`), а не живёт
+   * константой: рукописный промпт анализатора разъехался бы со стендом на
+   * первой же правке оси.
+   *
+   * Своей тройки моделей у анализатора намеренно нет: он идёт по роутерной.
+   * Новая обязательная переменная окружения уронила бы старт работающего
+   * деплоя (валидация требует ВСЕ тройки), а это цена, которой не стоит
+   * телеметрия. Потолок вывода при этом свой: роутер отвечает парой полей, а
+   * вердикт с цитатами длиннее, и обрезанный ответ давал бы «невалидно» на
+   * каждом ходу — дефект, неотличимый от плохого суждения.
+   */
+  async function analyze(payload) {
+    const system = typeof payload?.system === 'string' ? payload.system : '';
+    const input = typeof payload?.input === 'string' ? payload.input : '';
+    if (!system || system.length > MAX_INPUT_CHARS || !input || input.length > MAX_INPUT_CHARS) {
+      throw new ProviderRequestError('provider_request_invalid');
+    }
+    const tuple = validated.config.modelTuples[TUPLE_NAMES.assistantRouter];
+    const maxOutputTokens = Math.min(
+      MAX_OUTPUT_TOKENS, Math.max(tuple.maxOutputTokens, ANALYZER_MIN_OUTPUT_TOKENS),
+    );
+    const raw = await callOnce({
+      config: validated.config, fetchFn, operation: 'assistantAnalyzer', tuple, system, input,
+      maxOutputTokens, responseFormat: true,
+    });
+    return { text: raw.text, modelId: raw.receipt.modelId, receipt: raw.receipt };
+  }
+
   return Object.freeze({
     moderate,
     routeAssistant: (payload) => invokeAssistant(TUPLE_NAMES.assistantRouter, payload),
     answer: (payload) => invokeAssistant(TUPLE_NAMES.assistantAnswer, payload),
+    analyze,
   });
 }
 

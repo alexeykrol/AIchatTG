@@ -11,6 +11,7 @@ import {
   isCourseOperationsSupportQuestion,
   isCourseValueQuestion,
   isDefinitiveDomainRouteReason,
+  isNoTimeToLearnSignal,
   normalizeAssistantDisposition,
   normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
@@ -37,6 +38,29 @@ import {
 } from './assistant-policy.mjs';
 
 function roleConfig(config, role) { return role === BOT_ROLES.MODERATOR ? config.moderator : config.assistant; }
+
+/**
+ * Детекторы кода, работающие ДО модели. Порядок доменов — контракт:
+ * операционный первый (деньги, доступ, документы сильнее), value — второй,
+ * содержание — по умолчанию. Приоритет вшит в сами подсказки, чтобы провайдер
+ * не мог его переиграть.
+ *
+ * Вынесено в функцию, потому что у подсказок появился второй потребитель:
+ * журнал анализатора. Считать их дважды было бы двумя источниками истины о
+ * маршруте одного хода.
+ *
+ * `pill` маршрут НЕ определяет: это узкий сигнал пилюльной посылки, он
+ * журналируется как улика и не даёт права никуда свернуть.
+ */
+function assistantQuestionHints(text) {
+  const operations = isCourseOperationsSupportQuestion(text);
+  const value = !operations && isCourseValueQuestion(text);
+  return { operations, value, pill: isNoTimeToLearnSignal(text) };
+}
+
+function firedHintNames(hints) {
+  return ['operations', 'value', 'pill'].filter((name) => hints?.[name] === true);
+}
 
 function storedDisposition(row) {
   if (!row) return null;
@@ -285,6 +309,9 @@ export function createTelegramRuntime({
   // deployment that has not admitted a package keeps the previous snapshot
   // behaviour instead of failing closed on a path it never enabled.
   contentRetrieval = null,
+  // Анализатор запроса. Отсутствует по умолчанию: деплой, который его не
+  // включал, обязан вести себя ровно как прежде — без вызова и без записи.
+  analyzer = null,
   wait = sleep,
   // Test-only crash injection. Production bootstrap never supplies hooks.
   testHooks = null,
@@ -843,12 +870,8 @@ export function createTelegramRuntime({
     return runModeratorJudgement(claimed.claim);
   }
 
-  async function routeAssistantQuestion(question) {
-    // Порядок доменов — контракт: операционный детектор первый (деньги, доступ,
-    // документы сильнее), value — второй, содержание — по умолчанию. Приоритет
-    // вшит в сами подсказки, чтобы провайдер не мог его переиграть.
-    const courseOperationsHint = isCourseOperationsSupportQuestion(question.text);
-    const courseValueHint = !courseOperationsHint && isCourseValueQuestion(question.text);
+  async function routeAssistantQuestion(question, hints = assistantQuestionHints(question.text)) {
+    const { operations: courseOperationsHint, value: courseValueHint } = hints;
     let route;
     try {
       route = normalizeAssistantRoleRoute(await modelProvider.routeAssistant({
@@ -984,6 +1007,54 @@ export function createTelegramRuntime({
     return sendAssistantTurn(eventId, question, { text }, route, { persist: false });
   }
 
+  /**
+   * Наблюдение анализатора: один дешёвый вызов и строка в журнал. Поведение
+   * ассистента не меняется — ни ответ, ни маршрут, ни квота.
+   *
+   * Всё внутри обёрнуто: анализатор — надстройка, и его дефект не имеет права
+   * стоить человеку ответа. Провал тоже журналируется: молчащий журнал читался
+   * бы как «анализатор работает», а это противоположный вывод.
+   */
+  async function observeAssistantQuestion({ eventId, question, hints, routing }) {
+    if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return null;
+    const route = routing?.route || null;
+    try {
+      const previousTexts = store.recentDialogue(question.chatId, question.userId, {
+        limit: config.assistantDialogueTurnLimit,
+        ttlSeconds: config.assistantDialogueTtlSec,
+      }).map((turn) => turn.question);
+      const observation = await analyzer.analyze({ text: question.text, previousTexts });
+      store.recordAnalyzerObservation({
+        eventId,
+        chatId: question.chatId,
+        userId: question.userId,
+        question: question.text,
+        status: observation.status,
+        verdict: observation.status === 'ok' ? observation.verdict : null,
+        hints: firedHintNames(hints),
+        route,
+        modelId: observation.modelId || null,
+        error: observation.status === 'ok' ? null : (observation.error || observation.code || null),
+      });
+      return observation;
+    } catch (error) {
+      console.error(`[runtime] analyzer observation failed event=${eventId} ${runtimeErrorSummary(error)}`);
+      try {
+        store.recordAnalyzerObservation({
+          eventId,
+          chatId: question.chatId,
+          userId: question.userId,
+          question: question.text,
+          status: 'error',
+          hints: firedHintNames(hints),
+          route,
+          error: String(error?.code || error?.message || 'analyzer_failed'),
+        });
+      } catch { /* журнал не важнее ответа: молча идём дальше */ }
+      return null;
+    }
+  }
+
   async function handleAssistant(eventId, question) {
     const moderation = await waitForAssistantDisposition(store, config, question, wait);
     if (moderation.status !== 'allowed') {
@@ -1036,7 +1107,13 @@ export function createTelegramRuntime({
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return result;
       }
-      const routing = await routeAssistantQuestion(question);
+      const hints = assistantQuestionHints(question.text);
+      const routing = await routeAssistantQuestion(question, hints);
+      // Наблюдение анализатора идёт ПОСЛЕ маршрутизации и до ответа: в одной
+      // строке журнала должны стоять и диагноз, и маршрут, иначе сверять их
+      // потом будет не с чем. Режим observe ничего не меняет в ответе — он
+      // только смотрит; сбой анализатора не отменяет ответ человеку.
+      await observeAssistantQuestion({ eventId, question, hints, routing });
       if (routing.error) {
         if (isDefinitiveAssistantRoutingExit(routing.error)) store.releaseAssistantRequest(eventId);
         else store.markAssistantRequestUncertain(eventId);

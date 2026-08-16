@@ -4,6 +4,8 @@ import { createProviderAdapter } from './provider-adapter.mjs';
 import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
 import { assertSlicesAdmitted, composeKnowledgeSlices } from './knowledge-slices.mjs';
 import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
+import { createAnalyzerAdapter } from './analyzer-adapter.mjs';
+import { loadAnalyzerSpec } from './analyzer-spec.mjs';
 import { createRewriterAdapter } from './rewriter-adapter.mjs';
 import { createNotificationAdapter } from './notification-adapter.mjs';
 import { createTelegramAdapter } from './telegram-adapter.mjs';
@@ -63,12 +65,31 @@ const contentRetrieval = config.assistantRetrieval.enabled === true
 if (contentRetrieval && !contentRetrieval.available) {
   console.error(`[telegram-runtime] content retrieval unavailable: ${contentRetrieval.reason}`);
 }
+// Анализатор запроса. Спецификация — данные выката: её дайджест печатается в
+// лог, потому что тот же файл живёт в лаборатории, и расхождение стенда с боем
+// обязано быть видимым, а не обнаруживаться по странным цифрам замера.
+const provider = createProviderAdapter(config.provider);
+const analyzerSpec = config.analyzer.mode === 'off'
+  ? { valid: false, code: 'analyzer_disabled', spec: null, digest: null }
+  : loadAnalyzerSpec(config.analyzer.specPath);
+if (config.analyzer.mode !== 'off' && !analyzerSpec.valid) {
+  // Включённый, но нерабочий анализатор — дефект конфигурации, а не режим
+  // работы: он должен всплыть при старте, а не тишиной в журнале наблюдений.
+  throw new Error(`analyzer spec unavailable: ${analyzerSpec.code} (${config.analyzer.specPath})`);
+}
+const analyzer = createAnalyzerAdapter({
+  config: config.analyzer, provider, spec: analyzerSpec.spec, digest: analyzerSpec.digest,
+});
+console.log(`[telegram-runtime] analyzer mode=${analyzer.mode}; enabled=${analyzer.enabled}; `
+  + `reason=${analyzer.reason || 'none'}; chats=${config.analyzer.chatIds.length}; `
+  + `spec=${analyzerSpec.digest ? analyzerSpec.digest.slice(0, 12) : 'none'}`);
 const runtime = createTelegramRuntime({
   config,
   store: createRuntimeStore(database),
-  provider: createProviderAdapter(config.provider),
+  provider,
   knowledge,
   contentRetrieval,
+  analyzer,
   moderatorTelegram,
   guard,
   assistantTelegram: createTelegramAdapter(config.assistant),
