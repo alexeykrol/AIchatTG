@@ -9,7 +9,7 @@ policy; they differ in their Telegram credentials, permissions, and actions.
 | Role | Primary responsibility | Must not own |
 |---|---|---|
 | Moderator | Moderation decisions and enforcement | User teaching or onboarding copy |
-| Assistant | Public support and, later, approved knowledge navigation | Ban/delete authority |
+| Assistant | Public support and approved knowledge navigation (live since 2026-08-15) | Ban/delete authority |
 | Gatekeeper | Eligibility, onboarding, access handoff | Free-form assistant conversation |
 
 ## Target components
@@ -37,8 +37,11 @@ AIchatTG runs on the existing VPS as distinct services. Traefik may route the
 three bot endpoints and the optional read-only host-root operator console to it; the
 News Digest service remains separately built and deployed. A release must build
 from one AIchatTG commit and preserve its own runtime state. It must not rebuild
-`news-digest`. Course/index content is not part of this extraction and remains
-disabled until a new reviewed snapshot is built.
+`news-digest`. Course knowledge is not built here: the `allcourses` laboratory
+produces a content-addressed package and two slices, and this runtime admits
+them read-only by signed manifest. That path went live on 2026-08-15; a
+configured slice that fails admission stops the process at start-up rather than
+serving a silently empty domain.
 
 ## Deliberate non-goals
 

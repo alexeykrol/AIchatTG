@@ -8,17 +8,26 @@
 входа — отдельные действия под лизом контроллера, см.
 [TELEGRAM_RUNTIME_CUTOVER.md](TELEGRAM_RUNTIME_CUTOVER.md).
 
+> **Статус на 2026-08-16 (сверено с прод-контейнером).** Знание **включено в
+> бою** с 2026-08-15, образ `8579023`: пакет `ai-140310bf9472`, оба среза
+> приняты (`org entries=36`, `value entries=17`), отпечатки прод-файлов
+> побайтно совпадают с эталонами лаборатории. `KNOWLEDGE_ENABLED=true`,
+> `RETRIEVAL_ENABLED=true`, `REWRITE_ENABLED=false`. Значения путей ниже —
+> фактические: корень знания в контейнере `/var/lib/aichattg/knowledge`, на
+> хосте `/home/agent/aichattg/knowledge`. Каждая новая раскладка знания меняется
+> только по слову владельца.
+
 ---
 
 ## 1. Пакет знания
 
 Пакет собирает лаборатория (`allcourses`), рантайм его только принимает.
-Текущий: **`ai-887b1966234e`**, 65 МБ.
+Текущий (боевой с 2026-08-15): **`ai-140310bf9472`**, 65 МБ.
 
 Содержимое (5 файлов под подписью + манифест допуска):
 
 ```
-ai-887b1966234e/
+ai-140310bf9472/
   ai.db                       65 МБ, SQLite: чанки, FTS5, словарь концептов, юниты
   knowledge.manifest.json     манифест допуска (формат v2) — НЕ входит в подпись
   package-manifest.json       манифест сборки лаборатории
@@ -29,7 +38,7 @@ ai-887b1966234e/
 Положить целиком под корень знаний, сохраняя структуру:
 
 ```
-/srv/aichattg/knowledge/ai/
+/var/lib/aichattg/knowledge/ai/
 ```
 
 Права: рантайм читает пакет только на чтение. Манифест обязан лежать **под**
@@ -51,11 +60,11 @@ ai-887b1966234e/
 ### Обязательные
 
 ```
-TELEGRAM_RUNTIME_KNOWLEDGE_ROOT=/srv/aichattg/knowledge
+TELEGRAM_RUNTIME_KNOWLEDGE_ROOT=/var/lib/aichattg/knowledge
 TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED=true
 TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_ENABLED=true
-TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH=/srv/aichattg/knowledge/ai/knowledge.manifest.json
-TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256=887b1966234e6dad63bf6237a152cedf561e4263109ad44b15a198771833b60e
+TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH=/var/lib/aichattg/knowledge/ai/knowledge.manifest.json
+TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256=140310bf94723ede01dad54dec3fef542944ed21bca67403de53b6fcb4ea0031
 ```
 
 Digest берётся из `knowledge.manifest.json` (поле `packageDigest`) и **меняется
@@ -94,8 +103,8 @@ TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ENABLED=false
 домена были невидимы.
 
 ```
-TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH=/srv/aichattg/knowledge/org/org_slice.json
-TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH=/srv/aichattg/knowledge/value/value_slice.json
+TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH=/var/lib/aichattg/knowledge/org_slice.json
+TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH=/var/lib/aichattg/knowledge/value_slice.json
 ```
 
 | Срез | Источник | Отвечает на |
@@ -124,8 +133,8 @@ TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH=/srv/aichattg/knowledge/value/value_
 Проверка после перезапуска — по логу старта, а не по поведению бота:
 
 ```
-[telegram-runtime] knowledge slice org: configured=true; admitted=true; reason=none; entries=42; path=/srv/…/org_slice.json
-[telegram-runtime] knowledge slice value: configured=true; admitted=true; reason=none; entries=18; path=/srv/…/value_slice.json
+[telegram-runtime] knowledge slice org: configured=true; admitted=true; reason=none; entries=36; path=/var/lib/aichattg/knowledge/org_slice.json
+[telegram-runtime] knowledge slice value: configured=true; admitted=true; reason=none; entries=17; path=/var/lib/aichattg/knowledge/value_slice.json
 ```
 
 `configured=false` — переменная не задана. `admitted=false` при
@@ -139,7 +148,7 @@ TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH=/srv/aichattg/knowledge/value/value_
 Знание включается **до** боевого входа, чтобы дефект конфигурации всплыл на
 запуске процесса, а не на первом живом вопросе.
 
-1. Разложить пакет в `/srv/aichattg/knowledge/ai/`.
+1. Разложить пакет в `/var/lib/aichattg/knowledge/ai/` (на хосте — `/home/agent/aichattg/knowledge/ai/`; каталог монтируется в контейнер по этому пути).
 2. Прописать переменные знания, вход оставить выключенным.
 3. Перезапустить рантайм. Процесс либо стартует, либо падает с внятной ошибкой:
    неверный digest, манифест вне корня, битый файл.

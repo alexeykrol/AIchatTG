@@ -23,13 +23,28 @@ The current migration is documented in
 been ported with an isolated persistence boundary and a host-portable container
 contract. Moderator and Assistant are now ported into their own runtime with a
 safety disposition barrier, fenced inbound receipts, bounded per-user dialogue
-state and code-owned public fallback replies. Course knowledge is deliberately
-disabled and unimported until a separately reviewed snapshot is admitted.
+state and code-owned public fallback replies.
 The separate Compose release defines independent images, data roots and routes
 at `aikrol.questtales.com`. Moderator, Assistant and the operator console have
-completed their application cutover. Gatekeeper activation, a newly built
-course index, approved knowledge content, and any historical state import remain
-separate reviewed stages.
+completed their application cutover.
+
+**Course knowledge is live since 2026-08-15** (image `8579023`): the reviewed
+`ai-140310bf9472` package plus the `org` and `value` slices are admitted, and
+`TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED` / `..._RETRIEVAL_ENABLED` are
+`true` in production. Enablement, layout and rollback are documented in
+[docs/ASSISTANT_KNOWLEDGE_ENABLEMENT.md](docs/ASSISTANT_KNOWLEDGE_ENABLEMENT.md).
+Question rewriting before retrieval (`..._RETRIEVAL_REWRITE_ENABLED`) stays off.
+Gatekeeper activation and any historical state import remain separate reviewed
+stages.
+
+## Known open defects
+
+- **Telegram markup is not rendered.** `telegram-adapter.mjs` sends no
+  `parse_mode`, so `**bold**` and `###` reach the reader literally while the
+  answer prompts still produce Markdown. Gatekeeper sends `parse_mode: 'HTML'`;
+  the assistant does not. The fix (enable markup with a plain-text fallback on
+  Telegram's refusal, or forbid markup in the prompts) is an owner decision and
+  is deliberately not applied yet.
 
 ## Local checks
 
@@ -58,5 +73,5 @@ docs/
 ```
 
 Gatekeeper, Moderator and Assistant each have an AIchatTG-owned code and data
-boundary. Course knowledge is intentionally disabled until a new index is
-built and accepted; it is never read from News.
+boundary. Course knowledge is built by the `allcourses` laboratory, admitted
+here by signed manifest, and never read from News.
