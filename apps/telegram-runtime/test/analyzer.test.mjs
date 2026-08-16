@@ -460,7 +460,9 @@ withRuntime('a human still waits for the moderator even with synthetic testing o
   assert.equal(result.reason, 'moderator_unavailable');
 });
 
-// Выключенный режим синтетического тестирования не оставляет лазейки.
+// Выключенный режим не оставляет лазейки: конфиг не даёт списку синтетиков пережить
+// выключённый флаг (config.mjs бросает на *_SYNTHETIC_BOT_IDS без флага), поэтому
+// «выключено» — это именно пустой список, и бот отсекается на классификации.
 withRuntime('with synthetic testing off the bypass does not exist', async ({ store }) => {
   const actions = [];
   const runtime = createTelegramRuntime({
