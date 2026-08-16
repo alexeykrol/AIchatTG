@@ -15,6 +15,7 @@ import {
   incomingEventId,
   isCourseOperationsSupportQuestion,
   isCourseValueQuestion,
+  isNoTimeToLearnSignal,
   knowledgeManifestDigest,
   loadKnowledgeSnapshot,
   normalizeAssistantRoleRoute,
@@ -313,6 +314,36 @@ test('the value detector never intercepts an operations question', () => {
       question,
     );
   }
+});
+
+// Четыре формулировки, найденные диалоговым голдом лаборатории (dlg-10 n4,
+// dlg-11 n4, dlg-13 n2, dlg-13 n3). До этой правки детектор их пропускал, и
+// вопросы уезжали в содержание: выбор курса для сотрудника, цена освоения во
+// времени и две формы пилюли — суррогат вместо практики и контроль без
+// погружения. Последняя — ядро value-домена: это формула Марины в общем виде.
+test('the value detector catches the formulations found by the dialogue gold', () => {
+  const cases = [
+    'понял. а какой курс им вообще подойдет, они у меня админы и с техникой на вы',
+    'а долго это вообще осваивать? у меня салон, я не могу на месяц выпасть',
+    'а можно как-то покороче, чтобы понимать суть но не сидеть над заданиями?',
+    'у меня подрядчики этим занимаются, мне бы просто их проверять уметь',
+  ];
+  for (const question of cases) {
+    assert.equal(isCourseValueQuestion(question), true, question);
+  }
+  // Две из них — пилюля, и это должно быть видно метке уровня в журнале.
+  assert.equal(isNoTimeToLearnSignal('а можно как-то покороче, чтобы понимать суть но не сидеть над заданиями?'), true);
+  assert.equal(isNoTimeToLearnSignal('у меня подрядчики этим занимаются, мне бы просто их проверять уметь'), true);
+});
+
+// Границы новых групп. Каждая строка — соседний по словам, но ДРУГОЙ по сути
+// вопрос: инструмент проверяет вместо человека; обучение модели вместо
+// обучения человека; краткость подачи без отказа от работы.
+test('the new value groups do not swallow neighbouring content questions', () => {
+  assert.equal(isCourseValueQuestion('как сделать чтобы бот их проверял'), false);
+  assert.equal(isCourseValueQuestion('сколько времени занимает обучение модели на своих данных'), false);
+  assert.equal(isCourseValueQuestion('какой курс валют брать для конвертации в примере'), false);
+  assert.equal(isNoTimeToLearnSignal('как проверять качество ответов агента'), false);
 });
 
 test('a methodological question about module order stays out of the value domain too', () => {
