@@ -293,6 +293,32 @@ async function waitForAssistantDisposition(store, config, question, wait) {
   }
 }
 
+/**
+ * Модерация хода ассистента. Обычный отправитель ждёт вердикта модератора —
+ * контракт «ассистент не отвечает на непромодерированное» держится.
+ *
+ * Синтетик — единственное исключение, и оно вынужденное, а не удобное.
+ * ЗАМЕР (2026-08-16, четыре пробы в тестовом чате): модератор НЕ получает от
+ * Telegram ни одного сообщения бота-синтетика — ни команды, ни обычного
+ * текста, — тогда как ассистент получает все. Оба бота администраторы, у обоих
+ * privacy включён, вебхуки настроены одинаково; разницу задаёт Telegram, и
+ * снаружи она не управляется. Значит вердикта по синтетику не может
+ * существовать в принципе: ждать его — это не «строже», это выключить
+ * синтетическую полосу целиком при полностью написанной функции.
+ *
+ * Обход требует ВСЕХ трёх условий сразу: включён режим синтетического
+ * тестирования, отправитель — бот, и этот бот назван в списке синтетиков.
+ * Живой человек не может попасть под него ни при какой конфигурации.
+ * Результат хода всегда несёт `moderation.reason`, поэтому обойдённая
+ * модерация видна в журнале, а не подразумевается.
+ */
+async function assistantModeration(store, config, question, wait) {
+  if (config.syntheticTestingEnabled === true && question.isSyntheticSender === true) {
+    return { status: 'allowed', verdict: null, reason: 'synthetic_sender_unmoderated' };
+  }
+  return waitForAssistantDisposition(store, config, question, wait);
+}
+
 export function createTelegramRuntime({
   config,
   store,
@@ -1056,7 +1082,7 @@ export function createTelegramRuntime({
   }
 
   async function handleAssistant(eventId, question) {
-    const moderation = await waitForAssistantDisposition(store, config, question, wait);
+    const moderation = await assistantModeration(store, config, question, wait);
     if (moderation.status !== 'allowed') {
       return {
         kind: 'skipped',
@@ -1188,7 +1214,10 @@ export function createTelegramRuntime({
       const result = await sendAssistantTurn(eventId, question, answer, routing.route, { markup: true });
       store.completeAssistantRequest(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
-      return result;
+      // Обойдённая модерация обязана быть видна в квитанции хода, а не
+      // подразумеваться из конфигурации: иначе журнал не отличает ответ
+      // человеку от ответа синтетику.
+      return moderation.reason ? { ...result, moderation: { reason: moderation.reason } } : result;
     } catch (error) {
       store.markAssistantRequestUncertain(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'error' });

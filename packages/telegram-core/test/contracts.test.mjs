@@ -140,6 +140,14 @@ test('a named synthetic bot reaches the Assistant while stronger bot barriers st
   const answered = classify({ update: fromBot(77), syntheticBotIds: ['77'] });
   assert.equal(answered.kind, 'question');
   assert.equal(answered.question.text, 'question');
+  // Синтетичность едет отдельным полем: рантайм принимает по нему решение о
+  // модерации и не вправе вычислять этот факт заново.
+  assert.equal(answered.question.isSyntheticSender, true);
+  const human = classify({
+    update: { update_id: 12, message: message('/ask question', { from: { id: 5, first_name: 'Человек', is_bot: false } }) },
+    syntheticBotIds: ['77'],
+  });
+  assert.equal(human.question.isSyntheticSender, false, 'живой человек синтетиком не становится');
   assert.equal(classify({ update: fromBot(78), syntheticBotIds: ['77'] }).reason, 'bot_sender');
   assert.equal(classify({ update: fromBot(77), syntheticBotIds: [], botId: null }).reason, 'bot_sender');
   // own_bot and exempt_bot are evaluated first and are not overridable.

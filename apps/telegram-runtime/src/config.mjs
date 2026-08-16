@@ -280,6 +280,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     assistantDialogueTtlSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TTL_SEC', 604_800, 31_536_000),
     assistantDialogueTurnLimit: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT', 3, { min: 1, max: 100 }),
     analyzer: analyzerConfig(env, cwd),
+    syntheticTestingEnabled,
     moderator,
     assistant,
     provider: provider.enabled ? validatedProvider.config : provider,

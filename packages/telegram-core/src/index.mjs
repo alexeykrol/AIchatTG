@@ -275,8 +275,8 @@ export function classifyTelegramUpdate({
     if (botId != null && String(message.from?.id) === String(botId)) {
       return { kind: 'skip', reason: 'own_bot' };
     }
-    const isSyntheticSender = message.from?.is_bot
-      && new Set(syntheticBotIds.map(String)).has(String(message.from.id));
+    const isSyntheticSender = Boolean(message.from?.is_bot
+      && new Set(syntheticBotIds.map(String)).has(String(message.from.id)));
     if (message.from?.is_bot && !isSyntheticSender) return { kind: 'skip', reason: 'bot_sender' };
     const question = detectAssistantQuestion(message, botUsername);
     if (!question.isQuestion) return { kind: 'skip', reason: 'not_assistant_command' };
@@ -288,6 +288,10 @@ export function classifyTelegramUpdate({
         username: message.from?.username || null,
         command: question.isHelpCommand ? 'help' : question.isRetiredCommand ? 'retired' : 'ask',
         text: question.text,
+        // Синтетичность отправителя доезжает до рантайма явным полем, а не
+        // пересчитывается там заново: два независимых вычисления одного факта
+        // рано или поздно разойдутся, и разойдутся молча.
+        isSyntheticSender,
       },
     };
   }

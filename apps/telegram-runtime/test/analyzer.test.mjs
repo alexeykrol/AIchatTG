@@ -414,3 +414,67 @@ test('the analyzer call reuses the router tuple but raises the output ceiling', 
   await assert.rejects(() => provider.analyze({ system: '', input: 'x' }), /provider_request_invalid/);
   await assert.rejects(() => provider.analyze({ system: 'x', input: '' }), /provider_request_invalid/);
 });
+
+// ── Синтетическая полоса ────────────────────────────────────────────────────
+
+// Замер в тестовом чате: модератор не получает от Telegram НИ ОДНОГО сообщения
+// бота-синтетика (четыре пробы, команда и обычный текст), тогда как ассистент
+// получает все. Вердикта по синтетику существовать не может, поэтому ожидание
+// его выключало бы полосу целиком. Обход требует всех трёх условий сразу.
+function syntheticUpdate(updateId) {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId, chat: { id: -100 },
+      from: { id: 8994494918, first_name: 'Synthetic', is_bot: true },
+      text: '/ask что такое агент?',
+    },
+  };
+}
+
+function syntheticConfig(overrides = {}) {
+  const base = config(overrides);
+  return { ...base, assistant: { ...base.assistant, syntheticBotIds: ['8994494918'] } };
+}
+
+withRuntime('a synthetic sender is answered without a moderation verdict that cannot exist', async ({ store }) => {
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: syntheticConfig({ syntheticTestingEnabled: true }),
+    store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const result = await runtime.handleUpdate('assistant', syntheticUpdate(500));
+  assert.equal(result.kind, 'answered', JSON.stringify(result));
+  assert.equal(result.moderation.reason, 'synthetic_sender_unmoderated', 'обход виден в квитанции хода');
+});
+
+// Живой человек под обход не попадает ни при какой конфигурации: он не бот.
+withRuntime('a human still waits for the moderator even with synthetic testing on', async ({ store }) => {
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config({ syntheticTestingEnabled: true, assistantModerationWaitMs: 0 }),
+    store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const result = await runtime.handleUpdate('assistant', update(501, 501, '/ask что такое агент?'));
+  assert.equal(result.kind, 'skipped');
+  assert.equal(result.reason, 'moderator_unavailable');
+});
+
+// Выключенный режим синтетического тестирования не оставляет лазейки.
+withRuntime('with synthetic testing off the bypass does not exist', async ({ store }) => {
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config({ syntheticTestingEnabled: false, assistantModerationWaitMs: 0 }),
+    store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const result = await runtime.handleUpdate('assistant', {
+    update_id: 502,
+    message: {
+      message_id: 502, chat: { id: -100 },
+      from: { id: 8994494918, first_name: 'Synthetic', is_bot: true },
+      text: '/ask что такое агент?',
+    },
+  });
+  assert.equal(result.kind, 'skipped');
+  assert.equal(result.reason, 'bot_sender');
+});
