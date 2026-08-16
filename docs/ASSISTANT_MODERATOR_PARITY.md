@@ -8,7 +8,7 @@ Its imported behavior is grounded in two immutable, read-only News objects:
 | Source layer | Role in this port | Relationship |
 |---|---|---|
 | `a729ccd` | Deployed Moderator, Assistant command and safety disposition behavior | Production source of truth |
-| `ef1c6ea` | Accepted course-operations/help routing behavior | Ported policy/route layer; course content remains disabled until a new snapshot is admitted |
+| `ef1c6ea` | Accepted course-operations/help routing behavior | Ported policy/route layer; course content was disabled at port time and has been admitted since 2026-08-15 (see CHANGELOG 0.3.0) |
 
 No News file, runtime import, path, database, configuration value or secret is
 used by AIchatTG.

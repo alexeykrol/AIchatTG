@@ -2,6 +2,19 @@
 
 Updated: 2026-08-04 22:19 PDT. Public hostname: `aikrol.questtales.com`.
 
+> **Статус-пометка 2026-08-16.** Таблица ниже описывает организацию работы на
+> 2026-08-04 (четыре исполнителя Codex в изолированных worktree) и с тех пор не
+> обновлялась. Считать её **исторической**, пока владелец не подтвердит
+> исполнителей заново. Что изменилось по факту и проверено:
+> - **Knowledge Base:** «course knowledge remains disabled and unimported»
+>   больше не верно — знание допущено и работает в бою с 2026-08-15
+>   (пакет `ai-140310bf9472`, срезы `org`/`value`, образ `8579023`).
+> - **Тесты:** актуальный агрегат `npm test` — 407 (403 pass / 4 skipped /
+>   0 fail) под Node 20.20, а не 70/70 и 4/4 из строк ниже.
+> - **Assistant:** «course knowledge … remain gated» снято тем же выкатом.
+> Текущее состояние домена ведётся в `allcourses/.claude/SNAPSHOT.md` и
+> `CHANGELOG.md` этого репозитория.
+
 | Module | Classification | Current executor | Charter / isolated worktree | Controller / result recipient | Current state |
 |---|---|---|---|---|---|
 | Assistant | user-visible-workstream | `Ассистент — Исполнитель` (`019fd023-a940-7cf2-864a-75b20fd842ef`) | `2026-08-04-2114-assistant-executor-charter.md`; `codex/aichattg-assistant-executor-v1`; `.codex/worktrees/0f48/AIchatTG` | permanent integrator `019fd019-af89-7b50-a16d-8c7928753f24` | ready; charter and former-News provenance accepted; clean, runtime tests 70/70 passed; course knowledge and optional historical import remain gated |
