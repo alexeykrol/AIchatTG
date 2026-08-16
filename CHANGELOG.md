@@ -7,10 +7,9 @@ semantic versioning for repository-level architecture releases.
 
 ### Fixed
 
-- **Markup reached the reader raw.** The answer prompts require structure
-  (headings, lists, emphasis), the delivery adapter sent the text with no
-  `parse_mode`, and every live reader since the roll-out saw `**жирный**` and
-  `###` literally. Answers are now rendered to Telegram HTML
+- **Markup reached the reader raw.** The model answers in Markdown by default,
+  the delivery adapter sent the text with no `parse_mode`, and every live
+  reader since the roll-out saw `**жирный**` and `###` literally. Answers are now rendered to Telegram HTML
   (`packages/telegram-core/src/markup.mjs`) at the single call site where the
   text was written by the model; deterministic and service replies stay
   code-owned plain text.
@@ -81,10 +80,10 @@ semantic versioning for repository-level architecture releases.
   every later answer fail with `provider_request_invalid`, and left the event
   stuck in `processing` with empty logs (`a4b0549`).
 
-### Known
+### Known at the time of this release
 
-- Telegram markup is not rendered: the runtime sends no `parse_mode`, so
-  `**bold**` and `###` reach readers literally. Fix pending an owner decision.
+- Telegram markup was not rendered: the runtime sent no `parse_mode`, so
+  `**bold**` and `###` reached readers literally. Closed the next day in 0.3.1.
 
 ## [0.2.0] — 2026-08-04
 

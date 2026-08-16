@@ -34,6 +34,21 @@ const ROUTER_SYSTEM_PROMPT = [
   'a value question may only be advise or redirect. Do not add Markdown.',
 ].join(' ');
 
+/**
+ * Форма ответа, а не содержание. Модель и раньше отвечала markdown'ом — просто
+ * никто ей этого не говорил, и набор конструкций был как повезёт. Доставка
+ * рендерит ограниченный набор (см. `telegram-core/src/markup.mjs`), поэтому
+ * список разрешённых форм назван явно: таблица или HTML доехали бы до читателя
+ * мусором. Правило описывает ТОЛЬКО оформление и ничего не говорит о том, что
+ * отвечать, — иначе оно стало бы политикой ответа через чёрный ход.
+ */
+const ANSWER_FORMAT_RULES = [
+  'Format the answer in plain Markdown limited to: short bold headings, bold or',
+  'italic emphasis, single-level bullet or numbered lists, and links written as',
+  'a bare URL or [text](https://...). Do not use tables, HTML, nested lists,',
+  'block quotes or footnotes: the chat cannot render them.',
+].join(' ');
+
 const ANSWER_SYSTEM_PROMPT = [
   'You are the AIchatTG Assistant. Answer the supplied question in the user\'s',
   'language using only the supplied admitted knowledge snapshot and dialogue.',
@@ -42,6 +57,7 @@ const ANSWER_SYSTEM_PROMPT = [
   'exact canonicalUrl so the reader can open it; never alter such a URL and never',
   'state a link for an entry that has none. If the snapshot',
   'does not support an answer, say so briefly and ask for a more specific question.',
+  ANSWER_FORMAT_RULES,
 ].join(' ');
 
 // Тот же идентификатор, что в контракте источников telegram-core. Он объявлен
@@ -66,6 +82,7 @@ const OPERATIONS_ANSWER_SYSTEM_PROMPT = [
   'its canonicalUrl so the reader opens the page; never alter such a URL and never',
   'state a link for an entry that has none. If the snapshot does not support an',
   'answer, say so briefly and point to the support contact page.',
+  ANSWER_FORMAT_RULES,
 ].join(' ');
 
 // Тот же идентификатор, что в контракте источников telegram-core (см. выше про
@@ -119,6 +136,7 @@ const VALUE_ANSWER_SYSTEM_PROMPT = [
   'without inventing links, and never state a link for an entry that has none.',
   'Do not invent prices, dates, discounts or promises of results. If the',
   'snapshot does not support an answer, say so briefly.',
+  ANSWER_FORMAT_RULES,
 ].join(' ');
 
 export class ProviderUnavailableError extends Error {
