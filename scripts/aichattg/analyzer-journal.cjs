@@ -67,19 +67,49 @@ console.log(`хинты:     ${tally(rows.flatMap((row) => (row.hints || '').spl
 console.log(`маршрут:   ${tally(rows.map((row) => row.route_action))}`);
 
 // Расхождение хинта и модели — самое ценное место журнала: там либо детектор
-// слеп, либо суждение мимо. Печатается отдельно, чтобы не искать глазами.
+// слеп, либо суждение мимо. Сравнение СИММЕТРИЧНО: односторонняя проверка
+// (только «хинт сработал, а модель не согласна») не видит именно тот случай,
+// ради которого журнал и заведён, — молчащий детектор при уверенной модели.
+// `pill` из сравнения исключён: это не тема, а признак класса ответа.
+const TOPIC_HINTS = new Set(['operations', 'value']);
+function hintTopics(row) {
+  return (row.hints || '').split(',').filter((h) => TOPIC_HINTS.has(h));
+}
+function modelTopics(row) {
+  return (row.topics || '').split(',').filter((t) => TOPIC_HINTS.has(t));
+}
 const disagreements = ok.filter((row) => {
-  const hints = (row.hints || '').split(',').filter(Boolean);
-  const topics = (row.topics || '').split(',').filter(Boolean);
-  return hints.some((hint) => hint !== 'pill' && topics[0] !== hint);
+  const hints = new Set(hintTopics(row));
+  const topics = new Set(modelTopics(row));
+  return [...hints].some((h) => !topics.has(h)) || [...topics].some((t) => !hints.has(t));
 });
 console.log(`\nрасхождений хинт↔модель: ${disagreements.length}`);
+for (const row of disagreements) {
+  const side = hintTopics(row).length ? '' : ' (детектор молчит)';
+  console.log(`  · хинты:[${hintTopics(row).join(',') || '—'}] ↔ модель:[${modelTopics(row).join(',')}]${side}`
+    + ` — ${String(row.question).slice(0, 70)}`);
+}
 
 // Недоказанная улика: модель сослалась на цитату, которой в ходе нет.
 const invented = ok.filter((row) => {
   try { return (JSON.parse(row.verdict_json || '{}').quotesUnverified || []).length > 0; } catch { return false; }
 });
 console.log(`вердиктов с недоказанной уликой: ${invented.length}`);
+// `quotesUnverified` держит ИМЕНА полей, а не сами цитаты, поэтому печатаем и то и
+// другое: без текста цитаты непонятно, выдумала модель улику или оборвала её.
+for (const row of invented) {
+  let verdict = {};
+  try { verdict = JSON.parse(row.verdict_json || '{}'); } catch { verdict = {}; }
+  const quoteOf = {
+    topics: verdict.topicsEvidence,
+    level: verdict.level?.evidence,
+    intent: verdict.intent?.evidence,
+  };
+  console.log(`  · ${String(row.question).slice(0, 60)}`);
+  for (const field of verdict.quotesUnverified || []) {
+    console.log(`      ${field}: «${String(quoteOf[field] ?? '').slice(0, 110)}» — дословно в ходе не найдено`);
+  }
+}
 
 console.log('\n— ходы (свежие сверху) —');
 for (const row of rows) {
