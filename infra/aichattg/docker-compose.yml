@@ -112,6 +112,13 @@ services:
       # старт — «включить везде» не должно возникать из забытой переменной.
       TELEGRAM_RUNTIME_ANALYZER_MODE: "${TELEGRAM_RUNTIME_ANALYZER_MODE:-off}"
       TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: "${TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS:-}"
+      # Синтетический пользователь. Переменные существовали в конфиге и в
+      # шаблоне окружения, но в compose их не было — то есть контейнер их НИКОГДА
+      # не видел, и функция была недостижима в бою при полностью рабочем коде.
+      # Дефект нашёлся ровно так, как и должен: попыткой ею воспользоваться.
+      TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED: "${TELEGRAM_RUNTIME_SYNTHETIC_TESTING_ENABLED:-false}"
+      TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_BOT_IDS: "${TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_BOT_IDS:-}"
+      TELEGRAM_RUNTIME_MODERATOR_SYNTHETIC_BOT_IDS: "${TELEGRAM_RUNTIME_MODERATOR_SYNTHETIC_BOT_IDS:-}"
       TELEGRAM_RUNTIME_KNOWLEDGE_ROOT: /var/lib/aichattg/knowledge
       TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH: "${TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_PATH:-/var/lib/aichattg/knowledge/course-content.manifest.json}"
       TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_SHA256: "${TELEGRAM_RUNTIME_KNOWLEDGE_CONTENT_MANIFEST_SHA256:-}"
