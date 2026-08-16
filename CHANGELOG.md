@@ -3,6 +3,37 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [0.3.1] — 2026-08-16 — The answer is delivered as it was written
+
+### Fixed
+
+- **Markup reached the reader raw.** The answer prompts require structure
+  (headings, lists, emphasis), the delivery adapter sent the text with no
+  `parse_mode`, and every live reader since the roll-out saw `**жирный**` and
+  `###` literally. Answers are now rendered to Telegram HTML
+  (`packages/telegram-core/src/markup.mjs`) at the single call site where the
+  text was written by the model; deterministic and service replies stay
+  code-owned plain text.
+- **A long answer was not truncated — it was never delivered.** Telegram rejects
+  an over-limit message whole, and the 2048-token answer ceiling exceeds that
+  limit in Russian. Answers are now split before sending, on paragraph → line →
+  word boundaries; only the first part replies to the question, and its id is
+  the receipt.
+
+### Added
+
+- A single plain-text resend on a markup parse refusal, and only on that
+  refusal: at a 400 the message is provably undelivered, so the resend cannot
+  duplicate an answer. Every other failure stays non-retryable.
+- A journal line for every degraded delivery (`markup_stripped`, `partial`), so
+  a stripped or truncated answer can no longer look flawless in the record.
+- HTML escaping ahead of any tag we emit, `https`-only anchors, and a
+  private-use sentinel for extracted code blocks that the answer text cannot
+  forge — the "a stray character killed the message" class is unreachable
+  rather than unlikely.
+- 21 tests covering the renderer and the delivery adapter (repository total
+  428: 424 passing, 4 skipped).
+
 ## [0.3.0] — 2026-08-15 — Assistant course knowledge live
 
 ### Added

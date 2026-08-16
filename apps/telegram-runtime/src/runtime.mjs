@@ -957,6 +957,15 @@ export function createTelegramRuntime({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
       markup,
     });
+    // Деградация доставки не отменяет квитанцию: ответ дошёл, просто не целиком
+    // или без оформления, а повтор целого ответа задвоил бы уже доставленное.
+    // Но она обязана быть видна в журнале — иначе усечённый ответ выглядит
+    // безупречным.
+    if (transport?.degraded || transport?.partial) {
+      console.error(`[runtime] assistant delivery degraded event=${eventId} `
+        + `mode=${transport.partial ? 'partial' : String(transport.degraded)} `
+        + `error=${String(transport.error || '').slice(0, 120)}`);
+    }
     const receipt = assistantDeliveryReceipt(transport);
     if (persist) {
       store.recordBoundedAssistantTurn({
@@ -1097,7 +1106,9 @@ export function createTelegramRuntime({
         }
         throw error;
       }
-      const result = await sendAssistantTurn(eventId, question, answer, routing.route);
+      // Единственное место, где текст написала модель — единственное место с
+      // разметкой (см. `sendAssistantTurn`).
+      const result = await sendAssistantTurn(eventId, question, answer, routing.route, { markup: true });
       store.completeAssistantRequest(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
       return result;
