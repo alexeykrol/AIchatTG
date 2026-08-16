@@ -31,6 +31,21 @@ membership state, eligibility/onboarding disposition, moderation disposition,
 idempotent event claims, delivery receipts, and escalation state. A bot must
 not bypass another bot's ownership by writing its tables directly.
 
+### Rendering boundary
+
+Rendering is a property of authorship, not of transport. Markup is enabled at
+exactly one call site — the delivery of an answer the model wrote — and every
+deterministic, service or safety reply stays code-owned plain text, because
+markup there would add a class of failures to text that has no need of it.
+The renderer itself (`packages/telegram-core/src/markup.mjs`) is pure and
+stateless, so its behaviour is provable offline; transport, splitting policy
+and the single legal resend live in the runtime adapter. Telegram HTML is the
+chosen dialect over MarkdownV2 because it needs three escapes rather than
+escaping a dozen characters of ordinary prose, which makes "an incidental
+character dropped the message" unreachable rather than unlikely. A degraded
+delivery — markup stripped after a parse refusal, or a truncated multi-part
+send — is recorded, never silently accepted as clean.
+
 ## Deployment boundary
 
 AIchatTG runs on the existing VPS as distinct services. Traefik may route the

@@ -37,14 +37,21 @@ Question rewriting before retrieval (`..._RETRIEVAL_REWRITE_ENABLED`) stays off.
 Gatekeeper activation and any historical state import remain separate reviewed
 stages.
 
+**Answer rendering is live since 2026-08-16** (image `0e12a87`): the model's
+Markdown is rendered to Telegram HTML at the single call site where the model
+wrote the text, and an over-limit answer is split before sending rather than
+rejected whole by Telegram. Deterministic and service replies stay code-owned
+plain text. See [CHANGELOG 0.3.1](CHANGELOG.md) and
+`packages/telegram-core/src/markup.mjs`.
+
 ## Known open defects
 
-- **Telegram markup is not rendered.** `telegram-adapter.mjs` sends no
-  `parse_mode`, so `**bold**` and `###` reach the reader literally while the
-  answer prompts still produce Markdown. Gatekeeper sends `parse_mode: 'HTML'`;
-  the assistant does not. The fix (enable markup with a plain-text fallback on
-  Telegram's refusal, or forbid markup in the prompts) is an owner decision and
-  is deliberately not applied yet.
+- **Acceptance does not judge answer content.** The deterministic leg checks
+  behaviour and the model judge is explicitly barred from judging factual
+  grounding, so neither leg verifies whether an answer is true to the
+  knowledge it was given. This is a measured hole, not a hypothesis: a
+  factually loose answer passed 4/4 with `expectation_met: true` and was
+  caught only by a human. Closing it is an architectural choice, not a bugfix.
 
 ## Local checks
 
