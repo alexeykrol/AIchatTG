@@ -95,3 +95,43 @@ test('legacy assistant projection renders current dialogue and reports knowledge
   const analytics = legacyAssistantAnalytics(config);
   assert.equal(analytics.total.count, 1);
 });
+
+test('unmeasured spend is reported as unmeasured, never as zero', () => {
+  // База без учёта (таблицы записей ответов ещё нет) — консоль обязана сказать
+  // «не измерено», а не напечатать ноль вызова, которого она не видела.
+  const config = fixture();
+  const [event] = legacyAssistantEvents(config);
+  assert.equal(event.input_tokens, null);
+  assert.equal(event.output_tokens, null);
+  const [moderation] = legacyModerationEvents(config);
+  assert.equal(moderation.input_tokens, null);
+  assert.equal(moderation.output_tokens, null);
+});
+
+test('measured spend reaches the console from the durable answer record', () => {
+  const config = fixture();
+  const db = new Database(config.runtimeDatabasePath);
+  db.exec(`
+    CREATE TABLE runtime_assistant_answer_records (
+      event_id TEXT PRIMARY KEY, chat_id TEXT, user_id TEXT, question TEXT, answer TEXT,
+      model_id TEXT, input_tokens INTEGER, output_tokens INTEGER, total_tokens INTEGER, created_at INTEGER
+    );
+    INSERT INTO runtime_assistant_answer_records VALUES (
+      'ask-evt', '-100123', '42', 'Что делать?', 'Ответ', 'gpt-5.6-terra', 1204, 318, 1522, 1760000010
+    );
+    INSERT INTO runtime_inbound_events VALUES ('ask-evt-2');
+    INSERT INTO runtime_assistant_turns VALUES (
+      'turn-2', 'dialog-1', 'ask-evt-2', 'Граница?', 'Эта тема за пределами курса.', NULL,
+      '{"ok":true,"messageId":"89"}', 1760000020
+    );
+  `);
+  db.close();
+  const events = legacyAssistantEvents(config);
+  const measured = events.find((event) => event.question === 'Что делать?');
+  assert.equal(measured.input_tokens, 1204);
+  assert.equal(measured.output_tokens, 318);
+  // Детерминированный ответ модель не вызывал: платить нечем, и это тоже не ноль.
+  const deterministic = events.find((event) => event.question === 'Граница?');
+  assert.equal(deterministic.input_tokens, null);
+  assert.equal(deterministic.output_tokens, null);
+});

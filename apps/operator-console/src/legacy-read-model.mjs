@@ -30,6 +30,24 @@ function count(db, sql, ...params) {
   return Number(db.prepare(sql).get(...params)?.count) || 0;
 }
 
+function columns(db, table) {
+  return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name));
+}
+
+/**
+ * Расход печатается только там, где он измерен. Отсутствующая колонка, ход до
+ * появления учёта и детерминированный ответ без вызова модели дают null —
+ * консоль покажет «—». Ноль здесь означал бы «вызов был и стоил ноль», а
+ * такого не бывает: это выдуманное число в пользовательской поверхности.
+ */
+function usage(value) {
+  // Пустое значение приводится к null ЯВНО: Number(null) === 0, и молчаливое
+  // приведение вернуло бы тот самый выдуманный ноль.
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function moderationEvent(row) {
   const action = safeJson(row.action_json);
   const route = row.verdict === 'ban' ? 'threat' : row.verdict === 'suspect' ? 'abuse' : 'clean';
@@ -47,8 +65,10 @@ function moderationEvent(row) {
     quote: null,
     prompt_version: 'tg-v3',
     model: null,
-    input_tokens: 0,
-    output_tokens: 0,
+    // Расход вызова модерации рантайм сегодня не хранит: счётчики появятся
+    // вместе с колонками, и этот же код их подхватит без правки.
+    input_tokens: usage(row.input_tokens),
+    output_tokens: usage(row.output_tokens),
     cost_usd: null,
     mode: row.mode,
     action_taken: action?.action || action?.status || null,
@@ -78,8 +98,8 @@ function assistantEvent(row) {
     answer: row.answer,
     route: assistantRoute(row.receipt_json),
     model: row.model_id,
-    input_tokens: 0,
-    output_tokens: 0,
+    input_tokens: usage(row.input_tokens),
+    output_tokens: usage(row.output_tokens),
     cost_usd: null,
     relevance: null,
     error: null,
@@ -193,9 +213,21 @@ export function legacyAssistantEvents(config, { limit = 100 } = {}) {
     db = openReadOnly(config.runtimeDatabasePath);
     const schema = tables(db);
     if (!schema.has('runtime_assistant_turns') || !schema.has('runtime_assistant_dialogues')) return [];
-    return db.prepare(`SELECT turns.*, dialogues.user_id
+    // Токены хода лежат в долговечной записи ответа, а не в памяти диалога.
+    // База, накопленная до появления учёта, этой таблицы или колонок не имеет —
+    // тогда join не строится вовсе, и расход остаётся НЕизмеренным (null),
+    // а не обнулённым.
+    const metered = schema.has('runtime_assistant_answer_records')
+      && ['event_id', 'input_tokens', 'output_tokens']
+        .every((name) => columns(db, 'runtime_assistant_answer_records').has(name));
+    const usageSelect = metered ? ', answers.input_tokens AS input_tokens, answers.output_tokens AS output_tokens' : '';
+    const usageJoin = metered
+      ? 'LEFT JOIN runtime_assistant_answer_records answers ON answers.event_id = turns.event_id'
+      : '';
+    return db.prepare(`SELECT turns.*, dialogues.user_id${usageSelect}
       FROM runtime_assistant_turns turns
       JOIN runtime_assistant_dialogues dialogues ON dialogues.id = turns.dialogue_id
+      ${usageJoin}
       ORDER BY turns.created_at DESC, turns.id DESC LIMIT ?`).all(safeLimit(limit, 100, 300)).map(assistantEvent);
   } catch { return []; } finally { db?.close(); }
 }

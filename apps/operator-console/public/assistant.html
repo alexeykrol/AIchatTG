@@ -222,6 +222,9 @@
     }
     function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n : (n == null ? d : (isFinite(Number(n)) ? Number(n) : d)); }
     function fmtCost(c) { const v = num(c, null); return v == null ? '—' : '$' + v.toFixed(4); }
+    // Неизмеренный расход печатается прочерком: ноль читался бы как «вызов был
+    // и стоил ноль», а это выдуманное число.
+    function fmtTokens(t) { const v = num(t, null); return v == null ? '—' : String(v); }
     function fmtDate(dt) {
       // created_at is unix seconds for the assistant ledger.
       if (dt == null || dt === '') return { date: '', time: '' };
@@ -379,7 +382,7 @@
           <td><div class="qa-text" title="${esc(e.question || '')}">${esc(e.question || '—')}</div></td>
           <td><div class="qa-text" title="${esc(e.answer || '')}">${esc(e.answer || '—')}${errBadge}</div></td>
           <td>${routeLabel(e.route)}</td>
-          <td class="tok-cell">${esc(num(e.input_tokens, 0))} / ${esc(num(e.output_tokens, 0))}</td>
+          <td class="tok-cell">${esc(fmtTokens(e.input_tokens))} / ${esc(fmtTokens(e.output_tokens))}</td>
           <td class="cost-cell">${fmtCost(e.cost_usd)}</td>
           <td>${rowControls(e)}</td>
         </tr>`;
