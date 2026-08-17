@@ -46,9 +46,32 @@ const limit = Math.max(1, Math.min(1_000, Number.parseInt(arg('limit', '30'), 10
 const observationColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_analyzer_observations)')
   .all().map((row) => row.name));
 const debtColumn = observationColumns.has('detector_debt') ? 'detector_debt' : 'NULL AS detector_debt';
-const rows = db.prepare(`SELECT question, status, topics, level, level_confidence, intent,
+
+// Окно прогона. Без него журнал смешивает прогоны, а вопросы ритуала от
+// прогона к прогону ОДНИ И ТЕ ЖЕ — и по тексту строки неотличимы. Один такой
+// разбор уже привёл к выводу «правило не сработало» по строкам прошлого
+// прогона; правду дал только идентификатор хода. Поэтому: окно фильтром,
+// идентификатор — в выводе.
+function toEpoch(value, name) {
+  if (!value) return null;
+  const parsed = /^\d+$/u.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${name}: не дата и не epoch — ${value}`);
+  return parsed > 1e11 ? Math.floor(parsed / 1000) : parsed;
+}
+const since = toEpoch(arg('since', ''), '--since');
+const until = toEpoch(arg('until', ''), '--until');
+const chat = arg('chat', '');
+
+const where = ['1=1'];
+const params = [];
+if (since !== null) { where.push('created_at >= ?'); params.push(since); }
+if (until !== null) { where.push('created_at <= ?'); params.push(until); }
+if (chat) { where.push('chat_id = ?'); params.push(String(chat)); }
+
+const rows = db.prepare(`SELECT event_id, chat_id, question, status, topics, level, level_confidence, intent,
     intent_confidence, hints, route_action, route_source_id, verdict_json, ${debtColumn}, error, created_at
-  FROM runtime_assistant_analyzer_observations ORDER BY created_at DESC LIMIT ?`).all(limit);
+  FROM runtime_assistant_analyzer_observations WHERE ${where.join(' AND ')}
+  ORDER BY created_at DESC, event_id DESC LIMIT ?`).all(...params, limit);
 
 if (rows.length === 0) {
   console.log('журнал пуст: в наблюдаемых чатах ещё не было вопросов');
@@ -133,10 +156,12 @@ for (const row of invented) {
   }
 }
 
-console.log('\n— ходы (свежие сверху) —');
+console.log(`\n— ходы (свежие сверху)${since !== null || until !== null || chat ? ', окно задано' : ''} —`);
 for (const row of rows) {
   const when = new Date(row.created_at * 1000).toISOString().slice(5, 16).replace('T', ' ');
-  const head = `${when} [${row.status}]`;
+  // Идентификатор хода печатается всегда: вопросы ритуала повторяются от
+  // прогона к прогону, и по тексту строку от строки не отличить.
+  const head = `${when} ${String(row.event_id || '').replace(/^assistant:/u, '#')} [${row.status}]`;
   if (row.status !== 'ok') {
     console.log(`${head} ${String(row.question).slice(0, 90)}\n    ошибка: ${row.error}`);
     continue;
