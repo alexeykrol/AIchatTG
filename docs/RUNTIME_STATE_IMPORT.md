@@ -35,9 +35,12 @@ larger than 64 KiB are rejected without echoing the record.
 | `assistant_question_claim.v1` | Completed `answered` or `skipped` claim and timestamps | `runtime_assistant_question_claims` | No question, answer, dialogue, model identifier, delivery receipt or route. |
 | `weak_strike.v1` | Exact numeric counter for a chat/user pair and timestamp | `runtime_moderation_weak_strikes` | No text or profile data. |
 
-The importer intentionally does **not** import `runtime_assistant_dialogues` or
-`runtime_assistant_turns`: those require historical question/answer content,
-which is outside this state-import approval and would change Assistant context.
+The importer intentionally does **not** import `runtime_assistant_dialogues`,
+`runtime_assistant_turns` or `runtime_assistant_answer_records`: those require
+historical question/answer content, which is outside this state-import approval
+and would change Assistant context. `runtime_assistant_answer_records` is the
+durable question→answer record written only in analyzer-enabled chats for the
+evaluation contour; importing it would fabricate turns that were never served.
 
 `moderation.v1` requires an event ID exactly equal to `moderator:<updateId>`
 and a `platformMessageId` equal to either `<chatId>:<messageId>` or the exact

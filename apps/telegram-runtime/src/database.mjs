@@ -260,6 +260,40 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_analyzer_observations (
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_assistant_analyzer_observations_time
   ON runtime_assistant_analyzer_observations(created_at);
+-- Долговечная пара «вопрос → ответ»: то, что человек реально получил. Нужна
+-- приёмочному контуру — без текста ответа судить можно только маршрут.
+--
+-- Отдельная таблица, а не колонки к соседям, и это выбор из трёх мест:
+--   · runtime_assistant_turns — ОГРАНИЧЕННАЯ память диалога (последние N ходов
+--     и TTL): её строки стирает сам разговор, и замер, живущий в ней, исчезал
+--     бы вместе с ними — «данных нет» читалось бы как «ничего не было»;
+--   · runtime_assistant_analyzer_observations — НЕИЗМЕНЯЕМАЯ запись вердикта:
+--     пишется до ответа и ровно один раз (INSERT OR IGNORE). Дописать ответ
+--     туда значило бы сделать журнал мутируемым и терять ответ каждый раз,
+--     когда строка журнала не удалась; к тому же ответ существует и там, где
+--     вердикта нет вовсе (детерминированный путь, сбой анализатора).
+-- Связь — по event_id, один ход = по строке в каждой таблице: отказ одного
+-- сенсора не уносит с собой второй.
+--
+-- Внешнего ключа на runtime_inbound_events здесь намеренно нет — ровно как у
+-- журнала наблюдений: сенсор не имеет права отменить ответ человеку
+-- нарушением ссылочной целостности.
+CREATE TABLE IF NOT EXISTS runtime_assistant_answer_records (
+  event_id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  route_action TEXT,
+  route_source_id TEXT,
+  knowledge_source_id TEXT,
+  served_unit_ids TEXT,
+  model_id TEXT,
+  delivery TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_answer_records_dialogue
+  ON runtime_assistant_answer_records(chat_id, user_id, created_at);
 `;
 
 const MIGRATION_RECEIPT_SCHEMA = `
@@ -561,6 +595,16 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     FROM runtime_assistant_analyzer_observations
     WHERE chat_id = ? AND user_id = ? AND status = 'ok' AND created_at >= ?
     ORDER BY created_at DESC LIMIT ?`);
+  // OR IGNORE — по той же причине, что в журнале наблюдений: перевыдача
+  // апдейта Telegram не имеет права задвоить ход в стенограмме. Замер считает
+  // ходы, а не доставки.
+  const insertAnswerRecord = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_answer_records
+    (event_id, chat_id, user_id, question, answer, route_action, route_source_id,
+     knowledge_source_id, served_unit_ids, model_id, delivery, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const listAnswerRecordRows = db.prepare(`SELECT event_id, chat_id, user_id, question, answer,
+      route_action, route_source_id, knowledge_source_id, served_unit_ids, model_id, delivery, created_at
+    FROM runtime_assistant_answer_records ORDER BY created_at DESC, event_id DESC LIMIT ?`);
   const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
   const deleteExpiredDialogues = db.prepare('DELETE FROM runtime_assistant_dialogues WHERE last_activity_at <= ?');
@@ -1201,6 +1245,63 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         detectorDebt: row.detector_debt ? JSON.parse(row.detector_debt) : null,
         modelId: row.model_id,
         error: row.error,
+        createdAt: row.created_at,
+      }));
+    },
+    /**
+     * Долговечная пара «вопрос → ответ» для приёмочного контура.
+     *
+     * Пишется ТОЛЬКО там, где включён анализатор (пер-чатный гейт держит
+     * рантайм) — в боевом чате ни поведение, ни объём записи не меняются.
+     *
+     * Маршрут приходит двух форм: объектом `{action, sourceId}` у ответа по
+     * домену и строкой (`boundary:…`, `command:…`, `public:…`) у
+     * детерминированных ответов и воздержаний. Обе сохраняются как есть:
+     * свернуть строку в «неизвестно» значило бы потерять единственный признак,
+     * отличающий воздержание от ответа по материалам.
+     *
+     * `served_unit_ids` — идентификаторы записей знания в том виде, в каком их
+     * получила отвечающая модель (источник, не дериватив): разбор на юниты —
+     * работа лаборатории, и правило разбора живёт там, а не здесь.
+     */
+    recordAssistantAnswer({
+      eventId, chatId, userId, question, answer, route = null, knowledge = null,
+      modelId = null, delivery = null,
+    }) {
+      const action = typeof route === 'string' ? route : (route?.action || null);
+      const sourceId = typeof route === 'string' ? null : (route?.sourceId || null);
+      const entries = Array.isArray(knowledge?.entries) ? knowledge.entries : [];
+      const served = [];
+      for (const entry of entries) {
+        if (served.length >= 128) break;
+        const id = entry?.id == null ? '' : String(entry.id).slice(0, 200);
+        if (id && !served.includes(id)) served.push(id);
+      }
+      insertAnswerRecord.run(
+        String(eventId), String(chatId), userId == null ? '' : String(userId),
+        String(question), String(answer),
+        action == null ? null : String(action).slice(0, 200),
+        sourceId == null ? null : String(sourceId).slice(0, 200),
+        knowledge?.sourceId == null ? null : String(knowledge.sourceId).slice(0, 200),
+        served.length ? JSON.stringify(served) : null,
+        modelId == null ? null : String(modelId),
+        delivery == null ? null : String(delivery).slice(0, 120),
+        now(),
+      );
+    },
+    listAssistantAnswers({ limit = 100 } = {}) {
+      const boundedLimit = Math.max(1, Math.min(10_000, Number.parseInt(limit, 10) || 100));
+      return listAnswerRecordRows.all(boundedLimit).map((row) => ({
+        eventId: row.event_id,
+        chatId: row.chat_id,
+        userId: row.user_id,
+        question: row.question,
+        answer: row.answer,
+        route: { action: row.route_action, sourceId: row.route_source_id },
+        knowledgeSourceId: row.knowledge_source_id,
+        servedUnitIds: row.served_unit_ids ? JSON.parse(row.served_unit_ids) : [],
+        modelId: row.model_id,
+        delivery: row.delivery,
         createdAt: row.created_at,
       }));
     },

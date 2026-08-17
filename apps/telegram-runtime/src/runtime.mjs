@@ -1035,7 +1035,7 @@ export function createTelegramRuntime({
    * настоящий ответ на настоящий вопрос, он остаётся в истории.
    */
   async function sendAssistantTurn(eventId, question, answer, route = null,
-    { persist = true, markup = false } = {}) {
+    { persist = true, markup = false, knowledge = null } = {}) {
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
@@ -1065,8 +1065,52 @@ export function createTelegramRuntime({
         maxTurns: config.assistantDialogueTurnLimit,
         ttlSeconds: config.assistantDialogueTtlSec,
       });
+      // Долговечная запись — рядом с ограниченной памятью и по тому же
+      // признаку «это ход разговора, а не реакция интерфейса»: служебный текст
+      // (`persist: false`) в стенограмму не попадает, потому что вопроса за ним
+      // нет и судить там нечего.
+      recordAssistantAnswerRecord({
+        eventId, question, text: answer.text.trim(), route, knowledge,
+        modelId: answer.modelId || null, transport,
+      });
     }
     return { kind: 'answered', receipt, route };
+  }
+
+  /**
+   * Долговечная запись ответа — вторая половина приёмочного контура. Сегодня
+   * судить можно только маршрут: текст ответа живёт лишь в ОГРАНИЧЕННОЙ памяти
+   * диалога (`runtime_assistant_turns`, N последних ходов + TTL) и стирается
+   * разговором раньше, чем до него доходит судья.
+   *
+   * Гейт тот же, что у анализатора, и это контракт, а не осторожность: в чате
+   * вне списка ход идёт байт-в-байт прежним путём — без вызова анализатора, без
+   * строки в журнале и без этой записи.
+   *
+   * Запись обёрнута: сенсор не имеет права стоить человеку ответа. Её отказ
+   * виден в логе процесса, а не в молчании бота.
+   */
+  function recordAssistantAnswerRecord({ eventId, question, text, route, knowledge, modelId, transport }) {
+    if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return;
+    try {
+      store.recordAssistantAnswer({
+        eventId,
+        chatId: question.chatId,
+        userId: question.userId,
+        question: question.text,
+        answer: text,
+        route,
+        knowledge,
+        modelId,
+        // Деградация доставки обязана доехать до стенограммы: судить текст,
+        // который человек получил урезанным, как целый — значит мерить не то,
+        // что произошло.
+        delivery: transport?.partial ? 'partial'
+          : transport?.degraded ? `degraded:${String(transport.degraded).slice(0, 60)}` : 'ok',
+      });
+    } catch (error) {
+      console.error(`[runtime] assistant answer record failed event=${eventId} ${runtimeErrorSummary(error)}`);
+    }
   }
 
   /** Доставка служебного текста: человек получает ответ, история не трогается. */
@@ -1336,8 +1380,12 @@ export function createTelegramRuntime({
         throw error;
       }
       // Единственное место, где текст написала модель — единственное место с
-      // разметкой (см. `sendAssistantTurn`).
-      const result = await sendAssistantTurn(eventId, question, answer, routing.route, { markup: true });
+      // разметкой (см. `sendAssistantTurn`). Знание передаётся сюда же: в
+      // стенограмме должно стоять то, что модель ДЕЙСТВИТЕЛЬНО получила, а не
+      // то, что лаборатория найдёт по этому вопросу через неделю.
+      const result = await sendAssistantTurn(eventId, question, answer, routing.route, {
+        markup: true, knowledge: routing.knowledge,
+      });
       store.completeAssistantRequest(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
       // Обойдённая модерация обязана быть видна в квитанции хода, а не
