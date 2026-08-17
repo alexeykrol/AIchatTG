@@ -55,6 +55,18 @@ snapshot, completion, API key, or response body. Tests inject a fake `fetchFn`;
 no real provider request, endpoint, key, model choice, pricing decision, or
 retry policy is exercised by local checks.
 
+The Assistant router system prompt is not a constant in the adapter. It is
+compiled at module load from the shipped specification data file
+`apps/telegram-runtime/src/analyzer-spec.json` (section `routing`), so that the
+routing vocabulary the code enforces and the contract the model is told cannot
+drift apart silently. The file ships inside `src/` with the image and is read
+independently of the analyzer feature flag: routing is needed on every question,
+while the analyzer is telemetry. A file that is missing, malformed or not
+compilable into a router prompt fails the process at start rather than degrading
+into unanswered questions. Compilation is duplicated in the offline laboratory
+(`allcourses/code/knowledge/analyzer/prompt.py`) and the two compilers are held
+byte-identical by `knowledge/tests/test_prompt_parity.py`.
+
 Malformed enabled configuration fails closed before a transport call with a
 specific `ProviderUnavailableError` code such as `provider_vendor_invalid`,
 `provider_endpoint_invalid`, or `provider_model_tuples_invalid`. Legacy

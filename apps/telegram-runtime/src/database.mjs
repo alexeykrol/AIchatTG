@@ -249,6 +249,11 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_analyzer_observations (
   route_action TEXT,
   route_source_id TEXT,
   verdict_json TEXT,
+  -- Долг детектора: спор слоёв маршрута, разрешённый в пользу слоя с
+  -- доказанной точностью (ANALYZER-SPEC §2.3а, правило 3). В route_action
+  -- после перебивания стоит домен победителя, поэтому проигравший голос без
+  -- этой колонки исчезал бы бесследно — вместе с уликой о пробеле детектора.
+  detector_debt TEXT,
   model_id TEXT,
   error TEXT,
   created_at INTEGER NOT NULL
@@ -343,6 +348,11 @@ export function ensureRuntimeDatabaseSchema(db) {
   // существующая боевая база открывается без перестройки таблицы.
   const receiptColumns = new Set(db.prepare('PRAGMA table_info(runtime_inbound_update_receipts)').all().map((row) => row.name));
   if (!receiptColumns.has('error_text')) db.exec('ALTER TABLE runtime_inbound_update_receipts ADD COLUMN error_text TEXT');
+  // Долг детектора дописан к уже существующему журналу наблюдений.
+  // Аддитивно: боевая база с накопленными наблюдениями открывается без
+  // перестройки таблицы и без потери прежних строк.
+  const observationColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_analyzer_observations)').all().map((row) => row.name));
+  if (!observationColumns.has('detector_debt')) db.exec('ALTER TABLE runtime_assistant_analyzer_observations ADD COLUMN detector_debt TEXT');
 }
 
 /**
@@ -540,11 +550,12 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   // задваивать наблюдение: замер по журналу считает ходы, а не доставки.
   const insertAnalyzerObservation = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_analyzer_observations
     (id, event_id, chat_id, user_id, question, status, topics, level, level_confidence,
-     intent, intent_confidence, hints, route_action, route_source_id, verdict_json, model_id, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     intent, intent_confidence, hints, route_action, route_source_id, verdict_json, detector_debt,
+     model_id, error, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const listAnalyzerObservationRows = db.prepare(`SELECT id, event_id, chat_id, user_id, question, status,
       topics, level, level_confidence, intent, intent_confidence, hints, route_action, route_source_id,
-      verdict_json, model_id, error, created_at
+      verdict_json, detector_debt, model_id, error, created_at
     FROM runtime_assistant_analyzer_observations ORDER BY created_at DESC, id DESC LIMIT ?`);
   const listUserAnalyzerLevelRows = db.prepare(`SELECT level, level_confidence, created_at
     FROM runtime_assistant_analyzer_observations
@@ -1150,7 +1161,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
      */
     recordAnalyzerObservation({
       eventId, chatId, userId, question, status, verdict = null, hints = [],
-      route = null, modelId = null, error = null,
+      route = null, detectorDebt = null, modelId = null, error = null,
     }) {
       const level = verdict?.level || null;
       const intent = verdict?.intent || null;
@@ -1162,6 +1173,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         Array.isArray(hints) && hints.length ? hints.join(',') : null,
         route?.action || null, route?.sourceId || null,
         verdict ? JSON.stringify(verdict) : null,
+        detectorDebt ? JSON.stringify(detectorDebt) : null,
         modelId == null ? null : String(modelId),
         error == null ? null : String(error).slice(0, 500),
         now(),
@@ -1186,6 +1198,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         // Полный вердикт с уликами: без цитаты диагноз нечем проверить, а
         // непроверяемый диагноз — мнение, а не данные.
         verdict: row.verdict_json ? JSON.parse(row.verdict_json) : null,
+        detectorDebt: row.detector_debt ? JSON.parse(row.detector_debt) : null,
         modelId: row.model_id,
         error: row.error,
         createdAt: row.created_at,

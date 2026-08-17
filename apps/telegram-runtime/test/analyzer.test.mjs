@@ -21,12 +21,13 @@ import {
 } from '../src/analyzer-adapter.mjs';
 import {
   compileAnalyzerSystemPrompt,
+  compileRouterSystemPrompt,
   loadAnalyzerSpec,
   parseAnalyzerVerdict,
 } from '../src/analyzer-spec.mjs';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
-import { createProviderAdapter } from '../src/provider-adapter.mjs';
+import { ROUTER_SYSTEM_PROMPT, createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 
 const SPEC_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'analyzer-spec.json');
@@ -170,6 +171,49 @@ test('the compiled prompt is derived from the spec vocabularies', () => {
   for (const intent of SPEC.spec.intents.vocabulary) assert.ok(prompt.includes(intent.id), intent.id);
   assert.ok(!prompt.includes('searchSubject'), 'поля диспетчера не входят в промпт v0');
   assert.ok(compileAnalyzerSystemPrompt(SPEC.spec, { dispatcher: true }).includes('searchSubject'));
+});
+
+// ── Промпт роутера ──────────────────────────────────────────────────────────
+
+// Текст, которым боевой роутер работал ДО этапа Ф3, — константой в
+// `provider-adapter.mjs`. Он записан здесь дословно и намеренно: этап
+// переносит промпт из прозы в данные и не имеет права по дороге изменить в
+// нём хоть символ. Красный тест здесь означает не «поправьте эталон», а
+// «поведение бота меняется» — то есть требуется замер согласия, а не правка
+// строки.
+const ROUTER_PROMPT_BEFORE_SPEC = [
+  'You route an AIchatTG Assistant question without granting access yourself.',
+  'Return exactly one JSON object with action and sourceId. action is exactly one',
+  'of teach, navigate, support, advise, redirect. teach and navigate require',
+  'sourceId course-content-v1. support requires sourceId course-operations-v1.',
+  'advise requires sourceId course-value-v1 and covers personal fit, benefit and',
+  'course choice questions ("is this for me", "why do I need it", "which course',
+  'to pick"). redirect requires sourceId null. Respect courseOperationsHint: an',
+  'operations question may only be support or redirect. Respect courseValueHint:',
+  'a value question may only be advise or redirect. Do not add Markdown.',
+].join(' ');
+
+test('the router prompt compiled from the spec is byte-identical to the shipped one', () => {
+  assert.equal(compileRouterSystemPrompt(SPEC.spec), ROUTER_PROMPT_BEFORE_SPEC);
+  assert.equal(ROUTER_SYSTEM_PROMPT, ROUTER_PROMPT_BEFORE_SPEC,
+    'адаптер провайдера обязан брать промпт из спецификации, а не из своей константы');
+});
+
+// Промпт — дериватив словаря маршрутов. Если бы он был рукописным, правка
+// `routing.map` не меняла бы в нём ни символа: код считал бы одно, модель
+// слышала другое, и разошлись бы они молча.
+test('the router prompt follows the routing vocabulary, not a hand-written copy', () => {
+  for (const [topic, entry] of Object.entries(SPEC.spec.routing.map)) {
+    for (const action of entry.actions) {
+      assert.ok(ROUTER_SYSTEM_PROMPT.includes(action), `${topic}: действие ${action} не названо модели`);
+    }
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes(entry.sourceId || 'null'), `${topic}: пакет не назван модели`);
+  }
+  const renamed = JSON.parse(JSON.stringify(SPEC.spec));
+  renamed.routing.map.value.sourceId = 'course-value-v2';
+  renamed.hints.map.value.sourceId = 'course-value-v2';
+  assert.ok(compileRouterSystemPrompt(renamed).includes('course-value-v2'),
+    'правка данных обязана доехать до модели без правки кода');
 });
 
 test('a verdict outside the contract is invalid rather than repaired', () => {
@@ -325,6 +369,50 @@ withRuntime('the journal records the verdict, the fired hints and the route toge
   // Улика обязана дожить до журнала: диагноз без цитаты нечем проверить.
   assert.equal(row.verdict.level.evidence, 'их проверять уметь');
   assert.deepEqual(row.verdict.quotesUnverified, []);
+});
+
+// Долг детектора: спор слоёв, разрешённый в пользу доказанной точности
+// (§2.3а, правило 3). В `route_action` после перебивания стоит домен
+// победителя, поэтому без отдельной записи проигравший голос исчезал бы
+// бесследно, а спор выглядел бы чистым прогоном — и пробел детектора остался
+// бы невидимым ровно в том журнале, который заведён его искать.
+withRuntime('a layer conflict is journaled as detector debt, not swallowed', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  // Value-детектор ловит вопрос, роутер-заглушка отвечает `teach`: домены
+  // разные, побеждает детектор.
+  const result = await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
+  assert.equal(result.kind, 'answered');
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.route.action, 'advise', 'маршрут — за детектором');
+  assert.deepEqual(row.detectorDebt, {
+    kind: 'domain_conflict',
+    detector: 'value',
+    detectorName: 'isCourseValueQuestion',
+    model: 'content',
+    modelAction: 'teach',
+    resolvedTo: 'value',
+    resolvedBy: 'detector',
+  });
+});
+
+// Согласие слоёв долгом не является: иначе журнал наполнится шумом и
+// настоящий пробел детектора в нём утонет.
+withRuntime('an uncontested route leaves no debt behind', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  await runQuestion(runtime, '/ask В курсе что такое агент?');
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.route.action, 'teach');
+  assert.equal(row.detectorDebt, null);
 });
 
 // Сломанный анализатор обязан быть виден. Молчащий журнал читается как

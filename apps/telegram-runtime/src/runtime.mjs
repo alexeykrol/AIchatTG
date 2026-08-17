@@ -25,6 +25,7 @@ import {
   isProvenNoCallRequestError,
   isProviderUnavailableError,
 } from './provider-adapter.mjs';
+import { ROUTE_ARBITER as routeArbiter } from './route-arbitration.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
@@ -912,32 +913,32 @@ export function createTelegramRuntime({
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
-    // Хинт — замеренная бухгалтерия кода (0 ложных на голд-190, 0 украденных
-    // операционных); детектор уже ДОКАЗАЛ, что вопрос покрыт своим доменом.
-    // Поэтому модельный роутер на хинтованном вопросе не решает «отвечать ли»
-    // вовсе: спор с хинтом любым действием, включая redirect, проигрывает коду.
-    // Прежде redirect был исключением — и живой прогон skep-10 показал цену:
-    // пилюльный ход «пусть ваш ИИ сам всё соберёт» (value-хинт есть) роутер
-    // отправил в redirect, клиент получил «эта тема за пределами курса» на
-    // вопрос, который является ЯДРОМ домена ценности. Ложное «не уполномочен»
-    // на покрытой теме — тот же дефект, что молчание, только вежливее.
-    if (courseOperationsHint && route.action !== ASSISTANT_ROLE_ACTIONS.SUPPORT) {
-      route = { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS };
-    }
-    if (courseValueHint && route.action !== ASSISTANT_ROLE_ACTIONS.ADVISE) {
-      route = { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
-    }
+    // Арбитраж слоёв маршрута — правило §2.3а, читаемое из спецификации
+    // (`route-arbitration.mjs`), а не два `if`-а с зашитой прозой, как было.
+    // Хинты по-прежнему уходят ВХОДОМ в модельный роутер и по-прежнему
+    // перебивают его действие при срабатывании: детектор — слой с доказанной
+    // на голде точностью (0 ложных на голд-190). Живой прогон skep-10 показал
+    // цену обратного: пилюльный ход «пусть ваш ИИ сам всё соберёт» при
+    // сработавшем value-хинте роутер отправил в redirect, и клиент получил
+    // «эта тема за пределами курса» на ЯДРО домена ценности.
+    //
+    // Что изменилось: молчание детектора больше не трактуется как аргумент
+    // против суждения. Домен, уверенно названный моделью при молчащем
+    // детекторе, остаётся её доменом; спор двух назвавших слоёв пишется как
+    // долг детектора и попадает в журнал наблюдений — молча выигранный спор
+    // скрыл бы пробел детектора и выглядел бы успехом.
+    const arbitration = routeArbiter.arbitrate({ hints, route });
+    route = arbitration.route;
     // Redirect — законный вердикт роутера «вопрос вне покрытия», а НЕ повод
     // идти дальше без знания: ответный вызов без источника отвергается
     // адаптером (provider_request_invalid) и превращается в молчание клиенту.
-    // Живой прогон skep-10 (пилюльный ход «пусть ваш ИИ сам всё соберёт»):
-    // три пустых ответа подряд, синтетик ушёл неудовлетворённым. Redirect
-    // обслуживается тем же путём, что воздержание: ответственный текст
-    // «не уполномочен» + журнал дефицита.
+    // Живой прогон skep-10: три пустых ответа подряд, синтетик ушёл
+    // неудовлетворённым. Redirect обслуживается тем же путём, что воздержание:
+    // ответственный текст «не уполномочен» + журнал дефицита.
     if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) {
       return {
         route, knowledge: null, abstain: true,
-        reason: DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+        reason: DOMAIN_ROUTE_REASONS.NO_SIGNAL, arbitration,
       };
     }
 
@@ -949,7 +950,7 @@ export function createTelegramRuntime({
       || route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE) {
       const sourceKnowledge = knowledge.forSource(route.sourceId);
       if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
-      return { route, knowledge: sourceKnowledge.snapshot };
+      return { route, knowledge: sourceKnowledge.snapshot, arbitration };
     }
 
     // The content domain goes through the retriever. The whole snapshot is no
@@ -958,7 +959,7 @@ export function createTelegramRuntime({
     if (!contentRetrieval) {
       const sourceKnowledge = knowledge.forSource(route.sourceId);
       if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
-      return { route, knowledge: sourceKnowledge.snapshot };
+      return { route, knowledge: sourceKnowledge.snapshot, arbitration };
     }
     if (!contentRetrieval.available) {
       return { error: contentRetrieval.reason || 'knowledge_unavailable' };
@@ -974,11 +975,11 @@ export function createTelegramRuntime({
     // as broken and invites the user to retry into the same wall.
     if (!grounded.grounded) {
       if (isAbstentionReason(grounded.reason)) {
-        return { route, knowledge: null, abstain: true, reason: grounded.reason, trace: grounded.trace || null };
+        return { route, knowledge: null, abstain: true, reason: grounded.reason, trace: grounded.trace || null, arbitration };
       }
       return { error: grounded.reason || 'knowledge_unavailable' };
     }
-    return { route, knowledge: grounded.knowledge, trace: grounded.trace || null };
+    return { route, knowledge: grounded.knowledge, trace: grounded.trace || null, arbitration };
   }
 
   /**
@@ -1044,6 +1045,12 @@ export function createTelegramRuntime({
   async function observeAssistantQuestion({ eventId, question, hints, routing }) {
     if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return null;
     const route = routing?.route || null;
+    // Долг детектора — спор слоёв, разрешённый в пользу доказанной точности.
+    // Он пишется в ту же строку журнала, что диагноз и маршрут: после
+    // перебивания в `route_action` стоит домен победителя, и без этой записи
+    // проигравший голос исчезал бы бесследно — вместе с уликой о том, что
+    // детектор чего-то не видит.
+    const detectorDebt = routing?.arbitration?.debt || null;
     try {
       const previousTexts = store.recentDialogue(question.chatId, question.userId, {
         limit: config.assistantDialogueTurnLimit,
@@ -1059,6 +1066,7 @@ export function createTelegramRuntime({
         verdict: observation.status === 'ok' ? observation.verdict : null,
         hints: firedHintNames(hints),
         route,
+        detectorDebt,
         modelId: observation.modelId || null,
         error: observation.status === 'ok' ? null : (observation.error || observation.code || null),
       });
@@ -1074,6 +1082,7 @@ export function createTelegramRuntime({
           status: 'error',
           hints: firedHintNames(hints),
           route,
+          detectorDebt,
           error: String(error?.code || error?.message || 'analyzer_failed'),
         });
       } catch { /* журнал не важнее ответа: молча идём дальше */ }

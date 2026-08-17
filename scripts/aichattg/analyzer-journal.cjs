@@ -40,8 +40,14 @@ function arg(name, fallback) {
 const db = new Database(arg('db', DEFAULT_DB), { readonly: true });
 const limit = Math.max(1, Math.min(1_000, Number.parseInt(arg('limit', '30'), 10) || 30));
 
+// `detector_debt` дописан аддитивно (этап Ф3). Читалка обязана работать и с
+// базой, где колонки ещё нет: иначе разведка по старому снимку падает вместо
+// того, чтобы честно сказать «долга не записано».
+const observationColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_analyzer_observations)')
+  .all().map((row) => row.name));
+const debtColumn = observationColumns.has('detector_debt') ? 'detector_debt' : 'NULL AS detector_debt';
 const rows = db.prepare(`SELECT question, status, topics, level, level_confidence, intent,
-    intent_confidence, hints, route_action, route_source_id, verdict_json, error, created_at
+    intent_confidence, hints, route_action, route_source_id, verdict_json, ${debtColumn}, error, created_at
   FROM runtime_assistant_analyzer_observations ORDER BY created_at DESC LIMIT ?`).all(limit);
 
 if (rows.length === 0) {
@@ -88,6 +94,22 @@ for (const row of disagreements) {
   const side = hintTopics(row).length ? '' : ' (детектор молчит)';
   console.log(`  · хинты:[${hintTopics(row).join(',') || '—'}] ↔ модель:[${modelTopics(row).join(',')}]${side}`
     + ` — ${String(row.question).slice(0, 70)}`);
+}
+
+// Долг детектора: спор слоёв маршрута, разрешённый в пользу доказанной
+// точности (§2.3а, правило 3). Спор, выигранный молча, скрыл бы пробел
+// детектора и выглядел бы чистым прогоном — поэтому он печатается отдельной
+// строкой, а не растворяется в расхождениях выше.
+const debts = rows.map((row) => {
+  try { return row.detector_debt ? JSON.parse(row.detector_debt) : null; } catch { return null; }
+});
+const withDebt = rows.filter((row, index) => debts[index]);
+console.log(`долг детектора: ${withDebt.length}`);
+for (const row of withDebt) {
+  const debt = debts[rows.indexOf(row)];
+  console.log(`  · ${debt.kind}: детектор:${debt.detector} ↔ модель:${debt.model}`
+    + ` (${debt.modelAction}) → ${debt.resolvedTo} по ${debt.resolvedBy}`
+    + ` — ${String(row.question).slice(0, 60)}`);
 }
 
 // Недоказанная улика: модель сослалась на цитату, которой в ходе нет.

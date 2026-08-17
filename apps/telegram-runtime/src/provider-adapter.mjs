@@ -1,4 +1,9 @@
 import {
+  RUNTIME_ANALYZER_SPEC_PATH,
+  compileRouterSystemPrompt,
+  runtimeAnalyzerSpec,
+} from './analyzer-spec.mjs';
+import {
   SAFETY_ABUSE_MAX_OUTPUT_TOKENS,
   SAFETY_MODEL,
   SAFETY_REASONING_EFFORT,
@@ -25,17 +30,23 @@ const TUPLE_NAMES = Object.freeze({
   assistantAnswer: 'assistantAnswer',
 });
 
-const ROUTER_SYSTEM_PROMPT = [
-  'You route an AIchatTG Assistant question without granting access yourself.',
-  'Return exactly one JSON object with action and sourceId. action is exactly one',
-  'of teach, navigate, support, advise, redirect. teach and navigate require',
-  'sourceId course-content-v1. support requires sourceId course-operations-v1.',
-  'advise requires sourceId course-value-v1 and covers personal fit, benefit and',
-  'course choice questions ("is this for me", "why do I need it", "which course',
-  'to pick"). redirect requires sourceId null. Respect courseOperationsHint: an',
-  'operations question may only be support or redirect. Respect courseValueHint:',
-  'a value question may only be advise or redirect. Do not add Markdown.',
-].join(' ');
+/**
+ * Промпт роутера — ДЕРИВАТИВ спецификации-данных (`analyzer-spec.json`,
+ * секция `routing`), а не проза в коде. Раньше он был константой здесь, и
+ * правка словаря маршрутов не меняла в нём ни символа: код считал одно,
+ * модель слышала другое, и разойтись они могли молча.
+ *
+ * Компиляция один раз при загрузке модуля, а не при вызове: спецификация —
+ * данные выката. Отсюда же и жёсткость — дефект файла роняет СТАРТ, а не
+ * первый вопрос живого человека. Молчаливая деградация здесь была бы худшим
+ * из вариантов: маршрута нет — значит ответа нет ни у кого, и это обязано
+ * быть видно как упавший контейнер, а не как тишина в чате.
+ */
+const ROUTER_SPEC = runtimeAnalyzerSpec();
+if (!ROUTER_SPEC.valid) {
+  throw new Error(`assistant router prompt unavailable: ${ROUTER_SPEC.code} (${RUNTIME_ANALYZER_SPEC_PATH})`);
+}
+export const ROUTER_SYSTEM_PROMPT = compileRouterSystemPrompt(ROUTER_SPEC.spec);
 
 /**
  * Форма ответа, а не содержание. Модель и раньше отвечала markdown'ом — просто

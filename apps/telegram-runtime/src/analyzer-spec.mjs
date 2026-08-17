@@ -14,6 +14,14 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Файл спецификации едет вместе с исходниками (образ содержит только `src/`),
+ * поэтому путь берётся от модуля, а не от рабочей папки процесса. Доставку
+ * держит `analyzer/sync_spec.sh` в лаборатории; здесь — только чтение.
+ */
+export const RUNTIME_ANALYZER_SPEC_PATH = fileURLToPath(new URL('./analyzer-spec.json', import.meta.url));
 
 const CONFIDENCES = new Set(['low', 'medium', 'high']);
 const MAX_SPEC_BYTES = 512 * 1024;
@@ -77,7 +85,55 @@ export function validateAnalyzerSpec(spec) {
   if (!plainObject(spec.routing) || !plainObject(spec.routing.map)) {
     return invalidSpec('analyzer_spec_routing_invalid');
   }
+  if (!routingIsRoutable(spec)) return invalidSpec('analyzer_spec_routing_invalid');
+  if (!routerPromptIsCompilable(spec)) return invalidSpec('analyzer_spec_router_prompt_invalid');
   return { valid: true, code: null, spec };
+}
+
+/**
+ * Маршрутная часть обязана быть исполнимой: по ней компилируется промпт
+ * боевого роутера и по ней же арбитр слоёв (§2.3а) переводит действие модели в
+ * домен. Полудефектная секция дала бы промпт без домена или арбитраж без
+ * отказа — то есть тихую потерю маршрута, а не заметный отказ.
+ */
+function routingIsRoutable(spec) {
+  const map = spec.routing.map;
+  const topics = Object.keys(map);
+  if (topics.length === 0) return false;
+  for (const topic of topics) {
+    const entry = map[topic];
+    if (!plainObject(entry)) return false;
+    if (!Array.isArray(entry.actions) || entry.actions.length === 0) return false;
+    if (!entry.actions.every((action) => typeof action === 'string' && action.trim())) return false;
+    if (!(entry.sourceId === null || (typeof entry.sourceId === 'string' && entry.sourceId.trim()))) return false;
+  }
+  const arbitration = spec.routing.arbitration;
+  if (!plainObject(arbitration) || !map[arbitration.refusal_topic]) return false;
+  const hints = spec.hints;
+  if (!plainObject(hints) || !Array.isArray(hints.order) || !plainObject(hints.map)) return false;
+  return hints.order.every((name) => plainObject(hints.map[name]) && Boolean(map[hints.map[name].topic]));
+}
+
+function routerPromptIsCompilable(spec) {
+  const cfg = spec.routing.router_prompt;
+  if (!plainObject(cfg)) return false;
+  for (const key of ['preamble', 'action_line', 'requirement_line', 'hint_line', 'closing', 'null_source']) {
+    if (typeof cfg[key] !== 'string' || !cfg[key]) return false;
+  }
+  if (!plainObject(cfg.requirement_verb) || typeof cfg.requirement_verb.one !== 'string'
+    || typeof cfg.requirement_verb.many !== 'string') return false;
+  if (!plainObject(cfg.domain_notes) || !plainObject(cfg.hints)) return false;
+  if (typeof cfg.hint_include_refusal_action !== 'boolean') return false;
+  if (!Array.isArray(cfg.domain_order) || cfg.domain_order.length === 0) return false;
+  // Каждый домен словаря обязан попасть в промпт: домен, известный коду и
+  // неизвестный модели, — это маршрут, которого модель никогда не выберет.
+  const ordered = new Set(cfg.domain_order);
+  if (ordered.size !== cfg.domain_order.length) return false;
+  if (!cfg.domain_order.every((topic) => Boolean(spec.routing.map[topic]))) return false;
+  if (!Object.keys(spec.routing.map).every((topic) => ordered.has(topic))) return false;
+  return spec.hints.order.every((name) => plainObject(cfg.hints[name])
+    && typeof cfg.hints[name].field === 'string' && cfg.hints[name].field
+    && typeof cfg.hints[name].subject === 'string' && cfg.hints[name].subject);
 }
 
 /**
@@ -154,6 +210,82 @@ ${intentsBlock(spec)}
 ${extra}
 ## Формат ответа — строго один JSON-объект, без пояснений и без markdown
 ${JSON.stringify(shape, null, 2)}`;
+}
+
+/** «teach and navigate», «support». Последний соединяется союзом, а не запятой. */
+function joinAnd(items) {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
+function fill(template, values) {
+  return template.replace(/\{(\w+)\}/gu, (match, key) => (key in values ? String(values[key]) : match));
+}
+
+/**
+ * Системный промпт БОЕВОГО роутера `{action, sourceId}` — дериватив
+ * `routing`, а не константа в коде.
+ *
+ * WHY. До этапа Ф3 текст жил строкой в `provider-adapter.mjs` и мог молча
+ * разойтись со словарём маршрутов: правка `routing.map` не меняла ни символа
+ * в промпте, и модель продолжала слышать прежний контракт — при том, что код
+ * уже считал иначе. Теперь источник один: правка словаря автоматически
+ * меняет то, что читает модель.
+ *
+ * Второй экземпляр компилятора (первый — лабораторный `prompt.py`) закрыт
+ * тестом чётности, как и промпт анализатора: расхождение обязано быть
+ * красным тестом, а не разной инструкцией на стенде и в бою.
+ */
+export function compileRouterSystemPrompt(spec) {
+  const routing = spec.routing;
+  const cfg = routing.router_prompt;
+  const map = routing.map;
+  const refusal = routing.arbitration.refusal_topic;
+  const parts = [cfg.preamble];
+
+  const actions = cfg.domain_order.flatMap((topic) => map[topic].actions);
+  parts.push(fill(cfg.action_line, { actions: actions.join(', ') }));
+
+  for (const topic of cfg.domain_order) {
+    const entry = map[topic];
+    parts.push(fill(cfg.requirement_line, {
+      actions: joinAnd(entry.actions),
+      verb: entry.actions.length === 1 ? cfg.requirement_verb.one : cfg.requirement_verb.many,
+      sourceId: entry.sourceId === null ? cfg.null_source : entry.sourceId,
+      note: cfg.domain_notes[topic] || '',
+    }));
+  }
+
+  for (const name of spec.hints.order) {
+    const allowed = [...map[spec.hints.map[name].topic].actions];
+    // Право модели на отказ поверх сработавшего детектора — ДАННЫЕ, а не код.
+    // По §2.3а (правило 2) такой отказ незаконен: домен уже назван, и код
+    // перебивает redirect. Флаг оставлен включённым, потому что снятие меняет
+    // поведение и требует замера, а не решения на месте.
+    if (cfg.hint_include_refusal_action) allowed.push(...map[refusal].actions);
+    parts.push(fill(cfg.hint_line, {
+      field: cfg.hints[name].field,
+      subject: cfg.hints[name].subject,
+      actions: allowed.join(' or '),
+    }));
+  }
+
+  parts.push(cfg.closing);
+  return parts.join(' ');
+}
+
+/**
+ * Спецификация, поехавшая вместе с образом. Читается один раз: это данные
+ * выката, а не живая настройка.
+ *
+ * Отдельно от `config.analyzer.specPath` намеренно. Тот путь — настройка
+ * НАБЛЮДАТЕЛЬНОГО режима и может быть выключен; маршрут же нужен на каждом
+ * вопросе, и ставить его в зависимость от флага телеметрии значило бы, что
+ * выключенный анализатор лишает людей ответа.
+ */
+let shippedSpec = null;
+export function runtimeAnalyzerSpec() {
+  if (shippedSpec === null) shippedSpec = loadAnalyzerSpec(RUNTIME_ANALYZER_SPEC_PATH);
+  return shippedSpec;
 }
 
 /** Вход анализатора: текущий ход + до пяти предыдущих реплик покупателя. */
