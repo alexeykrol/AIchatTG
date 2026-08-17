@@ -50,6 +50,14 @@ const IMPLEMENTED_RULES = Object.freeze([
 const DEBT_CONFLICT = 'domain_conflict';
 const DEBT_REFUSAL_OVERRIDDEN = 'model_refusal_overridden';
 
+/**
+ * Условия правил первенства, которые этот код умеет проверять. Совпадает с
+ * `KNOWN_CONDITIONS` лабораторного исполнителя (`analyzer/routing.py`): данные,
+ * объявившие условие, которого код не исполняет, обязаны ронять сборку — иначе
+ * правило исполнится наполовину, и это будет выглядеть как каприз модели.
+ */
+const KNOWN_PRIMACY_CONDITIONS = Object.freeze(['level', 'intent', 'topic_first', 'topic_listed']);
+
 export class RouteArbitrationSpecError extends Error {
   constructor(code) {
     super(`route arbitration spec invalid: ${code}`);
@@ -111,6 +119,32 @@ export function createRouteArbiter(spec) {
     return detectorVotes.find((vote) => firedHints?.[vote.name] === true) || null;
   }
 
+  // Правила первенства главной темы. Пустая секция законна — правил нет,
+  // главной остаётся первая тема вердикта.
+  const levelIds = new Set((spec?.levels?.vocabulary || []).map((item) => item?.id));
+  const intentIds = new Set((spec?.intents?.vocabulary || []).map((item) => item?.id));
+  const primacyRules = Object.freeze((routing.main_topic_primacy?.rules || []).map((rule) => {
+    const id = rule?.id;
+    if (!id) fail('primacy_rule_without_id');
+    // Правило без недопустимого исхода — правило «от устройства». Ровно тот
+    // класс, который запрещён продуктовым первенством: спор реализаций,
+    // решённый на своём уровне.
+    if (!rule.unacceptable_outcome) fail(`primacy_without_outcome:${id}`);
+    const when = rule.when;
+    if (!when || typeof when !== 'object' || Object.keys(when).length === 0) fail(`primacy_empty_when:${id}`);
+    for (const [key, values] of Object.entries(when)) {
+      if (!KNOWN_PRIMACY_CONDITIONS.includes(key)) fail(`primacy_condition_unimplemented:${id}.${key}`);
+      if (!Array.isArray(values) || values.length === 0) fail(`primacy_condition_empty:${id}.${key}`);
+      const dictionary = key === 'level' ? levelIds
+        : key === 'intent' ? intentIds
+          : new Set(Object.keys(routing.map));
+      for (const value of values) if (!dictionary.has(value)) fail(`primacy_value_unknown:${id}.${key}=${value}`);
+    }
+    const target = rule.then?.main_topic;
+    if (!routing.map[target]) fail(`primacy_target_unknown:${id}`);
+    return Object.freeze({ ...rule, when: Object.freeze({ ...when }) });
+  }));
+
   /**
    * Детерминированная проекция §2.2 для режима dispatch (Ф4): главная тема
    * вердикта → {action, sourceId}. Пакет задаёт `routing.map`; действием идёт
@@ -131,6 +165,45 @@ export function createRouteArbiter(spec) {
     const entry = routing.map[topic];
     if (!entry) return null;
     return Object.freeze({ action: entry.actions[0], sourceId: entry.sourceId ?? null });
+  }
+
+  /**
+   * Главная тема вердикта — до проекции §2.2. До правил первенства главной
+   * молча считался `topics[0]`, то есть порядок, названный моделью; на
+   * пилюльном классе это давало измеренный дефект (уровень распознан верно,
+   * форма ответа выбиралась предметная — то есть подтверждала посылку
+   * «учиться не надо»).
+   *
+   * Правило читается ИЗ ДАННЫХ (`routing.main_topic_primacy`) — те же данные
+   * исполняет лаборатория (`analyzer/routing.py`). Два потребителя одного
+   * правила обязаны читать один файл, иначе это два разных правила.
+   *
+   * Место в цепочке: главная тема → голос суждения → арбитраж §2.3а. Правило
+   * правит голос СУЖДЕНИЯ и потому не может перебить сработавший детектор.
+   *
+   * Пустая секция обязана не менять ни одного маршрута — это контракт
+   * обратной совместимости, и он закреплён тестом.
+   */
+  function mainTopic({ topics = [], level = null, intent = null } = {}) {
+    const list = Array.isArray(topics) ? topics.filter((t) => typeof t === 'string') : [];
+    if (list.length === 0) return Object.freeze({ topic: null, applied: null });
+    for (const rule of primacyRules) {
+      const when = rule.when || {};
+      if (when.level && !when.level.includes(level)) continue;
+      if (when.intent && !when.intent.includes(intent)) continue;
+      if (when.topic_first && !when.topic_first.includes(list[0])) continue;
+      if (when.topic_listed && !when.topic_listed.some((t) => list.includes(t))) continue;
+      const target = rule.then.main_topic;
+      if (target === list[0]) continue;              // правило уже исполнено
+      return Object.freeze({
+        topic: target,
+        applied: Object.freeze({
+          rule: rule.id, from: list[0], to: target,
+          unacceptableOutcome: rule.unacceptable_outcome,
+        }),
+      });
+    }
+    return Object.freeze({ topic: list[0], applied: null });
   }
 
   /**
@@ -190,7 +263,10 @@ export function createRouteArbiter(spec) {
     });
   }
 
-  return Object.freeze({ arbitrate, routeOfTopic, refusalTopic, provenLayer, rules: IMPLEMENTED_RULES });
+  return Object.freeze({
+    arbitrate, routeOfTopic, mainTopic, refusalTopic, provenLayer,
+    rules: IMPLEMENTED_RULES, primacyRules,
+  });
 }
 
 /**

@@ -136,14 +136,19 @@ function countedProvider() {
   };
 }
 
-/** Вердикт-заглушка с заданной главной темой — для прогона dispatch-пути. */
-function verdictJson(topics) {
+/**
+ * Вердикт-заглушка с заданными темами — для прогона dispatch-пути.
+ * Уровень и намерение по умолчанию предметные (L1/explicit): правила
+ * первенства на такой ход не срабатывают, и старые тесты меряют то же, что
+ * мерили.
+ */
+function verdictJson(topics, { level = 'L1', intent = 'explicit' } = {}) {
   return JSON.stringify({
     topics,
     topics_evidence: 'что такое агент',
     context_dependent: false,
-    level: { hypothesis: 'L1', confidence: 'medium', evidence: 'что такое агент' },
-    intent: { kind: 'explicit', confidence: 'high', evidence: '', hidden_premise: null },
+    level: { hypothesis: level, confidence: 'medium', evidence: 'что такое агент' },
+    intent: { kind: intent, confidence: 'high', evidence: '', hidden_premise: null },
   });
 }
 
@@ -866,4 +871,41 @@ test('the synthetic daily cap has a default and stays configurable', () => {
       .assistantSyntheticDailyPerUser,
     60,
   );
+});
+
+// ── Первенство главной темы (пилюльный шов) ─────────────────────────────────
+
+// Продуктовый смысл правила: человек с посылкой «учиться не надо», получивший
+// ответ содержанием курса, получает подтверждение посылки. Уровень при этом
+// распознан ВЕРНО — дефект не в суждении, а в выборе формы ответа по порядку
+// тем, названному моделью. Замер: 2 хода из 59 на голде, оба исправления.
+withRuntime('a pill turn is answered in the value form, not with course content', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({
+    text: verdictJson(['content'], { level: 'L3', intent: 'latent' }),
+    mode: ANALYZER_MODES.DISPATCH,
+  });
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask А мне-то самому что надо знать, чтобы их контролировать?');
+  assert.equal(result.kind, 'answered', JSON.stringify(result));
+  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' },
+    'главной темой при L3 берётся ценность, а не содержание');
+  assert.ok(actions.at(-1)[1].text.endsWith(':advise'));
+});
+
+// Обратная сторона того же правила: предметный ход не должен пострадать.
+// Правило адресует пилюльный класс, а не «содержание вообще».
+withRuntime('a subject turn keeps the content form', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: verdictJson(['content']), mode: ANALYZER_MODES.DISPATCH });
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask Что такое эмбеддинги простыми словами?');
+  assert.equal(result.kind, 'answered', JSON.stringify(result));
+  assert.deepEqual(result.route, { action: 'teach', sourceId: 'course-content-v1' });
 });

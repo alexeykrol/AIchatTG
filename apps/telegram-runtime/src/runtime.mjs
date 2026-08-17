@@ -1212,9 +1212,24 @@ export function createTelegramRuntime({
     // Нормализация тем же контрактом, что у модельного роутера: спроецированный
     // из данных маршрут обязан пройти ту же проверку пары action↔sourceId,
     // которую проходит маршрут провайдера, — у ответной модели один вход.
-    const mapped = observation.status === 'ok'
-      ? normalizeAssistantRoleRoute(routeArbiter.routeOfTopic(observation.verdict.topics[0]))
+    // Главная тема — не «первая названная», а результат правил первенства из
+    // тех же данных (см. mainTopic): на пилюльном классе порядок тем от модели
+    // давал ответ в предметной форме, то есть подтверждал посылку «учиться не
+    // надо». Правила лежат в спеке вместе с недопустимым исходом.
+    const primacy = observation.status === 'ok'
+      ? routeArbiter.mainTopic({
+        topics: observation.verdict.topics,
+        level: observation.verdict.level?.hypothesis ?? null,
+        intent: observation.verdict.intent?.kind ?? null,
+      })
+      : { topic: null, applied: null };
+    const mapped = primacy.topic
+      ? normalizeAssistantRoleRoute(routeArbiter.routeOfTopic(primacy.topic))
       : null;
+    if (primacy.applied) {
+      console.info(`[runtime] analyzer primacy event=${eventId} rule=${primacy.applied.rule} `
+        + `${primacy.applied.from}→${primacy.applied.to}`);
+    }
     if (!mapped) {
       console.error(`[runtime] analyzer dispatch degraded to the previous router event=${eventId} `
         + `status=${observation.status} error=${String(observation.error || observation.code || '').slice(0, 200)}`);

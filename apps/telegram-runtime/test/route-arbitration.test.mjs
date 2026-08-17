@@ -316,3 +316,55 @@ test('the gold set through the dispatch mapping yields zero refusals and zero do
   assert.deepEqual(refused, [], `ложных «не уполномочен»: ${refused.length}`);
   assert.deepEqual(rerouted, [], `украденных из содержания: ${rerouted.length}`);
 });
+
+// ── Первенство главной темы ─────────────────────────────────────────────────
+
+test('the pill rule moves the main topic from content to value at L3', () => {
+  const pill = ROUTE_ARBITER.mainTopic({ topics: ['content', 'value'], level: 'L3', intent: 'latent' });
+  assert.equal(pill.topic, 'value');
+  assert.equal(pill.applied.rule, 'pill_is_never_answered_with_content');
+  assert.ok(pill.applied.unacceptableOutcome, 'правило обязано нести недопустимый исход');
+
+  // Намерение в условие не входит: если бы входило, произнесённая вслух
+  // посылка разрешала бы отвечать содержанием — тот же исход, только в виде
+  // разрешения.
+  assert.equal(ROUTE_ARBITER.mainTopic({ topics: ['content'], level: 'L3', intent: 'explicit' }).topic, 'value');
+
+  // Предметный ход не задет: правило адресует пилюльный класс, а не
+  // «содержание вообще».
+  const subject = ROUTE_ARBITER.mainTopic({ topics: ['content'], level: 'L1', intent: 'explicit' });
+  assert.equal(subject.topic, 'content');
+  assert.equal(subject.applied, null);
+
+  // Правило уже исполнено моделью — менять нечего, долга нет.
+  assert.equal(ROUTE_ARBITER.mainTopic({ topics: ['value', 'content'], level: 'L3' }).applied, null);
+  assert.equal(ROUTE_ARBITER.mainTopic({ topics: [] }).topic, null);
+});
+
+test('with no primacy rules the main topic is the first one — proof it is data, not an if', () => {
+  const bare = JSON.parse(JSON.stringify(SPEC.spec));
+  bare.routing.main_topic_primacy = { rules: [] };
+  const arbiter = createRouteArbiter(bare);
+  for (const level of ['L1', 'L2', 'L3']) {
+    assert.equal(arbiter.mainTopic({ topics: ['content', 'value'], level, intent: 'latent' }).topic, 'content');
+  }
+  delete bare.routing.main_topic_primacy;
+  assert.equal(createRouteArbiter(bare).mainTopic({ topics: ['content'], level: 'L3' }).topic, 'content');
+});
+
+test('primacy data the code cannot execute fails the build instead of half-running', () => {
+  const withRule = (rule) => {
+    const spec = JSON.parse(JSON.stringify(SPEC.spec));
+    spec.routing.main_topic_primacy = { rules: [rule] };
+    return () => createRouteArbiter(spec);
+  };
+  const good = { id: 'r', when: { level: ['L3'] }, then: { main_topic: 'value' }, unacceptable_outcome: 'x' };
+
+  assert.throws(withRule({ ...good, when: { trajectory_depth: [3] } }), /primacy_condition_unimplemented/u);
+  assert.throws(withRule({ ...good, when: { level: ['L9'] } }), /primacy_value_unknown/u);
+  assert.throws(withRule({ ...good, when: {} }), /primacy_empty_when/u);
+  assert.throws(withRule({ ...good, then: { main_topic: 'nowhere' } }), /primacy_target_unknown/u);
+  // Правило без недопустимого исхода — правило «от устройства»: запрещено.
+  assert.throws(withRule({ id: 'r', when: { level: ['L3'] }, then: { main_topic: 'value' } }),
+    /primacy_without_outcome/u);
+});
