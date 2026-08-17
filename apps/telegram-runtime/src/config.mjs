@@ -283,6 +283,15 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     },
     assistantCooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20, 86_400),
     assistantDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20, 10_000),
+    // Отдельный потолок для синтетических отправителей. Замер 2026-08-16: прогон
+    // приёмки из 30 вопросов дал 4 ответа и 26 отказов `daily_cap` — человеческая
+    // защита от злоупотребления сделала измерительный контур неисполнимым, то есть
+    // работу пришлось бы принимать мнением. Потолок не снимается (расход на модель
+    // остаётся ограниченным) — он назван отдельно, как и требует Ц4: ступени и
+    // защита от злоупотребления суть разные механизмы с разными значениями.
+    // Действует ТОЛЬКО когда синтетическое тестирование включено и отправитель
+    // опознан синтетическим; 0 означает «как у людей».
+    assistantSyntheticDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER', 200, 10_000),
     assistantDialogueTtlSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TTL_SEC', 604_800, 31_536_000),
     assistantDialogueTurnLimit: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT', 3, { min: 1, max: 100 }),
     analyzer: analyzerConfig(env, cwd),

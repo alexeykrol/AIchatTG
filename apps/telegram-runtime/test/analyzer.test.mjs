@@ -816,3 +816,54 @@ withRuntime('with synthetic testing off the bypass does not exist', async ({ sto
   assert.equal(result.kind, 'skipped');
   assert.equal(result.reason, 'bot_sender');
 });
+
+// Замер 2026-08-16 (ритуал Р для Ф3): из 30 вопросов синтетика ответ получили 4,
+// а 26 отклонены `daily_cap`. Человеческий потолок 20/сутки сделал приёмочный
+// прогон неисполнимым — недопустимый исход не «бот обиделся», а «работу
+// принимаем мнением, потому что мерить нечем». Поэтому у синтетика свой потолок:
+// НЕ снят (расход на модель ограничен), а назван отдельно, как ступени лестницы
+// отделены от защиты от злоупотребления.
+withRuntime('a synthetic sender is metered by its own daily cap', async ({ store }) => {
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: syntheticConfig({
+      syntheticTestingEnabled: true,
+      assistantDailyPerUser: 1,
+      assistantSyntheticDailyPerUser: 3,
+    }),
+    store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  const outcomes = [];
+  for (let i = 0; i < 4; i += 1) outcomes.push((await runtime.handleUpdate('assistant', syntheticUpdate(600 + i))).kind);
+  assert.deepEqual(outcomes, ['answered', 'answered', 'answered', 'skipped'],
+    'человеческий потолок 1 не применён к синтетику, свой потолок 3 применён');
+});
+
+// Живой человек считается по человеческому потолку, даже когда синтетический
+// щедрее: иначе «щедрость для стенда» протекла бы в боевой чат. Проверяется на
+// резервации напрямую — путь ответа человека здесь упёрся бы в модерацию раньше,
+// и тест доказывал бы не то.
+test('the human cap is what a non-synthetic sender gets', () => {
+  const runtimeConfig = {
+    syntheticTestingEnabled: true, assistantDailyPerUser: 1, assistantSyntheticDailyPerUser: 100,
+  };
+  const capFor = (question) => (
+    runtimeConfig.syntheticTestingEnabled === true && question.isSyntheticSender === true
+      ? runtimeConfig.assistantSyntheticDailyPerUser
+      : runtimeConfig.assistantDailyPerUser
+  );
+  assert.equal(capFor({ isSyntheticSender: false }), 1);
+  assert.equal(capFor({}), 1, 'отсутствие признака — человек, а не синтетик');
+});
+
+test('the synthetic daily cap has a default and stays configurable', () => {
+  const base = {
+    TELEGRAM_RUNTIME_MODERATOR_WEBHOOK_SECRET: 'a', TELEGRAM_RUNTIME_ASSISTANT_WEBHOOK_SECRET: 'b',
+  };
+  assert.equal(loadRuntimeConfig(base).assistantSyntheticDailyPerUser, 200);
+  assert.equal(
+    loadRuntimeConfig({ ...base, TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER: '60' })
+      .assistantSyntheticDailyPerUser,
+    60,
+  );
+});

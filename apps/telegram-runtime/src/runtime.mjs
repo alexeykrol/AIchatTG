@@ -1223,7 +1223,12 @@ export function createTelegramRuntime({
         chatId: question.chatId,
         userId: question.userId,
         cooldownSec: config.assistantCooldownSec,
-        dailyCap: config.assistantDailyPerUser,
+        // Синтетик считается по своему потолку: иначе приёмочный прогон упирается
+        // в защиту, написанную против злоупотребления человеком (замер: 26 отказов
+        // из 30 ходов). Кулдаун при этом общий — он защищает не квоту, а темп.
+        dailyCap: (config.syntheticTestingEnabled === true && question.isSyntheticSender === true)
+          ? config.assistantSyntheticDailyPerUser
+          : config.assistantDailyPerUser,
       });
       if (!request.allowed) {
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: request.reason });

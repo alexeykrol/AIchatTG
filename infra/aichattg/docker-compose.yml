@@ -106,6 +106,10 @@ services:
       TELEGRAM_RUNTIME_ASSISTANT_EXEMPT_BOT_IDS: "${TELEGRAM_RUNTIME_ASSISTANT_EXEMPT_BOT_IDS:-}"
       TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC: "${TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC:-20}"
       TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER: "${TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER:-20}"
+      # Потолок синтетика — отдельный: человеческие 20/сутки сделали приёмочный
+      # прогон неисполнимым (замер: 4 ответа и 26 отказов на 30 ходов). Работает
+      # только при включённом синтетическом тестировании.
+      TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER: "${TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER:-200}"
       TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED: "${TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED:-false}"
       # Анализатор запроса. off по умолчанию: выкат не меняет ни одного чата,
       # пока чат не назван явно. observe — вердикт только журналируется;
