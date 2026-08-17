@@ -25,6 +25,9 @@ import {
   compileAnalyzerSystemPrompt,
   parseAnalyzerVerdict,
 } from './analyzer-spec.mjs';
+// Контракт учёта затрат один на весь рантайм и живёт у транспорта. Свой
+// нормализатор здесь означал бы две линейки для одного и того же расхода.
+import { providerCallUsage } from './provider-adapter.mjs';
 
 export const ANALYZER_MODES = Object.freeze({ OFF: 'off', OBSERVE: 'observe', DISPATCH: 'dispatch' });
 
@@ -32,7 +35,7 @@ function unavailable(code) {
   return Object.freeze({
     enabled: false, mode: ANALYZER_MODES.OFF, reason: code, digest: null,
     appliesTo: () => false,
-    analyze: async () => ({ status: 'error', code }),
+    analyze: async () => ({ status: 'error', code, usage: providerCallUsage(null) }),
   });
 }
 
@@ -78,20 +81,38 @@ export function createAnalyzerAdapter({ config, provider, spec, digest = null } 
   /** Пустой список чатов означает «нигде», а не «везде»: fail closed. */
   function appliesTo(chatId) { return chatIds.has(String(chatId)); }
 
+  /**
+   * Расход возвращается при ЛЮБОМ исходе, включая негодный вердикт и отказ
+   * провайдера: битый JSON и HTTP-ошибка приходят ПОСЛЕ того, как вызов
+   * состоялся, и квитанция с токенами у такой ошибки есть. Списать их в «ничего
+   * не потратили» значило бы занижать учёт ровно на самых дорогих ходах — тех,
+   * что не дали результата. Локальный отказ до сети (`analyzer_request_invalid`)
+   * расхода не имеет, и там все счётчики остаются null.
+   */
   async function analyze({ text, previousTexts = [] } = {}) {
     const turnText = typeof text === 'string' ? text.trim() : '';
-    if (!turnText) return { status: 'error', code: 'analyzer_request_invalid' };
+    if (!turnText) return { status: 'error', code: 'analyzer_request_invalid', usage: providerCallUsage(null) };
     let raw;
     try {
       raw = await provider.analyze({ system, input: buildAnalyzerUserPayload(turnText, previousTexts) });
     } catch (error) {
-      return { status: 'error', code: String(error?.code || 'analyzer_provider_failed') };
+      const usage = providerCallUsage(error?.receipt);
+      return {
+        status: 'error',
+        code: String(error?.code || 'analyzer_provider_failed'),
+        modelId: usage.modelId,
+        usage,
+      };
     }
+    const usage = providerCallUsage(raw?.receipt);
     const verdict = parseAnalyzerVerdict(raw?.text, spec, turnText);
     if (verdict.status !== 'ok') {
-      return { status: 'invalid', error: verdict.error, raw: verdict.raw, modelId: raw?.modelId || null };
+      return {
+        status: 'invalid', error: verdict.error, raw: verdict.raw,
+        modelId: raw?.modelId || usage.modelId, usage,
+      };
     }
-    return { status: 'ok', verdict, modelId: raw?.modelId || null };
+    return { status: 'ok', verdict, modelId: raw?.modelId || usage.modelId, usage };
   }
 
   return Object.freeze({ enabled: true, mode, reason: null, digest, appliesTo, analyze });

@@ -199,8 +199,19 @@ function warningContextAvailable(context) { return context.weak_strikes > 0 && c
 function safetyRoute(router) { return router.threat.match ? 'threat' : router.abuse.match ? 'abuse' : 'clean'; }
 function sha256(value) { return createHash('sha256').update(String(value)).digest('hex'); }
 
+/**
+ * Расход двухступенчатой модерации. Суммируются ТОЛЬКО названные провайдером
+ * счётчики; если их не назвал никто, поле остаётся `null`, а не превращается в
+ * ноль. Ноль здесь читался бы как «модерация ничего не стоила» — недостача
+ * учёта выглядела бы экономией (тот же контракт, что `providerCallUsage`).
+ */
 function aggregateUsage(results) {
-  const sum = (field) => results.reduce((total, result) => total + (Number(result?.receipt?.[field]) || 0), 0);
+  const sum = (field) => {
+    const measured = results
+      .map((result) => result?.receipt?.[field])
+      .filter((value) => Number.isSafeInteger(value) && value >= 0);
+    return measured.length ? measured.reduce((total, value) => total + value, 0) : null;
+  };
   return {
     calls: results.length,
     failed: 0,

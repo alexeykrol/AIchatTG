@@ -261,6 +261,37 @@ function responseHeader(response, name) {
 }
 
 function tokenCount(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
+
+/** Вызов, чью цену никто не назвал: пусто во всех счётчиках, но не ноль. */
+const UNMEASURED_CALL = Object.freeze({
+  modelId: null, inputTokens: null, outputTokens: null, totalTokens: null,
+});
+
+/**
+ * Расход одного вызова — контракт учёта, ОДИН на все операции рантайма
+ * (модерация, роутер, анализатор, ответ). Имена полей повторяют лабораторные
+ * (`dialogue_eval/judge.py`: `prompt_tokens → input`, `completion_tokens →
+ * output`, `total_tokens → total`), чтобы цифры боя и лаборатории складывались
+ * одной линейкой, а не двумя похожими.
+ *
+ * Неназванный расход — `null`, а НЕ ноль. Ноль означал бы «вызов ничего не
+ * стоил», и тогда вызов, чью цену провайдер не назвал, стал бы неотличим от
+ * бесплатного: сумма по журналу занижалась бы молча и выглядела бы экономией.
+ * Деньги здесь не считаются вовсе: тариф — знание вне рантайма, а выдуманная
+ * цифра в отчёте хуже её отсутствия.
+ */
+export function providerCallUsage(receipt) {
+  if (!plainObject(receipt)) return UNMEASURED_CALL;
+  const modelId = typeof receipt.modelId === 'string' && MODEL_PATTERN.test(receipt.modelId)
+    ? receipt.modelId : null;
+  return Object.freeze({
+    modelId,
+    inputTokens: tokenCount(receipt.inputTokens),
+    outputTokens: tokenCount(receipt.outputTokens),
+    totalTokens: tokenCount(receipt.totalTokens),
+  });
+}
+
 function usageFrom(response) {
   if (response?.usage == null) return { inputTokens: null, outputTokens: null, totalTokens: null };
   if (!plainObject(response.usage)) return null;

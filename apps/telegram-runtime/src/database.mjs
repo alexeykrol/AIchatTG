@@ -255,6 +255,24 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_analyzer_observations (
   -- этой колонки исчезал бы бесследно — вместе с уликой о пробеле детектора.
   detector_debt TEXT,
   model_id TEXT,
+  -- Затраты вызова анализатора. Имена полей повторяют лабораторные
+  -- (dialogue_eval/judge.py: prompt/completion/total → input/output/total),
+  -- чтобы цифры боя и лаборатории складывались одной линейкой. NULL означает
+  -- «провайдер расход не назвал», а не «расхода не было»: ноль сделал бы
+  -- неучтённый вызов неотличимым от бесплатного и занизил бы сумму молча.
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
+  -- Второй платный вызов того же хода — модельный роутер. Он живёт здесь, а не
+  -- в записи ответа, потому что эта строка пишется на КАЖДОМ ходу, включая
+  -- ходы, закончившиеся отказом и не дошедшие до ответа: оплаченный вызов,
+  -- не оставивший следа, и есть та дыра в учёте, ради которой заведены колонки.
+  -- Своя модель у роутера отдельно: складывать токены разных моделей в одно
+  -- число значит потерять то, чем эта сумма была оплачена.
+  route_model_id TEXT,
+  route_input_tokens INTEGER,
+  route_output_tokens INTEGER,
+  route_total_tokens INTEGER,
   error TEXT,
   created_at INTEGER NOT NULL
 );
@@ -289,6 +307,12 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_answer_records (
   knowledge_source_id TEXT,
   served_unit_ids TEXT,
   model_id TEXT,
+  -- Затраты вызова ОТВЕТА, тем же контрактом полей, что в журнале наблюдений.
+  -- Пустые счётчики законны: детерминированный ответ (граница, воздержание)
+  -- модель не вызывает, и платить там нечем.
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
   delivery TEXT,
   created_at INTEGER NOT NULL
 );
@@ -387,6 +411,19 @@ export function ensureRuntimeDatabaseSchema(db) {
   // перестройки таблицы и без потери прежних строк.
   const observationColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_analyzer_observations)').all().map((row) => row.name));
   if (!observationColumns.has('detector_debt')) db.exec('ALTER TABLE runtime_assistant_analyzer_observations ADD COLUMN detector_debt TEXT');
+  // Учёт затрат дописан к обеим таблицам тем же аддитивным приёмом: боевая
+  // база, накопившая ходы без счётчиков, открывается как есть, старые строки
+  // остаются с NULL (расход тех ходов не измерен и выдумывать его нечем), а
+  // новые пишутся уже с токенами.
+  for (const column of ['input_tokens', 'output_tokens', 'total_tokens', 'route_input_tokens',
+    'route_output_tokens', 'route_total_tokens']) {
+    if (!observationColumns.has(column)) db.exec(`ALTER TABLE runtime_assistant_analyzer_observations ADD COLUMN ${column} INTEGER`);
+  }
+  if (!observationColumns.has('route_model_id')) db.exec('ALTER TABLE runtime_assistant_analyzer_observations ADD COLUMN route_model_id TEXT');
+  const answerColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_answer_records)').all().map((row) => row.name));
+  for (const column of ['input_tokens', 'output_tokens', 'total_tokens']) {
+    if (!answerColumns.has(column)) db.exec(`ALTER TABLE runtime_assistant_answer_records ADD COLUMN ${column} INTEGER`);
+  }
 }
 
 /**
@@ -449,6 +486,32 @@ function serializeModeratorSnapshot(comment) {
     json,
     bytes,
     sha256: createHash('sha256').update(json).digest('hex'),
+  };
+}
+
+/**
+ * Счётчик токенов на запись: целое ≥ 0 либо NULL. Приведения «пусто → ноль»
+ * здесь нет и быть не может — неизмеренный расход обязан остаться отличимым от
+ * нулевого, иначе сумма по журналу занижается молча. Тот же контракт, что у
+ * `providerCallUsage` в адаптере провайдера: бухгалтерия — код, и она одна.
+ */
+function tokenColumn(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
+
+function usageColumns(usage) {
+  return {
+    modelId: typeof usage?.modelId === 'string' && usage.modelId ? usage.modelId.slice(0, 200) : null,
+    inputTokens: tokenColumn(usage?.inputTokens),
+    outputTokens: tokenColumn(usage?.outputTokens),
+    totalTokens: tokenColumn(usage?.totalTokens),
+  };
+}
+
+/** Чтение затрат обратно: старая строка без счётчиков читается как «не измерено». */
+function usageOf(row, prefix = '') {
+  return {
+    inputTokens: tokenColumn(row?.[`${prefix}input_tokens`]),
+    outputTokens: tokenColumn(row?.[`${prefix}output_tokens`]),
+    totalTokens: tokenColumn(row?.[`${prefix}total_tokens`]),
   };
 }
 
@@ -585,11 +648,14 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const insertAnalyzerObservation = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_analyzer_observations
     (id, event_id, chat_id, user_id, question, status, topics, level, level_confidence,
      intent, intent_confidence, hints, route_action, route_source_id, verdict_json, detector_debt,
-     model_id, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     model_id, input_tokens, output_tokens, total_tokens,
+     route_model_id, route_input_tokens, route_output_tokens, route_total_tokens,
+     error, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const listAnalyzerObservationRows = db.prepare(`SELECT id, event_id, chat_id, user_id, question, status,
       topics, level, level_confidence, intent, intent_confidence, hints, route_action, route_source_id,
-      verdict_json, detector_debt, model_id, error, created_at
+      verdict_json, detector_debt, model_id, input_tokens, output_tokens, total_tokens,
+      route_model_id, route_input_tokens, route_output_tokens, route_total_tokens, error, created_at
     FROM runtime_assistant_analyzer_observations ORDER BY created_at DESC, id DESC LIMIT ?`);
   const listUserAnalyzerLevelRows = db.prepare(`SELECT level, level_confidence, created_at
     FROM runtime_assistant_analyzer_observations
@@ -600,10 +666,12 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   // ходы, а не доставки.
   const insertAnswerRecord = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_answer_records
     (event_id, chat_id, user_id, question, answer, route_action, route_source_id,
-     knowledge_source_id, served_unit_ids, model_id, delivery, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     knowledge_source_id, served_unit_ids, model_id, input_tokens, output_tokens, total_tokens,
+     delivery, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const listAnswerRecordRows = db.prepare(`SELECT event_id, chat_id, user_id, question, answer,
-      route_action, route_source_id, knowledge_source_id, served_unit_ids, model_id, delivery, created_at
+      route_action, route_source_id, knowledge_source_id, served_unit_ids, model_id,
+      input_tokens, output_tokens, total_tokens, delivery, created_at
     FROM runtime_assistant_answer_records ORDER BY created_at DESC, event_id DESC LIMIT ?`);
   const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
@@ -1205,10 +1273,15 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
      */
     recordAnalyzerObservation({
       eventId, chatId, userId, question, status, verdict = null, hints = [],
-      route = null, detectorDebt = null, modelId = null, error = null,
+      route = null, detectorDebt = null, modelId = null, usage = null, routeUsage = null, error = null,
     }) {
       const level = verdict?.level || null;
       const intent = verdict?.intent || null;
+      // Затраты хода: вызов анализатора и — когда он был — вызов модельного
+      // роутера. Оба пишутся своими счётчиками и своей моделью: сложить их в
+      // одно число значило бы потерять, чем именно эта сумма оплачена.
+      const analyzerCost = usageColumns(usage);
+      const routeCost = usageColumns(routeUsage);
       insertAnalyzerObservation.run(
         randomUUID(), String(eventId), String(chatId), String(userId), String(question), String(status),
         Array.isArray(verdict?.topics) ? verdict.topics.join(',') : null,
@@ -1219,6 +1292,8 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         verdict ? JSON.stringify(verdict) : null,
         detectorDebt ? JSON.stringify(detectorDebt) : null,
         modelId == null ? null : String(modelId),
+        analyzerCost.inputTokens, analyzerCost.outputTokens, analyzerCost.totalTokens,
+        routeCost.modelId, routeCost.inputTokens, routeCost.outputTokens, routeCost.totalTokens,
         error == null ? null : String(error).slice(0, 500),
         now(),
       );
@@ -1244,6 +1319,11 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         verdict: row.verdict_json ? JSON.parse(row.verdict_json) : null,
         detectorDebt: row.detector_debt ? JSON.parse(row.detector_debt) : null,
         modelId: row.model_id,
+        // Затраты хода. Пустые счётчики — «не измерено», и это не то же самое,
+        // что ноль: ход до этой правки (или вызов, чью цену провайдер не
+        // назвал) обязан быть виден как пробел учёта, а не как экономия.
+        usage: usageOf(row),
+        routeUsage: { modelId: row.route_model_id ?? null, ...usageOf(row, 'route_') },
         error: row.error,
         createdAt: row.created_at,
       }));
@@ -1266,7 +1346,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
      */
     recordAssistantAnswer({
       eventId, chatId, userId, question, answer, route = null, knowledge = null,
-      modelId = null, delivery = null,
+      modelId = null, usage = null, delivery = null,
     }) {
       const action = typeof route === 'string' ? route : (route?.action || null);
       const sourceId = typeof route === 'string' ? null : (route?.sourceId || null);
@@ -1277,6 +1357,10 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         const id = entry?.id == null ? '' : String(entry.id).slice(0, 200);
         if (id && !served.includes(id)) served.push(id);
       }
+      // Затраты вызова ответа. Детерминированный текст (граница, воздержание)
+      // модель не вызывает — там счётчики остаются пустыми, и это факт «вызова
+      // не было», а не ноль расхода.
+      const answerCost = usageColumns(usage);
       insertAnswerRecord.run(
         String(eventId), String(chatId), userId == null ? '' : String(userId),
         String(question), String(answer),
@@ -1285,6 +1369,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         knowledge?.sourceId == null ? null : String(knowledge.sourceId).slice(0, 200),
         served.length ? JSON.stringify(served) : null,
         modelId == null ? null : String(modelId),
+        answerCost.inputTokens, answerCost.outputTokens, answerCost.totalTokens,
         delivery == null ? null : String(delivery).slice(0, 120),
         now(),
       );
@@ -1301,6 +1386,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         knowledgeSourceId: row.knowledge_source_id,
         servedUnitIds: row.served_unit_ids ? JSON.parse(row.served_unit_ids) : [],
         modelId: row.model_id,
+        usage: usageOf(row),
         delivery: row.delivery,
         createdAt: row.created_at,
       }));

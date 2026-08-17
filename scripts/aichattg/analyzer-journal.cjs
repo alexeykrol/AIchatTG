@@ -43,8 +43,15 @@ const limit = Math.max(1, Math.min(1_000, Number.parseInt(arg('limit', '30'), 10
 // `detector_debt` дописан аддитивно (этап Ф3). Читалка обязана работать и с
 // базой, где колонки ещё нет: иначе разведка по старому снимку падает вместо
 // того, чтобы честно сказать «долга не записано».
-const observationColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_analyzer_observations)')
-  .all().map((row) => row.name));
+function columnsOf(table) {
+  try {
+    return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name));
+  } catch { return new Set(); }
+}
+function tableExists(name) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+}
+const observationColumns = columnsOf('runtime_assistant_analyzer_observations');
 const debtColumn = observationColumns.has('detector_debt') ? 'detector_debt' : 'NULL AS detector_debt';
 
 // Окно прогона. Без него журнал смешивает прогоны, а вопросы ритуала от
@@ -94,6 +101,64 @@ console.log(`уровень:   ${tally(ok.map((row) => row.level))}`);
 console.log(`намерение: ${tally(ok.map((row) => row.intent))}`);
 console.log(`хинты:     ${tally(rows.flatMap((row) => (row.hints || '').split(',').filter(Boolean)))}`);
 console.log(`маршрут:   ${tally(rows.map((row) => row.route_action))}`);
+
+// ── Расход ──────────────────────────────────────────────────────────────────
+// Имя модели рантайм писал и раньше, токены — нет, поэтому по бою можно было
+// назвать число вызовов, но не стоимость. Здесь суммируются ровно те счётчики,
+// которые назвал провайдер: вызовы без учёта печатаются отдельным числом и в
+// сумму нулями НЕ подмешиваются — иначе пробел учёта выглядел бы экономией.
+//
+// Сумма считается по ОКНУ, а не по показанным строкам: `--limit` режет вывод,
+// но не прогон, и складывать «последние 30 напечатанных» значило бы мерить
+// длину вывода вместо цены прогона.
+//
+// Колонки дописаны аддитивно (как detector_debt), поэтому снимок, сделанный до
+// них, обязан читаться: честное «расход не записан» полезнее падения.
+function spend(table, { modelColumn = 'model_id', prefix = '' } = {}) {
+  if (!tableExists(table)) return null;
+  const columns = columnsOf(table);
+  if (!columns.has(`${prefix}input_tokens`) || !columns.has(modelColumn)) return null;
+  const row = db.prepare(`SELECT
+      COUNT(${modelColumn}) AS calls,
+      COUNT(${prefix}input_tokens) AS measured,
+      SUM(${prefix}input_tokens) AS input,
+      SUM(${prefix}output_tokens) AS output,
+      SUM(${prefix}total_tokens) AS total
+    FROM ${table} WHERE ${where.join(' AND ')}`).get(...params);
+  return {
+    calls: row.calls || 0, measured: row.measured || 0,
+    input: row.input || 0, output: row.output || 0, total: row.total || 0,
+  };
+}
+
+const OBSERVATIONS = 'runtime_assistant_analyzer_observations';
+const ANSWERS = 'runtime_assistant_answer_records';
+const stages = [
+  ['анализатор', spend(OBSERVATIONS)],
+  ['роутер', spend(OBSERVATIONS, { modelColumn: 'route_model_id', prefix: 'route_' })],
+  ['ответ', spend(ANSWERS)],
+];
+const measuredStages = stages.filter(([, value]) => value !== null);
+if (measuredStages.length === 0) {
+  console.log('\nрасход за окно: в этом снимке базы учёт затрат не записан (колонки добавлены позже)');
+} else {
+  const totals = measuredStages.reduce((sum, [, value]) => ({
+    calls: sum.calls + value.calls, measured: sum.measured + value.measured,
+    input: sum.input + value.input, output: sum.output + value.output, total: sum.total + value.total,
+  }), { calls: 0, measured: 0, input: 0, output: 0, total: 0 });
+  const unmeasured = totals.calls - totals.measured;
+  // Деньги не считаются намеренно: тариф — знание вне рантайма, а выдуманная
+  // цифра в отчёте хуже её отсутствия (тот же контракт, что у лаборатории).
+  // «за окно» в заголовке не украшение: строки выше режет `--limit`, а расход
+  // считается по всему окну, и без этого слова два числа читались бы как одно.
+  console.log(`\nрасход за окно: вызовов ${totals.calls} · вход ${totals.input} · выход ${totals.output}`
+    + ` · всего ${totals.total}${unmeasured ? ` · без учёта вызовов: ${unmeasured}` : ''}`);
+  for (const [name, value] of stages) {
+    if (value === null) { console.log(`  · ${name}: в базе нет колонок учёта`); continue; }
+    console.log(`  · ${name}: вызовов ${value.calls} · вход ${value.input} · выход ${value.output}`
+      + ` · всего ${value.total}${value.calls > value.measured ? ` · без учёта: ${value.calls - value.measured}` : ''}`);
+  }
+}
 
 // Расхождение хинта и модели — самое ценное место журнала: там либо детектор
 // слеп, либо суждение мимо. Сравнение СИММЕТРИЧНО: односторонняя проверка

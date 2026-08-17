@@ -24,6 +24,7 @@ import {
   createProviderAdapter,
   isProvenNoCallRequestError,
   isProviderUnavailableError,
+  providerCallUsage,
 } from './provider-adapter.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { ROUTE_ARBITER as routeArbiter } from './route-arbitration.mjs';
@@ -925,23 +926,33 @@ export function createTelegramRuntime({
     return runModeratorJudgement(claimed.claim);
   }
 
+  /**
+   * Расход роутера уезжает вместе с маршрутом (`routerUsage`) и прикладывается
+   * к ЛЮБОМУ исходу: вызов оплачен и тогда, когда его ответ оказался негодным.
+   * Учёт, считающий только удачные вызовы, показывал бы систему дешевле, чем
+   * она есть, — а нужен ровно обратный эффект.
+   */
   async function routeAssistantQuestion(question, hints = assistantQuestionHints(question.text)) {
     const { operations: courseOperationsHint, value: courseValueHint } = hints;
-    let route;
+    let answered;
     try {
-      route = normalizeAssistantRoleRoute(await modelProvider.routeAssistant({
+      answered = await modelProvider.routeAssistant({
         text: question.text,
         chatId: question.chatId,
         userId: question.userId,
         courseOperationsHint,
         courseValueHint,
-      }));
+      });
     } catch (error) {
-      if (isProviderUnavailableError(error)) return { error: error.code };
+      // Провайдера нет вовсе — вызова не было, и расхода тоже: квитанции здесь
+      // не существует, поэтому счётчики остаются пустыми, а не нулевыми.
+      if (isProviderUnavailableError(error)) return { error: error.code, routerUsage: providerCallUsage(error?.receipt) };
       throw error;
     }
-    if (!route) return { error: 'assistant_route_invalid' };
-    return resolveAssistantRoute(question, hints, route);
+    const routerUsage = providerCallUsage(answered?.receipt);
+    const route = normalizeAssistantRoleRoute(answered);
+    if (!route) return { error: 'assistant_route_invalid', routerUsage };
+    return { ...(await resolveAssistantRoute(question, hints, route)), routerUsage };
   }
 
   /**
@@ -1072,6 +1083,10 @@ export function createTelegramRuntime({
       recordAssistantAnswerRecord({
         eventId, question, text: answer.text.trim(), route, knowledge,
         modelId: answer.modelId || null, transport,
+        // Цена ответа берётся из квитанции провайдера. У детерминированного
+        // текста (граница, воздержание, служебный ответ) квитанции нет —
+        // счётчики останутся пустыми, и это честное «вызова не было».
+        usage: providerCallUsage(answer.receipt),
       });
     }
     return { kind: 'answered', receipt, route };
@@ -1090,7 +1105,7 @@ export function createTelegramRuntime({
    * Запись обёрнута: сенсор не имеет права стоить человеку ответа. Её отказ
    * виден в логе процесса, а не в молчании бота.
    */
-  function recordAssistantAnswerRecord({ eventId, question, text, route, knowledge, modelId, transport }) {
+  function recordAssistantAnswerRecord({ eventId, question, text, route, knowledge, modelId, transport, usage }) {
     if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return;
     try {
       store.recordAssistantAnswer({
@@ -1102,6 +1117,7 @@ export function createTelegramRuntime({
         route,
         knowledge,
         modelId,
+        usage,
         // Деградация доставки обязана доехать до стенограммы: судить текст,
         // который человек получил урезанным, как целый — значит мерить не то,
         // что произошло.
@@ -1135,6 +1151,13 @@ export function createTelegramRuntime({
    * После перебивания в `route_action` стоит домен победителя, и без этой
    * записи проигравший голос исчезал бы бесследно — вместе с уликой о том,
    * что детектор чего-то не видит.
+   *
+   * Здесь же — цена самой маршрутизации: расход анализатора (`usage`) и расход
+   * модельного роутера (`routeUsage`), когда он вызывался. Роутер живёт в этой
+   * строке, а не в записи ответа, потому что строка журнала пишется на КАЖДОМ
+   * ходу — включая те, что закончились отказом и вовсе не дошли до ответа.
+   * Оплаченный вызов, не оставивший следа, — это и есть та дыра в учёте,
+   * ради которой всё затевалось.
    */
   function recordAnalyzerObservationRow({ eventId, question, hints, routing, observation }) {
     store.recordAnalyzerObservation({
@@ -1148,6 +1171,8 @@ export function createTelegramRuntime({
       route: routing?.route || null,
       detectorDebt: routing?.arbitration?.debt || null,
       modelId: observation.modelId || null,
+      usage: observation.usage || null,
+      routeUsage: routing?.routerUsage || null,
       error: observation.status === 'ok' ? null : (observation.error || observation.code || null),
     });
   }
