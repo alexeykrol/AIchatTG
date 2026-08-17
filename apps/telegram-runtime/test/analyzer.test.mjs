@@ -108,7 +108,7 @@ const VERDICT = JSON.stringify({
 });
 
 /** Анализатор, отвечающий заданным текстом; считает свои вызовы. */
-function stubAnalyzer({ text = VERDICT, fail = null, chatIds = ['-100'] } = {}) {
+function stubAnalyzer({ text = VERDICT, fail = null, chatIds = ['-100'], mode = ANALYZER_MODES.OBSERVE } = {}) {
   const calls = [];
   const provider = {
     async analyze(payload) {
@@ -118,9 +118,33 @@ function stubAnalyzer({ text = VERDICT, fail = null, chatIds = ['-100'] } = {}) 
     },
   };
   const adapter = createAnalyzerAdapter({
-    config: { mode: ANALYZER_MODES.OBSERVE, chatIds }, provider, spec: SPEC.spec, digest: SPEC.digest,
+    config: { mode, chatIds }, provider, spec: SPEC.spec, digest: SPEC.digest,
   });
   return { adapter, calls };
+}
+
+/** Роутер с учётом вызовов: dispatch обязан его НЕ звать, деградация — звать. */
+function countedProvider() {
+  const base = fakeProvider();
+  const routerCalls = [];
+  return {
+    routerCalls,
+    provider: {
+      ...base,
+      async routeAssistant(payload) { routerCalls.push(payload); return base.routeAssistant(payload); },
+    },
+  };
+}
+
+/** Вердикт-заглушка с заданной главной темой — для прогона dispatch-пути. */
+function verdictJson(topics) {
+  return JSON.stringify({
+    topics,
+    topics_evidence: 'что такое агент',
+    context_dependent: false,
+    level: { hypothesis: 'L1', confidence: 'medium', evidence: 'что такое агент' },
+    intent: { kind: 'explicit', confidence: 'high', evidence: '', hidden_premise: null },
+  });
 }
 
 async function runQuestion(runtime, text, { updateId = 40, messageId = 70 } = {}) {
@@ -286,12 +310,30 @@ test('the runtime config defaults to off and refuses a half-configured analyzer'
   assert.equal(loadRuntimeConfig({ ...base }).analyzer.mode, 'off');
   assert.throws(() => loadRuntimeConfig({ ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'observe' }),
     /ANALYZER_CHAT_IDS requires at least one chat/);
-  assert.throws(() => loadRuntimeConfig({ ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'dispatch', TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: '-100' }),
+  // dispatch (Ф4) — законный режим, но пустой список чатов роняет старт так же,
+  // как в observe: «включить везде» не возникает из забытой переменной.
+  assert.throws(() => loadRuntimeConfig({ ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'dispatch' }),
+    /ANALYZER_CHAT_IDS requires at least one chat/);
+  assert.throws(() => loadRuntimeConfig({ ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'broadcast', TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: '-100' }),
     /ANALYZER_MODE must be one of/);
   const enabled = loadRuntimeConfig({
     ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'observe', TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: '-100, -200',
   });
   assert.deepEqual(enabled.analyzer.chatIds, ['-100', '-200']);
+  const dispatch = loadRuntimeConfig({
+    ...base, TELEGRAM_RUNTIME_ANALYZER_MODE: 'dispatch', TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: '-100',
+  });
+  assert.equal(dispatch.analyzer.mode, 'dispatch');
+});
+
+// Опечатка режима при прямом вызове фабрики — выключенный анализатор, а не
+// «как observe»: неизвестная строка не имеет права включать поведение молча.
+test('an unknown mode yields a disabled adapter, not observe-by-accident', () => {
+  const adapter = createAnalyzerAdapter({
+    config: { mode: 'broadcast', chatIds: ['-100'] }, provider: { analyze: async () => ({}) }, spec: SPEC.spec,
+  });
+  assert.equal(adapter.enabled, false);
+  assert.equal(adapter.reason, 'analyzer_mode_unsupported');
 });
 
 // ── Наблюдение не трогает ответ ─────────────────────────────────────────────
@@ -466,6 +508,212 @@ withRuntime('a replayed event does not double the observation', async ({ store }
   const rows = store.listAnalyzerObservations();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].question, 'первый');
+});
+
+// ── Режим dispatch (Ф4) ─────────────────────────────────────────────────────
+
+// Главный контракт режима: ОДИН источник маршрута в каждый момент. В
+// dispatch-чате вызов анализатора заменяет вызов модельного роутера, а не
+// добавляется к нему — здесь это проверяется счётчиком вызовов, а не словами.
+withRuntime('dispatch routes by the verdict and does not call the model router', async ({ store }) => {
+  const actions = [];
+  const { adapter, calls } = stubAnalyzer({ text: verdictJson(['value']), mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask В курсе что такое агент?');
+  assert.equal(result.kind, 'answered', JSON.stringify(result));
+  assert.equal(routerCalls.length, 0, 'вердикт заменяет роутер, а не дублирует его');
+  assert.equal(calls.length, 1, 'ровно одно суждение на ход');
+  // §2.2: главная тема вердикта детерминированно задаёт пакет и действие.
+  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.ok(actions.at(-1)[1].text.endsWith(':advise'), 'ответ собран в форме домена вердикта');
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.status, 'ok');
+  assert.deepEqual(row.topics, ['value']);
+  assert.deepEqual(row.route, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.equal(row.detectorDebt, null, 'молчание детектора — не спор');
+  // История — контекст, а не журнал доставок: dispatch-ход остаётся обычным
+  // ходом диалога, служебных строк не появляется.
+  const dialogue = store.recentDialogue('-100', '7', { limit: 3, ttlSeconds: 604_800 });
+  assert.equal(dialogue.length, 1);
+  assert.ok(dialogue[0].answer.endsWith(':advise'));
+});
+
+// Правило 3 §2.3а живёт и на dispatch-пути: тот же арбитр, та же запись долга.
+withRuntime('dispatch still yields to a fired detector and records the debt', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: verdictJson(['content']), mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  // Вопрос ловится боевым value-детектором, вердикт-заглушка называет content:
+  // спор решает слой с доказанной на голде точностью, проигравший голос — в журнал.
+  const result = await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
+  assert.equal(result.kind, 'answered');
+  assert.equal(routerCalls.length, 0);
+  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  const [row] = store.listAnalyzerObservations();
+  assert.deepEqual(row.detectorDebt, {
+    kind: 'domain_conflict',
+    detector: 'value',
+    detectorName: 'isCourseValueQuestion',
+    model: 'content',
+    modelAction: 'teach',
+    resolvedTo: 'value',
+    resolvedBy: 'detector',
+  });
+});
+
+// Правило 2 §2.3а: отказ поверх сработавшего детектора незаконен (класс
+// skep-10). Вердикт «вне корпуса» на хинтованном вопросе перебивается доменом
+// детектора, а предотвращённое ложное «не уполномочен» остаётся долгом.
+withRuntime('dispatch: a verdict refusal over a fired detector is overridden, not delivered', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: verdictJson(['out_of_corpus']), mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
+  assert.equal(result.kind, 'answered');
+  assert.notEqual(result.abstained, true, 'покрытая тема не получает «не уполномочен»');
+  assert.equal(routerCalls.length, 0);
+  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.detectorDebt.kind, 'model_refusal_overridden');
+});
+
+// Отказ законен только при молчании обоих слоёв — и он ответ, а не молчание.
+withRuntime('dispatch: a refusal with silent detectors is served as an abstention', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: verdictJson(['out_of_corpus']), mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask Посоветуйте CRM для салона красоты');
+  assert.equal(result.kind, 'answered');
+  assert.equal(result.abstained, true);
+  assert.equal(routerCalls.length, 0);
+  assert.ok(actions.at(-1)[1].text.length > 0, 'человек получает текст, а не тишину');
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.route.action, 'redirect');
+});
+
+// Деградация fail-open: сбой анализатора откатывает ход на прежний путь
+// роутера, сбой остаётся в журнале, человек получает обычный ответ.
+withRuntime('a broken dispatch analyzer falls back to the previous router and journals the failure', async ({ store }) => {
+  const question = '/ask В курсе что такое агент?';
+  // Эталон прежнего пути — прогон без анализатора на том же сторе.
+  const plain = [];
+  const plainRuntime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(plain),
+  });
+  await runQuestion(plainRuntime, question, { updateId: 10, messageId: 70 });
+
+  const actions = [];
+  const { adapter } = stubAnalyzer({ fail: 'provider_http_error', mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, question, { updateId: 20, messageId: 71 });
+  assert.equal(result.kind, 'answered');
+  assert.equal(routerCalls.length, 1, 'ход ушёл прежним роутером');
+  assert.equal(actions.at(-1)[1].text, plain.at(-1)[1].text, 'ответ деградации байт-в-байт прежний');
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.status, 'error');
+  assert.equal(row.error, 'provider_http_error');
+  assert.equal(row.route.action, 'teach', 'в журнале — маршрут состоявшегося пути');
+});
+
+withRuntime('a garbage dispatch verdict falls back and is journaled as invalid', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: '{"topics":["prices"]}', mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask В курсе что такое агент?');
+  assert.equal(result.kind, 'answered');
+  assert.equal(routerCalls.length, 1);
+  const [row] = store.listAnalyzerObservations();
+  assert.equal(row.status, 'invalid');
+  assert.ok(row.error.includes('topics'));
+});
+
+// Пер-чатный гейт поведения: чат вне списка не знает о существовании
+// анализатора — ни вызова, ни строки журнала, ответ байт-в-байт прежний.
+withRuntime('dispatch outside the chat list changes nothing and calls no analyzer', async ({ store }) => {
+  const question = '/ask В курсе что такое агент?';
+  const plain = [];
+  const plainRuntime = createTelegramRuntime({
+    config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(plain),
+  });
+  const first = await runQuestion(plainRuntime, question, { updateId: 10, messageId: 70 });
+
+  const guarded = [];
+  const { adapter, calls } = stubAnalyzer({ mode: ANALYZER_MODES.DISPATCH, chatIds: ['-999'] });
+  const { provider, routerCalls } = countedProvider();
+  const dispatchRuntime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(guarded),
+  });
+  const second = await runQuestion(dispatchRuntime, question, { updateId: 20, messageId: 71 });
+  assert.equal(second.kind, 'answered');
+  assert.equal(calls.length, 0, 'анализатор не вызван');
+  assert.equal(routerCalls.length, 1, 'маршрут — прежним роутером');
+  assert.equal(guarded.at(-1)[1].text, plain.at(-1)[1].text);
+  assert.deepEqual(second.route, first.route);
+  assert.deepEqual(store.listAnalyzerObservations(), []);
+});
+
+// Классификация по цене (§2.3): исход вызова анализатора решает судьбу квоты
+// на локальном доказуемом выходе. Успешный вердикт с последующим локальным
+// дефектом знания возвращает квоту (прецедент прежнего пути: человек не платит
+// за наш дефект); неоднозначный отказ анализатора после выхода в сеть фенсит
+// резервацию, как фенсится любой неоднозначный платный вызов.
+withRuntime('the analyzer call declares its billing class on a definitive local exit', async ({ db, store }) => {
+  const failingKnowledge = { forSource() { return { available: false, reason: 'knowledge_source_unavailable' }; } };
+  const reservation = db.prepare(
+    'SELECT status FROM runtime_assistant_request_reservations WHERE event_id = ?',
+  );
+
+  // Исход вызова известен (вердикт получен) → локальный дефект знания
+  // возвращает квоту, ровно как возвращал бы после вызова роутера.
+  const paid = [];
+  const { adapter: okAdapter } = stubAnalyzer({ text: verdictJson(['value']), mode: ANALYZER_MODES.DISPATCH });
+  const okRuntime = createTelegramRuntime({
+    config: config(), store, provider: countedProvider().provider, knowledge: failingKnowledge,
+    analyzer: okAdapter, ...adapters(paid),
+  });
+  const refunded = await runQuestion(okRuntime, '/ask В курсе что такое агент?', { updateId: 10, messageId: 70 });
+  assert.equal(refunded.kind, 'skipped');
+  assert.equal(refunded.reason, 'knowledge_source_unavailable');
+  assert.equal(reservation.get(refunded.eventId), undefined, 'квота возвращена — резервация снята');
+
+  // Отказ анализатора после выхода в сеть неоднозначен: даже локальный
+  // доказуемый выход деградационного пути не возвращает квоту — резервация
+  // фенсится.
+  const fenced = [];
+  const { adapter: brokenAdapter } = stubAnalyzer({ fail: 'provider_http_error', mode: ANALYZER_MODES.DISPATCH });
+  const brokenRuntime = createTelegramRuntime({
+    config: config(), store, provider: countedProvider().provider, knowledge: failingKnowledge,
+    analyzer: brokenAdapter, ...adapters(fenced),
+  });
+  const kept = await runQuestion(brokenRuntime, '/ask В курсе что такое агент?', { updateId: 20, messageId: 71 });
+  assert.equal(kept.kind, 'skipped');
+  assert.equal(kept.reason, 'knowledge_source_unavailable');
+  assert.equal(reservation.get(kept.eventId)?.status, 'uncertain', 'неоднозначный вызов фенсится');
 });
 
 // ── Транспорт ───────────────────────────────────────────────────────────────

@@ -109,6 +109,10 @@ function routingIsRoutable(spec) {
   }
   const arbitration = spec.routing.arbitration;
   if (!plainObject(arbitration) || !map[arbitration.refusal_topic]) return false;
+  // Каждая тема словаря обязана иметь маршрут. Тема, которую вердикт может
+  // назвать, а диспетчер не может отправить (режим dispatch, Ф4), была бы
+  // тихой потерей маршрута на живом вопросе — дефект данных роняет старт.
+  if (!vocabulary(spec, 'topics').ids.every((id) => Boolean(map[id]))) return false;
   const hints = spec.hints;
   if (!plainObject(hints) || !Array.isArray(hints.order) || !plainObject(hints.map)) return false;
   return hints.order.every((name) => plainObject(hints.map[name]) && Boolean(map[hints.map[name].topic]));

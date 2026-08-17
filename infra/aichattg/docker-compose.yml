@@ -108,8 +108,11 @@ services:
       TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER: "${TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER:-20}"
       TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED: "${TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED:-false}"
       # Анализатор запроса. off по умолчанию: выкат не меняет ни одного чата,
-      # пока чат не назван явно. Пустой список при включённом режиме роняет
-      # старт — «включить везде» не должно возникать из забытой переменной.
+      # пока чат не назван явно. observe — вердикт только журналируется;
+      # dispatch (этап Ф4) — в чатах из списка домен и форму ответа задаёт
+      # вердикт анализатора вместо отдельного вызова роутера, остальные чаты
+      # идут прежним путём. Пустой список при включённом режиме роняет старт —
+      # «включить везде» не должно возникать из забытой переменной.
       TELEGRAM_RUNTIME_ANALYZER_MODE: "${TELEGRAM_RUNTIME_ANALYZER_MODE:-off}"
       TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS: "${TELEGRAM_RUNTIME_ANALYZER_CHAT_IDS:-}"
       # Синтетический пользователь. Переменные существовали в конфиге и в

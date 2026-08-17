@@ -112,6 +112,28 @@ export function createRouteArbiter(spec) {
   }
 
   /**
+   * Детерминированная проекция §2.2 для режима dispatch (Ф4): главная тема
+   * вердикта → {action, sourceId}. Пакет задаёт `routing.map`; действием идёт
+   * ПЕРВОЕ действие домена — эталон поведения задан лабораторным диспетчером
+   * (`session.py`: `(route.get("actions") or ["teach"])[0]`), и расходиться с
+   * ним значило бы иметь два разных отображения одного контракта.
+   *
+   * Различение teach/navigate внутри content остаётся суждению: код не
+   * выводит его из текста вопроса. Сегодняшний контракт вердикта этого
+   * различения не несёт, поэтому content уходит действием по умолчанию;
+   * расширение контракта — правка данных с замером, не решение на месте.
+   *
+   * Неизвестная тема — null, а не догадка: вызывающий обязан деградировать к
+   * прежнему роутеру. Для валидной спецификации случай недостижим — загрузка
+   * требует маршрут на каждую тему словаря (`analyzer-spec.mjs`).
+   */
+  function routeOfTopic(topic) {
+    const entry = routing.map[topic];
+    if (!entry) return null;
+    return Object.freeze({ action: entry.actions[0], sourceId: entry.sourceId ?? null });
+  }
+
+  /**
    * Один ход: собрать голоса, применить правила, вернуть маршрут и — если был
    * спор — долг детектора. Чистая функция: журналирование не её дело.
    */
@@ -168,7 +190,7 @@ export function createRouteArbiter(spec) {
     });
   }
 
-  return Object.freeze({ arbitrate, refusalTopic, provenLayer, rules: IMPLEMENTED_RULES });
+  return Object.freeze({ arbitrate, routeOfTopic, refusalTopic, provenLayer, rules: IMPLEMENTED_RULES });
 }
 
 /**

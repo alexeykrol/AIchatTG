@@ -5,15 +5,19 @@
  * Режимы (`config.analyzer.mode`):
  *   off      — модуль не существует для рантайма: ни вызова, ни записи;
  *   observe  — вердикт считается и ЖУРНАЛИРУЕТСЯ, поведение ассистента не
- *              меняется ни на один символ.
+ *              меняется ни на один символ;
+ *   dispatch — этап Ф4: в чатах из списка вердикт ЗАМЕНЯЕТ отдельный вызов
+ *              модельного роутера — домен и форму ответа задаёт суждение
+ *              анализатора через тот же арбитраж §2.3а. Сам адаптер при этом
+ *              не меняется ни на строку: чем ход считать — решает он, что с
+ *              вердиктом делать — решает рантайм.
  *
- * Наблюдение идёт первым сознательно. Диспетчер меняет то, что человек видит в
- * чате (уточняющий вопрос вместо ответа), и включать это, не имея ни одного
- * замера на живом трафике, — значит менять поведение вслепую. Сначала данные,
- * потом поведение.
+ * Наблюдение шло первым сознательно: сначала данные, потом поведение. Режим
+ * dispatch включается после наблюдения и только пер-чатно.
  *
  * Отказ анализатора НИКОГДА не отменяет ответ: любой сбой возвращается кодом,
- * а не исключением, и путь ответа идёт дальше нетронутым.
+ * а не исключением, и путь ответа идёт дальше нетронутым (в dispatch — откатом
+ * на прежний путь роутера, см. runtime.mjs).
  */
 
 import {
@@ -22,7 +26,7 @@ import {
   parseAnalyzerVerdict,
 } from './analyzer-spec.mjs';
 
-export const ANALYZER_MODES = Object.freeze({ OFF: 'off', OBSERVE: 'observe' });
+export const ANALYZER_MODES = Object.freeze({ OFF: 'off', OBSERVE: 'observe', DISPATCH: 'dispatch' });
 
 function unavailable(code) {
   return Object.freeze({
@@ -56,6 +60,12 @@ export function accumulateLevels(observations, spec) {
 export function createAnalyzerAdapter({ config, provider, spec, digest = null } = {}) {
   const mode = String(config?.mode || ANALYZER_MODES.OFF);
   if (mode === ANALYZER_MODES.OFF) return unavailable('analyzer_disabled');
+  // Неизвестный режим — это выключенный анализатор, а не «как observe»:
+  // конфиг валидирует строку при старте, но прямой вызов фабрики обязан
+  // отказывать сам, иначе опечатка режима включала бы поведение молча.
+  if (mode !== ANALYZER_MODES.OBSERVE && mode !== ANALYZER_MODES.DISPATCH) {
+    return unavailable('analyzer_mode_unsupported');
+  }
   if (!spec) return unavailable('analyzer_spec_unavailable');
   if (typeof provider?.analyze !== 'function') return unavailable('analyzer_provider_unavailable');
 

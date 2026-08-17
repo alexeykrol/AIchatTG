@@ -159,6 +159,27 @@ test('flipping the proven layer in the data flips the winner of a conflict', () 
   assert.equal(decided.debt.resolvedBy, 'model');
 });
 
+// ── Отображение §2.2 для режима dispatch (Ф4) ───────────────────────────────
+
+// Детерминированная проекция «главная тема вердикта → {action, sourceId}».
+// Пакет задаёт routing.map; действием идёт первое действие домена — эталон
+// поведения задан лабораторным диспетчером (session.py). Различение
+// teach/navigate внутри content остаётся суждению: код не выводит его из
+// текста, а сегодняшний контракт вердикта его не несёт.
+test('the §2.2 projection maps every vocabulary topic and invents nothing', () => {
+  assert.deepEqual({ ...ROUTE_ARBITER.routeOfTopic('content') }, { action: 'teach', sourceId: 'course-content-v1' });
+  assert.deepEqual({ ...ROUTE_ARBITER.routeOfTopic('value') }, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.deepEqual({ ...ROUTE_ARBITER.routeOfTopic('operations') }, { action: 'support', sourceId: 'course-operations-v1' });
+  assert.deepEqual({ ...ROUTE_ARBITER.routeOfTopic('out_of_corpus') }, { action: 'redirect', sourceId: null });
+  // Неизвестная тема — null, не догадка: вызывающий деградирует к роутеру.
+  assert.equal(ROUTE_ARBITER.routeOfTopic('nonsense'), null);
+  // Полнота по словарю: каждая тема спецификации отображается. Для валидной
+  // спеки это гарантировано загрузкой (см. тест ниже), здесь — фактом.
+  for (const topic of SPEC.spec.topics.vocabulary) {
+    assert.ok(ROUTE_ARBITER.routeOfTopic(topic.id), `тема ${topic.id} без маршрута`);
+  }
+});
+
 // Данные, объявляющие правило, которого код не исполняет, — худший вид
 // расхождения: спецификация выглядит применённой, а применена вчерашняя.
 test('the arbiter fails closed when the data declares rules it does not implement', () => {
@@ -207,6 +228,18 @@ test('a spec without a compilable routing section is refused at load', async () 
     missingDomain.routing.router_prompt.domain_order = ['content', 'operations', 'value'];
     writeFileSync(unlisted, JSON.stringify(missingDomain));
     assert.equal(loadAnalyzerSpec(unlisted).code, 'analyzer_spec_router_prompt_invalid');
+
+    // Тема, которую вердикт может назвать, а диспетчер не может отправить, —
+    // тихая потеря маршрута в режиме dispatch. Дефект данных роняет загрузку,
+    // а не ход живого человека.
+    const orphan = join(folder, 'orphan-topic.json');
+    const withOrphan = JSON.parse(JSON.stringify(SPEC.spec));
+    withOrphan.topics.vocabulary = [
+      ...withOrphan.topics.vocabulary,
+      { id: 'orphan', label: 'сирота', theme: 'тема без маршрута' },
+    ];
+    writeFileSync(orphan, JSON.stringify(withOrphan));
+    assert.equal(loadAnalyzerSpec(orphan).code, 'analyzer_spec_routing_invalid');
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });
 
@@ -245,4 +278,41 @@ test('the gold set of content questions produces zero false refusals through arb
   }
   assert.deepEqual(refused, [], `ложных отказов: ${refused.length}`);
   assert.deepEqual(rerouted, [], `угнанных из содержания: ${rerouted.length}`);
+});
+
+// ── Голд-190 через dispatch-путь (приёмка Ф4) ───────────────────────────────
+
+// Тот же голд, но маршрут рождается так, как рождается в режиме dispatch:
+// вердикт-заглушка с главной темой content → детерминированное отображение
+// §2.2 (routeOfTopic) → тот же арбитр. Ни один содержательный вопрос не имеет
+// права превратиться в отказ («не уполномочен») или сменить домен. Слой
+// суждения здесь заглушен намеренно: приёмка меряет слой КОДА — отображение и
+// арбитраж, — а точность самого вердикта замеряется лабораторией на своём
+// голде (0.83–0.84 по осям).
+test('the gold set through the dispatch mapping yields zero refusals and zero domain thefts', async (t) => {
+  const { existsSync, readFileSync } = await import('node:fs');
+  const core = await import('@aichattg/telegram-core');
+  const goldPath = process.env.AICHATTG_CONTENT_GOLD_PATH
+    || '/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/packages/ai-140310bf9472/gold/ai.gold.jsonl';
+  if (!existsSync(goldPath)) {
+    t.skip(`gold set is not available at ${goldPath}`);
+    return;
+  }
+  const questions = readFileSync(goldPath, 'utf8').split('\n').filter((line) => line.trim())
+    .map((line) => JSON.parse(line).question).filter(Boolean);
+  assert.ok(questions.length >= 150, `gold set looks truncated: ${questions.length} questions`);
+
+  const mapped = ROUTE_ARBITER.routeOfTopic('content');
+  assert.deepEqual({ ...mapped }, { action: 'teach', sourceId: 'course-content-v1' });
+  const refused = [];
+  const rerouted = [];
+  for (const question of questions) {
+    const operations = core.isCourseOperationsSupportQuestion(question);
+    const hints = { operations, value: !operations && core.isCourseValueQuestion(question), pill: core.isNoTimeToLearnSignal(question) };
+    const decided = ROUTE_ARBITER.arbitrate({ hints, route: mapped });
+    if (decided.route.action === 'redirect' || decided.refusalLegal) refused.push(question);
+    if (decided.topic !== 'content') rerouted.push(`${question} → ${decided.topic}`);
+  }
+  assert.deepEqual(refused, [], `ложных «не уполномочен»: ${refused.length}`);
+  assert.deepEqual(rerouted, [], `украденных из содержания: ${rerouted.length}`);
 });

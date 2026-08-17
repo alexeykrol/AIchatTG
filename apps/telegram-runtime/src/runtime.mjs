@@ -25,6 +25,7 @@ import {
   isProvenNoCallRequestError,
   isProviderUnavailableError,
 } from './provider-adapter.mjs';
+import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { ROUTE_ARBITER as routeArbiter } from './route-arbitration.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
@@ -205,6 +206,33 @@ function isDefinitiveAssistantRoutingExit(errorCode) {
     // which lives beside the reason codes so a new code cannot be introduced
     // without deciding its billing class.
     || isDefinitiveDomainRouteReason(code);
+}
+
+/**
+ * Классификация вызова анализатора по цене (боевой контракт §2.3): каждый
+ * вызов обязан объявить, дошёл ли он до платного пути. НЕОДНОЗНАЧЕН — только
+ * отказ, случившийся ПОСЛЕ выхода в сеть (транспорт, HTTP): там оплата
+ * недоказуема ни в одну сторону, и ход фенсится, как фенсится ответный вызов
+ * с теми же кодами.
+ *
+ * Неоднозначными НЕ являются:
+ *  - `ok` и `invalid` — ответ провайдера существует, исход вызова известен;
+ *    квотная судьба хода дальше решается ровно так же, как решалась бы после
+ *    вызова роутера (прецедент: `assistant_route_invalid` — оплаченный вызов
+ *    с мусорным маршрутом — возвращает квоту, потому что человек не платит за
+ *    наш дефект);
+ *  - выходы локальной валидации ДО сети — зеркало isProvenNoCallRequestError:
+ *    пустой ход (`analyzer_request_invalid`) и запрос, отвергнутый адаптером
+ *    провайдера до fetch (`provider_request_invalid`).
+ *
+ * Кого нет в списке доказуемо-локальных — тот неоднозначен: ошибка в сторону
+ * недоверия оставляет резервацию зафенсенной и не может занизить счёт хода.
+ */
+function analyzerCallAmbiguous(observation) {
+  if (observation == null) return false;
+  if (observation.status !== 'error') return false;
+  const code = String(observation.code || '');
+  return code !== 'analyzer_request_invalid' && code !== 'provider_request_invalid';
 }
 
 function applyTelegramSafetySignals(config, decision, comment) {
@@ -913,6 +941,18 @@ export function createTelegramRuntime({
       throw error;
     }
     if (!route) return { error: 'assistant_route_invalid' };
+    return resolveAssistantRoute(question, hints, route);
+  }
+
+  /**
+   * Общий хвост маршрута: арбитраж слоёв, воздержание, добыча знания. Вынесен
+   * из routeAssistantQuestion, когда у маршрута появился второй источник
+   * суждения — вердикт анализатора в режиме dispatch (Ф4). Источник маршрута
+   * в каждый момент один (модельный роутер ЛИБО вердикт), а всё, что после
+   * суждения, обязано быть одним кодом: два хвоста разошлись бы на первой же
+   * правке, и dispatch-чат получил бы другие правила воздержания.
+   */
+  async function resolveAssistantRoute(question, hints, initialRoute) {
     // Арбитраж слоёв маршрута — правило §2.3а, читаемое из спецификации
     // (`route-arbitration.mjs`), а не два `if`-а с зашитой прозой, как было.
     // Хинты по-прежнему уходят ВХОДОМ в модельный роутер и по-прежнему
@@ -927,8 +967,8 @@ export function createTelegramRuntime({
     // детекторе, остаётся её доменом; спор двух назвавших слоёв пишется как
     // долг детектора и попадает в журнал наблюдений — молча выигранный спор
     // скрыл бы пробел детектора и выглядел бы успехом.
-    const arbitration = routeArbiter.arbitrate({ hints, route });
-    route = arbitration.route;
+    const arbitration = routeArbiter.arbitrate({ hints, route: initialRoute });
+    const route = arbitration.route;
     // Redirect — законный вердикт роутера «вопрос вне покрытия», а НЕ повод
     // идти дальше без знания: ответный вызов без источника отвергается
     // адаптером (provider_request_invalid) и превращается в молчание клиенту.
@@ -1034,6 +1074,40 @@ export function createTelegramRuntime({
     return sendAssistantTurn(eventId, question, { text }, route, { persist: false });
   }
 
+  /** Вызов анализатора с контекстом диалога — общий вход observe и dispatch. */
+  function analyzeAssistantQuestion(question) {
+    const previousTexts = store.recentDialogue(question.chatId, question.userId, {
+      limit: config.assistantDialogueTurnLimit,
+      ttlSeconds: config.assistantDialogueTtlSec,
+    }).map((turn) => turn.question);
+    return analyzer.analyze({ text: question.text, previousTexts });
+  }
+
+  /**
+   * Строка журнала наблюдений: диагноз, сработавшие хинты, ИТОГОВЫЙ маршрут и
+   * долг детектора — вместе, иначе сверять их потом будет не с чем.
+   *
+   * Долг детектора — спор слоёв, разрешённый в пользу доказанной точности.
+   * После перебивания в `route_action` стоит домен победителя, и без этой
+   * записи проигравший голос исчезал бы бесследно — вместе с уликой о том,
+   * что детектор чего-то не видит.
+   */
+  function recordAnalyzerObservationRow({ eventId, question, hints, routing, observation }) {
+    store.recordAnalyzerObservation({
+      eventId,
+      chatId: question.chatId,
+      userId: question.userId,
+      question: question.text,
+      status: observation.status,
+      verdict: observation.status === 'ok' ? observation.verdict : null,
+      hints: firedHintNames(hints),
+      route: routing?.route || null,
+      detectorDebt: routing?.arbitration?.debt || null,
+      modelId: observation.modelId || null,
+      error: observation.status === 'ok' ? null : (observation.error || observation.code || null),
+    });
+  }
+
   /**
    * Наблюдение анализатора: один дешёвый вызов и строка в журнал. Поведение
    * ассистента не меняется — ни ответ, ни маршрут, ни квота.
@@ -1044,50 +1118,73 @@ export function createTelegramRuntime({
    */
   async function observeAssistantQuestion({ eventId, question, hints, routing }) {
     if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return null;
-    const route = routing?.route || null;
-    // Долг детектора — спор слоёв, разрешённый в пользу доказанной точности.
-    // Он пишется в ту же строку журнала, что диагноз и маршрут: после
-    // перебивания в `route_action` стоит домен победителя, и без этой записи
-    // проигравший голос исчезал бы бесследно — вместе с уликой о том, что
-    // детектор чего-то не видит.
-    const detectorDebt = routing?.arbitration?.debt || null;
     try {
-      const previousTexts = store.recentDialogue(question.chatId, question.userId, {
-        limit: config.assistantDialogueTurnLimit,
-        ttlSeconds: config.assistantDialogueTtlSec,
-      }).map((turn) => turn.question);
-      const observation = await analyzer.analyze({ text: question.text, previousTexts });
-      store.recordAnalyzerObservation({
-        eventId,
-        chatId: question.chatId,
-        userId: question.userId,
-        question: question.text,
-        status: observation.status,
-        verdict: observation.status === 'ok' ? observation.verdict : null,
-        hints: firedHintNames(hints),
-        route,
-        detectorDebt,
-        modelId: observation.modelId || null,
-        error: observation.status === 'ok' ? null : (observation.error || observation.code || null),
-      });
+      const observation = await analyzeAssistantQuestion(question);
+      recordAnalyzerObservationRow({ eventId, question, hints, routing, observation });
       return observation;
     } catch (error) {
       console.error(`[runtime] analyzer observation failed event=${eventId} ${runtimeErrorSummary(error)}`);
       try {
-        store.recordAnalyzerObservation({
+        recordAnalyzerObservationRow({
           eventId,
-          chatId: question.chatId,
-          userId: question.userId,
-          question: question.text,
-          status: 'error',
-          hints: firedHintNames(hints),
-          route,
-          detectorDebt,
-          error: String(error?.code || error?.message || 'analyzer_failed'),
+          question,
+          hints,
+          routing,
+          observation: { status: 'error', code: String(error?.code || error?.message || 'analyzer_failed') },
         });
       } catch { /* журнал не важнее ответа: молча идём дальше */ }
       return null;
     }
+  }
+
+  /**
+   * Режим dispatch (Ф4): домен и форму ответа задаёт вердикт анализатора.
+   *
+   * Один источник маршрута в каждый момент: здесь вызов анализатора ЗАМЕНЯЕТ
+   * отдельный вызов модельного роутера, а не добавляется к нему — двух
+   * суждений об одном ходе не бывает, и ход не дорожает. Отображение вердикта
+   * в {action, sourceId} — детерминированное §2.2 (`routeOfTopic`): главная
+   * тема → пакет; различение teach/navigate внутри content остаётся суждению,
+   * и раз сегодняшний контракт вердикта его не несёт, content идёт действием
+   * по умолчанию (эталон — лабораторный диспетчер), а не догадкой кода.
+   *
+   * Хинты кода при этом никуда не деваются: вердикт проходит ТОГО ЖЕ арбитра
+   * §2.3а, что и модельный роутер (общий хвост `resolveAssistantRoute`) —
+   * сработавший детектор перебивает, отказ законен только при молчании обоих
+   * слоёв, спор пишется долгом детектора в ту же строку журнала.
+   *
+   * Деградация fail-open: любой сбой анализатора (невалидный вердикт, таймаут,
+   * ошибка провайдера) откатывает ход на прежний путь роутера, а сбой остаётся
+   * в журнале и в логе процесса. Диспетчер, который упал, пропускает к
+   * эксперту, а не закрывает дверь (ANALYZER-SPEC §9). Молчание запрещено.
+   */
+  async function dispatchAssistantQuestion({ eventId, question, hints }) {
+    let observation;
+    try {
+      observation = await analyzeAssistantQuestion(question);
+    } catch (error) {
+      observation = { status: 'error', code: String(error?.code || error?.message || 'analyzer_failed') };
+    }
+    // Нормализация тем же контрактом, что у модельного роутера: спроецированный
+    // из данных маршрут обязан пройти ту же проверку пары action↔sourceId,
+    // которую проходит маршрут провайдера, — у ответной модели один вход.
+    const mapped = observation.status === 'ok'
+      ? normalizeAssistantRoleRoute(routeArbiter.routeOfTopic(observation.verdict.topics[0]))
+      : null;
+    if (!mapped) {
+      console.error(`[runtime] analyzer dispatch degraded to the previous router event=${eventId} `
+        + `status=${observation.status} error=${String(observation.error || observation.code || '').slice(0, 200)}`);
+    }
+    const routing = mapped
+      ? await resolveAssistantRoute(question, hints, mapped)
+      : await routeAssistantQuestion(question, hints);
+    try {
+      recordAnalyzerObservationRow({ eventId, question, hints, routing, observation });
+    } catch (error) {
+      // Журнал не важнее ответа, но его отказ обязан быть виден в логе.
+      console.error(`[runtime] analyzer dispatch journal failed event=${eventId} ${runtimeErrorSummary(error)}`);
+    }
+    return { routing, observation, routedByVerdict: Boolean(mapped) };
   }
 
   async function handleAssistant(eventId, question) {
@@ -1143,14 +1240,29 @@ export function createTelegramRuntime({
         return result;
       }
       const hints = assistantQuestionHints(question.text);
-      const routing = await routeAssistantQuestion(question, hints);
+      // Режим dispatch действует ПО-ЧАТНО (ступень 1 инфраструктурной
+      // лестницы): для чата вне списка условие ниже ложно, и ход идёт прежним
+      // путём байт-в-байт — без вызова анализатора и без строки в журнале.
+      const dispatched = analyzer?.enabled === true
+        && analyzer.mode === ANALYZER_MODES.DISPATCH
+        && analyzer.appliesTo(question.chatId)
+        ? await dispatchAssistantQuestion({ eventId, question, hints })
+        : null;
+      const routing = dispatched ? dispatched.routing : await routeAssistantQuestion(question, hints);
       // Наблюдение анализатора идёт ПОСЛЕ маршрутизации и до ответа: в одной
       // строке журнала должны стоять и диагноз, и маршрут, иначе сверять их
       // потом будет не с чем. Режим observe ничего не меняет в ответе — он
       // только смотрит; сбой анализатора не отменяет ответ человеку.
-      await observeAssistantQuestion({ eventId, question, hints, routing });
+      // В dispatch-чате журнал уже записан внутри dispatchAssistantQuestion —
+      // event_id уникален, второй строки на ход не бывает.
+      if (!dispatched) await observeAssistantQuestion({ eventId, question, hints, routing });
       if (routing.error) {
-        if (isDefinitiveAssistantRoutingExit(routing.error)) store.releaseAssistantRequest(eventId);
+        // Классификация по цене (§2.3) с учётом вызова анализатора: локальный
+        // доказуемый выход возвращает квоту, только если и вызов анализатора
+        // не завис в неоднозначности — иначе резервация фенсится, как после
+        // любого неоднозначного платного вызова.
+        if (isDefinitiveAssistantRoutingExit(routing.error)
+          && !analyzerCallAmbiguous(dispatched?.observation)) store.releaseAssistantRequest(eventId);
         else store.markAssistantRequestUncertain(eventId);
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
         return { kind: 'skipped', reason: routing.error };
