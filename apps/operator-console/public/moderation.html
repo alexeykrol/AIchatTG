@@ -346,6 +346,9 @@
     }
     function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n : (n == null ? d : (isFinite(Number(n)) ? Number(n) : d)); }
     function fmtCost(c) { const v = num(c, null); return v == null ? '—' : '$' + v.toFixed(4); }
+    // Неизмеренный расход — прочерк, а не ноль: ноль означал бы «вызов был и
+    // стоил ноль», и пробел учёта читался бы как экономия.
+    function fmtTokens(t) { const v = num(t, null); return v == null ? '—' : String(v); }
     function fmtConf(c) { const v = num(c, null); return v == null ? '—' : Math.round(v * 100) + '%'; }
     function fmtDate(dt) {
       if (!dt) return { date: '', time: '' };
@@ -588,7 +591,7 @@
             <div class="stat"><div class="stat-label">Подозрительные</div><div class="stat-value">${esc(num(byV.suspect, 0))}</div></div>
             <div class="stat"><div class="stat-label">Чистые</div><div class="stat-value">${esc(num(byV.clean, 0))}</div></div>
             <div class="stat cost"><div class="stat-label">Итого $</div><div class="stat-value">${fmtCost(cost.total)}</div><div class="stat-sub">shadow ${fmtCost(byMode.shadow)} · live ${fmtCost(byMode.live)}</div></div>
-            <div class="stat"><div class="stat-label">Токены</div><div class="stat-value" style="font-size:16px">${esc(num(tokens.input, 0))} / ${esc(num(tokens.output, 0))}</div><div class="stat-sub">вход / выход</div></div>
+            <div class="stat"><div class="stat-label">Токены</div><div class="stat-value" style="font-size:16px">${esc(fmtTokens(tokens.input))} / ${esc(fmtTokens(tokens.output))}</div><div class="stat-sub">вход / выход</div></div>
           </div>
         </div>`;
     }

@@ -64,9 +64,10 @@ function moderationEvent(row) {
     reason: row.reason,
     quote: null,
     prompt_version: 'tg-v3',
-    model: null,
-    // Расход вызова модерации рантайм сегодня не хранит: счётчики появятся
-    // вместе с колонками, и этот же код их подхватит без правки.
+    // Модель и расход вызова модерации рантайм пишет в саму запись. Строка,
+    // накопленная до появления этих колонок, читается как «не измерено»:
+    // `undefined` здесь законен и обязан остаться прочерком, а не нулём.
+    model: row.model_id ?? null,
     input_tokens: usage(row.input_tokens),
     output_tokens: usage(row.output_tokens),
     cost_usd: null,
@@ -152,17 +153,30 @@ export function legacyModerationStats(config) {
     if (!tables(db).has('runtime_moderation_records')) throw new Error('schema unavailable');
     const byVerdict = Object.fromEntries(db.prepare(`SELECT verdict, COUNT(*) AS count
       FROM runtime_moderation_records GROUP BY verdict`).all().map((row) => [row.verdict, Number(row.count) || 0]));
+    // Сумма расхода модерации за всю базу. SUM в SQLite пропускает NULL и сам
+    // возвращает NULL, если не измерено ничего, — ровно тот контракт, что нужен:
+    // база без колонок и база без замеров обязаны сказать «не измерено», а не
+    // напечатать ноль вызовов, которых консоль не видела.
+    const metered = ['input_tokens', 'output_tokens']
+      .every((name) => columns(db, 'runtime_moderation_records').has(name));
+    const spend = metered
+      ? db.prepare(`SELECT SUM(input_tokens) AS input, SUM(output_tokens) AS output
+        FROM runtime_moderation_records`).get()
+      : null;
     return {
       totalEvents: Object.values(byVerdict).reduce((sum, value) => sum + value, 0),
       byVerdict,
       cost: { total: null, byMode: { shadow: null, live: null } },
-      tokens: { input: 0, output: 0 },
+      tokens: { input: usage(spend?.input), output: usage(spend?.output) },
       pending: [],
       outages: [],
       readOnly: true,
     };
   } catch {
-    return { totalEvents: 0, byVerdict: {}, cost: { total: null, byMode: {} }, tokens: {}, pending: [], outages: [], readOnly: true };
+    return {
+      totalEvents: 0, byVerdict: {}, cost: { total: null, byMode: {} },
+      tokens: { input: null, output: null }, pending: [], outages: [], readOnly: true,
+    };
   } finally { db?.close(); }
 }
 

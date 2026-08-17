@@ -84,9 +84,37 @@ test('classification uses exact Terra/OpenAI/medium and routes clean in one call
     route: 'clean', level: null, reason: 'safety:clean',
   });
   assert.deepEqual(result.safetyTrace.usage, {
-    calls: 1, failed: 0, inputTokens: 100, outputTokens: 10, costUsd: null,
+    calls: 1, failed: 0, inputTokens: 100, outputTokens: 10, totalTokens: 110, costUsd: null,
     modelId: 'gpt-5.6-terra', vendor: 'openai', reasoningEffort: 'medium',
   });
+});
+
+// Модерация — двухступенчатый контракт, и ход её оплачивает целиком. Учёт
+// обязан сложить ОБЕ квитанции: цена по последнему вызову занизила бы счёт
+// ровно на целый оплаченный вызов.
+test('the abuse route bills both stages, and a stage without a receipt leaves null rather than zero', async () => {
+  const replies = [
+    { text: routerJson({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'], abuseConfidence: 0.96 }), receipt: receipt('router', 120, 20) },
+    { text: '{"severity":"weak","confidence":0.94,"basis":"isolated_disrespect"}', receipt: receipt('abuse_classifier', 80, 12) },
+  ];
+  const billed = await classifySafetyV3({ message: 'Ты идиот', async invoke() { return replies.shift(); } });
+  assert.deepEqual({
+    calls: billed.safetyTrace.usage.calls,
+    inputTokens: billed.safetyTrace.usage.inputTokens,
+    outputTokens: billed.safetyTrace.usage.outputTokens,
+    totalTokens: billed.safetyTrace.usage.totalTokens,
+  }, { calls: 2, inputTokens: 200, outputTokens: 32, totalTokens: 232 });
+
+  // Провайдер не назвал расход ни на одной ступени: вызовы были, цена
+  // неизвестна. Ноль здесь сделал бы пробел учёта неотличимым от бесплатной
+  // модерации.
+  const silent = await classifySafetyV3({ message: 'Полезный вопрос', async invoke() { return { text: routerJson() }; } });
+  assert.deepEqual({
+    calls: silent.safetyTrace.usage.calls,
+    inputTokens: silent.safetyTrace.usage.inputTokens,
+    outputTokens: silent.safetyTrace.usage.outputTokens,
+    totalTokens: silent.safetyTrace.usage.totalTokens,
+  }, { calls: 1, inputTokens: null, outputTokens: null, totalTokens: null });
 });
 
 test('abuse calls the 768-token classifier exactly once and validates basis against router types', async () => {

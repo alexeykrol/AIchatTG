@@ -106,6 +106,41 @@ test('unmeasured spend is reported as unmeasured, never as zero', () => {
   const [moderation] = legacyModerationEvents(config);
   assert.equal(moderation.input_tokens, null);
   assert.equal(moderation.output_tokens, null);
+  assert.equal(moderation.model, null, 'модель вызова в этой базе не записана');
+  // Сводка по модерации — та же дисциплина: база без колонок учёта обязана
+  // сказать «не измерено», а не показать ноль токенов за всю историю чата.
+  assert.deepEqual(legacyModerationStats(config).tokens, { input: null, output: null });
+});
+
+test('measured moderation spend and its model reach the console from the record', () => {
+  const config = fixture();
+  const db = new Database(config.runtimeDatabasePath);
+  db.exec(`
+    ALTER TABLE runtime_moderation_records ADD COLUMN model_id TEXT;
+    ALTER TABLE runtime_moderation_records ADD COLUMN input_tokens INTEGER;
+    ALTER TABLE runtime_moderation_records ADD COLUMN output_tokens INTEGER;
+    ALTER TABLE runtime_moderation_records ADD COLUMN total_tokens INTEGER;
+    UPDATE runtime_moderation_records
+      SET model_id = 'gpt-5.6-terra', input_tokens = 640, output_tokens = 44, total_tokens = 684
+      WHERE id = 'mod-1';
+    INSERT INTO runtime_inbound_events VALUES ('mod-evt-2');
+    INSERT INTO runtime_moderation_records
+      (id, event_id, chat_id, message_id, user_id, verdict, confidence, reason, mode, action_json, created_at)
+      VALUES ('mod-2', 'mod-evt-2', '-100123', '78', '42', 'clean', 0.99, 'safety:clean', 'live', '[]', 1760000005);
+  `);
+  db.close();
+  const events = legacyModerationEvents(config);
+  const measured = events.find((event) => event.id === 'mod-1');
+  assert.equal(measured.model, 'gpt-5.6-terra');
+  assert.equal(measured.input_tokens, 640);
+  assert.equal(measured.output_tokens, 44);
+  // Строка до появления учёта живёт в той же таблице и остаётся прочерком:
+  // ноль здесь смешал бы «не измерено» с «бесплатно».
+  const unmeasured = events.find((event) => event.id === 'mod-2');
+  assert.equal(unmeasured.model, null);
+  assert.equal(unmeasured.input_tokens, null);
+  // Сумма складывает только измеренное — неизмеренные строки её не обнуляют.
+  assert.deepEqual(legacyModerationStats(config).tokens, { input: 640, output: 44 });
 });
 
 test('measured spend reaches the console from the durable answer record', () => {

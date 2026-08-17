@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS runtime_moderation_records (
   reason TEXT NOT NULL,
   mode TEXT NOT NULL,
   action_json TEXT,
+  -- Модель и затраты модерации. Это самый частый платный вызов рантайма:
+  -- модерация идёт на КАЖДОМ сообщении, а её расход не хранился нигде, тогда
+  -- как анализатор и ответ свои токены уже пишут. Счётчики суммируют ОБЕ
+  -- ступени контракта (роутер и, когда он был, классификатор тяжести):
+  -- квитанция последнего вызова занизила бы счёт ровно на целый вызов.
+  -- NULL означает «не измерено», а не «бесплатно»: вызова не было вовсе
+  -- (освобождённый отправитель), провайдер расход не назвал, либо строка
+  -- восстановлена процессом, который сам никого не вызывал.
+  model_id TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runtime_assistant_dialogues (
@@ -424,6 +436,14 @@ export function ensureRuntimeDatabaseSchema(db) {
   for (const column of ['input_tokens', 'output_tokens', 'total_tokens']) {
     if (!answerColumns.has(column)) db.exec(`ALTER TABLE runtime_assistant_answer_records ADD COLUMN ${column} INTEGER`);
   }
+  // Тем же приёмом — записи модерации. Боевая база накопила их больше всего
+  // (вызов на каждом сообщении), поэтому перестройка таблицы здесь особенно
+  // недопустима: прежние строки остаются с NULL, новые пишутся с токенами.
+  const moderationColumns = new Set(db.prepare('PRAGMA table_info(runtime_moderation_records)').all().map((row) => row.name));
+  for (const column of ['input_tokens', 'output_tokens', 'total_tokens']) {
+    if (!moderationColumns.has(column)) db.exec(`ALTER TABLE runtime_moderation_records ADD COLUMN ${column} INTEGER`);
+  }
+  if (!moderationColumns.has('model_id')) db.exec('ALTER TABLE runtime_moderation_records ADD COLUMN model_id TEXT');
 }
 
 /**
@@ -618,8 +638,9 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     (id, dialogue_id, event_id, question, answer, model_id, receipt_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const insertModeration = db.prepare(`INSERT INTO runtime_moderation_records
-    (id, event_id, chat_id, message_id, user_id, verdict, confidence, reason, mode, action_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, event_id, chat_id, message_id, user_id, verdict, confidence, reason, mode, action_json,
+     model_id, input_tokens, output_tokens, total_tokens, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(event_id) DO NOTHING`);
   const questionClaim = db.prepare(`INSERT INTO runtime_assistant_question_claims
     (chat_id, message_id, status, claimed_at) VALUES (?, ?, 'processing', ?)
@@ -1060,11 +1081,22 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     completeEvent(eventId, status, result = null, error = null) {
       finish.run(status, result == null ? null : JSON.stringify(result), error, now(), eventId);
     },
+    /**
+     * Запись состоявшейся модерации вместе с ценой вызова. Имя модели берётся
+     * из самого вердикта (`decision.modelId`), а не из квитанции: вердикт
+     * долговечен и известен даже на восстановлении, где квитанции вызова уже
+     * нет. Счётчики — из агрегата обеих ступеней; пустые законны и означают
+     * «вызова не было или его цену не назвали», но никогда не ноль.
+     */
     recordModeration(record) {
+      const cost = usageColumns(record.usage);
       insertModeration.run(
         randomUUID(), record.eventId, record.chatId, record.messageId, record.userId,
         record.verdict, record.confidence, record.reason, record.mode,
-        JSON.stringify(record.actions || []), now(),
+        JSON.stringify(record.actions || []),
+        record.modelId == null ? null : String(record.modelId).slice(0, 200),
+        cost.inputTokens, cost.outputTokens, cost.totalTokens,
+        now(),
       );
     },
     claimAssistantQuestion({ chatId, messageId }) {

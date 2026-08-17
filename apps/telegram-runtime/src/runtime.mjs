@@ -715,6 +715,15 @@ export function createTelegramRuntime({
       return { kind: 'moderated', verdict: 'clean', action: 'exempt', actions: [] };
     }
     let decision;
+    /**
+     * Цена модерации — самого частого платного вызова рантайма: он идёт на
+     * КАЖДОМ сообщении чата. Берётся АГРЕГАТ обеих ступеней контракта (роутер
+     * и, для оскорблений, классификатор тяжести), а не квитанция последнего
+     * вызова: та занизила бы счёт ровно на целый оплаченный вызов. До
+     * прохождения границы провайдера расход пуст — это «вызова не было», а не
+     * ноль.
+     */
+    let moderationUsage = providerCallUsage(null);
     // The semantic v3 router may use no history except the deterministic state
     // required to recognise a dispute about an earlier warning. Read it before
     // the non-retrying provider boundary, then use the same snapshot to plan
@@ -724,12 +733,14 @@ export function createTelegramRuntime({
       return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), 'judgement_claim_fenced');
     }
     try {
-      decision = normalizeSafetyClassification(await modelProvider.moderate({
+      const classified = await modelProvider.moderate({
         text: comment.text, chatId: comment.chatId, userId: comment.userId,
         messageId: comment.messageId, platformMessageId: comment.platformMessageId,
         currentWeakStrikes: strikeState.weakStrikes,
         warningStage: strikeState.warningStage,
-      }));
+      });
+      decision = normalizeSafetyClassification(classified);
+      moderationUsage = providerCallUsage(classified?.safetyTrace?.usage);
     } catch (error) {
       if (isProviderUnavailableError(error)) {
         if (job.safe_retry_count < moderatorRetryLimit()) {
@@ -782,6 +793,12 @@ export function createTelegramRuntime({
         abuseLevel: decision.abuseLevel,
         confidence: decision.confidence,
         modelId: decision.modelId || null,
+        // Четыре числа, и ни одного слова: счётчики текста не несут, поэтому
+        // запрет на хранение сказанного моделью их не касается. Долговечными
+        // они обязаны быть по другой причине — вызов уже оплачен ЗДЕСЬ, а
+        // запись модерации может быть дописана другим процессом после падения.
+        // Без этого поля восстановленный ход выглядел бы бесплатным.
+        usage: moderationUsage,
       },
       chatId: comment.chatId,
       messageId: comment.messageId,
@@ -810,6 +827,7 @@ export function createTelegramRuntime({
     }
     store.recordModeration({
       eventId, ...comment, ...decision, ...plan, mode: config.moderationMode, actions,
+      usage: moderationUsage,
     });
     store.completeModeratorDecision({ eventId });
     return {
@@ -834,7 +852,15 @@ export function createTelegramRuntime({
     } catch { expectedPlan = null; }
     if (!comment || !decision || !expectedPlan || typeof duplicateNative !== 'boolean'
       || canonicalJson(storedPolicy) !== canonicalJson(expectedPlan)) return null;
-    return { comment, decision, plan: duplicateNative ? { ...expectedPlan, duplicateNative: true } : expectedPlan };
+    return {
+      comment,
+      decision,
+      // Цена вызова, сделанного ДО падения. Этот процесс никого не вызывал, и
+      // выдумать расход ему нечем: снимок без счётчиков (запись до появления
+      // учёта) читается как «не измерено», а не как бесплатный ход.
+      usage: providerCallUsage(durableDecision?.usage),
+      plan: duplicateNative ? { ...expectedPlan, duplicateNative: true } : expectedPlan,
+    };
   }
 
   /**
@@ -852,7 +878,7 @@ export function createTelegramRuntime({
       });
       return jobResult(job?.event_id, reviewed.row, 'durable_decision_or_snapshot_invalid');
     }
-    const { comment, decision, plan } = durable;
+    const { comment, decision, plan, usage } = durable;
     store.observeModerationMessage({
       chatId: comment.chatId, messageId: comment.messageId, userId: comment.userId,
       revisionIdentity: comment.platformMessageId,
@@ -908,6 +934,10 @@ export function createTelegramRuntime({
     store.recordModeration({
       eventId: job.event_id, ...comment, ...decision, ...plan,
       mode: config.moderationMode, actions: enforcementResult.actions || [],
+      // Расход того самого вызова, что был оплачен до падения: он доехал сюда
+      // долговечной записью решения. Иначе восстановленный ход — единственный,
+      // где оплаченная модерация не оставила бы следа.
+      usage,
     });
     store.completeModeratorDecision({ eventId: job.event_id });
     return {

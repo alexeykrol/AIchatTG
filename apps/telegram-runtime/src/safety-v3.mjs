@@ -217,6 +217,10 @@ function aggregateUsage(results) {
     failed: 0,
     inputTokens: sum('inputTokens'),
     outputTokens: sum('outputTokens'),
+    // Итог берётся из квитанций, а не выводится сложением входа с выходом:
+    // общее число называет провайдер, и считать его самим значило бы завести
+    // вторую линейку для той же величины.
+    totalTokens: sum('totalTokens'),
     costUsd: null,
     modelId: SAFETY_MODEL,
     vendor: SAFETY_VENDOR,
