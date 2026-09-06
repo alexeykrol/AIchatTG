@@ -36,7 +36,10 @@ export function buildScenario({ expertId = 'assistant', syntheticId = 'skeptic',
     ],
     opening: { to: syntheticId, text: 'Ты зашёл в чат курса. Дважды обжигался: обещали prompting, дали пересказ. Спроси, чему тут учат по prompting, и не выдавай, что курс тебе нужен.' },
     turn_limit: turnLimit,
-    expectations: [{ participant_id: expertId, turn: 1, expectation: { behavior: 'content_answer', note: 'Ответ по prompting из материалов.' } }],
+    // Поведение берётся из закрытого списка судей (allcourses
+    // dialogue_eval/behaviors.py → BEHAVIORS). Выдуманное имя проходит наши тесты и
+    // падает у валидатора стенограмм — ровно на том стыке, который строит этот пакет.
+    expectations: [{ participant_id: expertId, turn: 1, expectation: { behavior: 'grounded_answer', note: 'Ответ по prompting из материалов.' } }],
   };
 }
 
