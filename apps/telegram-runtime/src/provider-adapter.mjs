@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { STATE_CONTEXT_INSTRUCTION } from './assistant-working-state.mjs';
+import { assistantDialogue } from './assistant-dialogue.mjs';
 import {
   RUNTIME_ANALYZER_SPEC_PATH,
   compileRouterSystemPrompt,
@@ -376,6 +379,8 @@ function userInput(operation, payload) {
       question: text,
       courseOperationsHint: Boolean(payload.courseOperationsHint),
       courseValueHint: Boolean(payload.courseValueHint),
+      ...(Array.isArray(payload.dialogue) ? { dialogue: assistantDialogue(payload.dialogue) } : {}),
+      ...(payload.working_state ? { working_state: payload.working_state } : {}),
     }) : null;
   }
   const text = questionText(payload.text);
@@ -386,10 +391,7 @@ function userInput(operation, payload) {
   // дальше; пустая история — законное состояние (первый вопрос в диалоге).
   // Живой прогон: служебный ход с пустым вопросом отравлял диалог целиком, и
   // ВСЕ последующие вопросы человека молча падали в provider_request_invalid.
-  const dialogue = payload.dialogue
-    .map((turn) => ({ question: questionText(turn?.question), answer: questionText(turn?.answer) }))
-    .filter((turn) => turn.question && turn.answer)
-    .slice(-3);
+  const dialogue = assistantDialogue(payload.dialogue);
   const route = { action: String(payload.route.action || ''), sourceId: payload.route.sourceId ?? null };
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',
@@ -397,7 +399,7 @@ function userInput(operation, payload) {
       ? payload.knowledge.entries.map((entry) => knowledgeEntry(entry)) : null,
   };
   if (!knowledge.sourceId || !knowledge.entries || knowledge.entries.length === 0 || knowledge.entries.length > 128) return null;
-  return boundedJson({ question: text, route, dialogue, knowledge });
+  return boundedJson({ question: text, route, dialogue, knowledge, ...(payload.working_state ? { working_state: payload.working_state } : {}) });
 }
 
 /**
@@ -492,9 +494,9 @@ export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {
     const input = userInput(operation, payload);
     if (!input) throw new ProviderRequestError('provider_request_invalid');
     const tuple = validated.config.modelTuples[operation];
-    const system = operation === 'assistantRouter'
+    const system = (operation === 'assistantRouter'
       ? ROUTER_SYSTEM_PROMPT
-      : answerSystemPrompt(payload);
+      : answerSystemPrompt(payload)) + (payload.working_state ? `\n\n${STATE_CONTEXT_INSTRUCTION}` : '');
     const raw = await callOnce({
       config: validated.config, fetchFn, operation, tuple, system, input,
       maxOutputTokens: tuple.maxOutputTokens, responseFormat: operation === 'assistantRouter',
@@ -534,6 +536,10 @@ export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {
   }
 
   return Object.freeze({
+    // Public identity hashes the normalized route actually used, excluding credentials.
+    configurationFingerprint: createHash('sha256').update(JSON.stringify({
+      vendor: validated.config.vendor, endpoint: validated.config.endpoint, modelTuples: validated.config.modelTuples,
+    })).digest('hex'),
     moderate,
     routeAssistant: (payload) => invokeAssistant(TUPLE_NAMES.assistantRouter, payload),
     answer: (payload) => invokeAssistant(TUPLE_NAMES.assistantAnswer, payload),
