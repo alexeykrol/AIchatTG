@@ -12,6 +12,7 @@
  * тест, а не тихо разный диагноз на стенде и в бою.
  */
 
+import { assistantDialogue } from './assistant-dialogue.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -292,13 +293,20 @@ export function runtimeAnalyzerSpec() {
   return shippedSpec;
 }
 
-/** Вход анализатора: текущий ход + до пяти предыдущих реплик покупателя. */
-export function buildAnalyzerUserPayload(turnText, contextTexts = []) {
+/** Legacy user context plus an optional bounded, explicitly attributed Q/A tail. */
+export function buildAnalyzerUserPayload(turnText, contextTexts = [], dialogue = null, workingState = null) {
   const previous = (Array.isArray(contextTexts) ? contextTexts : [])
     .map((text) => (typeof text === 'string' ? text : ''))
     .filter((text) => text.trim())
     .slice(-5);
-  return JSON.stringify({ previous_user_turns: previous, current_turn: turnText }, null, 2);
+  return JSON.stringify({
+    // Do not duplicate the user side in both fields: three maximum-sized
+    // pairs plus duplicate questions would exceed the provider input budget.
+    ...(Array.isArray(dialogue)
+      ? { dialogue: assistantDialogue(dialogue) } : { previous_user_turns: previous }),
+    ...(workingState ? { working_state: workingState } : {}),
+    current_turn: turnText,
+  }, null, 2);
 }
 
 function stripFences(text) {

@@ -51,6 +51,8 @@ import { createOrgSliceKnowledge, withOrgSlice } from '../src/org-slice.mjs';
 import { createValueSliceKnowledge, withValueSlice } from '../src/value-slice.mjs';
 import { createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { createAnalyzerAdapter } from '../src/analyzer-adapter.mjs';
+import { runtimeAnalyzerSpec } from '../src/analyzer-spec.mjs';
 
 const LAB_CHAT_ID = '-100';
 const LAB_USER_ID = '7';
@@ -334,30 +336,23 @@ function costOf(receipt) {
   };
 }
 
-/**
- * Один прогон стенда. Вынесен из main отдельной функцией, чтобы тест мог
- * вызвать ровно то же самое без подмены аргументов процесса.
- */
-export async function runLocalAssistant({
-  questions,
-  packageDir,
-  orgSlicePath = null,
-  valueSlicePath = null,
-  mode = 'dry',
-  maxEntries = DEFAULT_MAX_ENTRIES,
-  maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
-  env = process.env,
-} = {}) {
+/** Shared real Assistant factories. Managed mode changes only storage, identity and explicit providers. */
+export function createLocalAssistantSession({
+  databasePath, packageDir, orgSlicePath = null, valueSlicePath = null,
+  mode = 'dry', maxEntries = DEFAULT_MAX_ENTRIES, maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
+  env = {}, provider: injectedProvider = null, workingStateProvider = null, durableAnswerReceipts = false,
+  identity = { chatId: LAB_CHAT_ID, userId: LAB_USER_ID }, analyzerMode = 'off',
+  now = () => Math.floor(Date.now() / 1000),
+}) {
   const packageRoot = resolve(packageDir);
   const manifestPath = join(packageRoot, 'knowledge.manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 
-  const folder = mkdtempSync(join(tmpdir(), 'aichattg-local-assistant-'));
-  const database = openRuntimeDatabase(join(folder, 'lab-runtime.db'));
-  const store = createRuntimeStore(database);
+  const database = openRuntimeDatabase(databasePath);
+  const store = createRuntimeStore(database, { now });
   const captured = [];
   const live = mode === 'live' ? createLiveProvider(env) : null;
-  const provider = live ? live.provider : createDryProvider({ captured });
+  const provider = injectedProvider || (live ? live.provider : createDryProvider({ captured }));
 
   const config = labConfig({
     maxEntries,
@@ -365,6 +360,13 @@ export async function runLocalAssistant({
     packageManifestPath: manifestPath,
     packageDigest: String(manifest.packageDigest || ''),
     packageRoot,
+  });
+
+  config.moderator.chatIds = [identity.chatId];
+  config.assistant.chatIds = [identity.chatId];
+  const analyzer = createAnalyzerAdapter({
+    config: { mode: analyzerMode, chatIds: [identity.chatId] },
+    provider, spec: runtimeAnalyzerSpec().spec,
   });
 
   // Настоящий допуск: манифест читается, sha256 каждого файла пересчитывается.
@@ -380,6 +382,9 @@ export async function runLocalAssistant({
   const runtime = createTelegramRuntime({
     config,
     store,
+    analyzer,
+    workingStateProvider,
+    durableAnswerReceipts,
     provider,
     knowledge,
     contentRetrieval,
@@ -388,6 +393,50 @@ export async function runLocalAssistant({
     assistantTelegram,
     notifier: { async notify() { return { delivered: false, skipped: 'lab' }; } },
   });
+
+  return { runtime, store, database, config, captured, live, assistantTelegram,
+    manifest, packageRoot, contentRetrieval, orgSlice, valueSlice,
+    async ask(index, text) {
+      const message = { message_id: index + 1, chat: { id: Number(identity.chatId) },
+        from: { id: Number(identity.userId), first_name: 'Lab', is_bot: false }, text: `/ask ${text}` };
+      await runtime.handleUpdate('moderator', { update_id: index * 2 + 1, message });
+      return runtime.handleUpdate('assistant', { update_id: index * 2 + 2, message });
+    },
+    completedPair(index, pairId, expectedQuestion) {
+      const eventId = `assistant:${index * 2 + 2}`;
+      const row = database.prepare('SELECT * FROM runtime_assistant_answer_records WHERE event_id = ?').get(eventId);
+      const receipt = database.prepare('SELECT * FROM runtime_inbound_update_receipts WHERE receipt_id = ?').get(eventId);
+      if (!row || receipt?.status !== 'completed' || JSON.parse(receipt.result_json || '{}').kind !== 'answered'
+        || row.chat_id !== identity.chatId || row.user_id !== identity.userId || row.question !== expectedQuestion) return null;
+      return { id: pairId, event_id: eventId,
+        user: { turn_id: `${pairId}:user`, text: row.question, timestamp: receipt.received_at },
+        assistant: { turn_id: `${pairId}:assistant`, text: row.answer, timestamp: row.created_at },
+        answer_usage: { modelId: row.model_id, inputTokens: row.input_tokens, outputTokens: row.output_tokens, totalTokens: row.total_tokens },
+        delivery: row.delivery };
+    },
+    close() { contentRetrieval.close?.(); database.close(); },
+  };
+}
+
+/**
+ * Один прогон стенда. Вынесен из main отдельной функцией, чтобы тест мог
+ * вызвать ровно то же самое без подмены аргументов процесса.
+ */
+export async function runLocalAssistant({
+  questions,
+  packageDir,
+  orgSlicePath = null,
+  valueSlicePath = null,
+  mode = 'dry',
+  maxEntries = DEFAULT_MAX_ENTRIES,
+  maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
+  env = process.env,
+} = {}) {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-local-assistant-'));
+  const session = createLocalAssistantSession({ packageDir, orgSlicePath, valueSlicePath,
+    mode, maxEntries, maxContextTokens, env, databasePath: join(folder, 'lab-runtime.db') });
+  const { database, store, captured, live, runtime, manifest, packageRoot, contentRetrieval,
+    assistantTelegram, orgSlice, valueSlice } = session;
 
   const transcript = {
     dialogue_id: `lab:${Date.now()}`,

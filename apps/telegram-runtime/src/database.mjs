@@ -629,8 +629,9 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       error_code = 'snapshot_expired', updated_at = ?
     WHERE state = 'safe_retry' AND snapshot_expires_at <= ?`);
   const dialogue = db.prepare('SELECT * FROM runtime_assistant_dialogues WHERE chat_id = ? AND user_id = ?');
+  // Timestamps have second precision; insertion order breaks ties, not random UUIDs.
   const turns = db.prepare(`SELECT question, answer FROM runtime_assistant_turns
-    WHERE dialogue_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`);
+    WHERE dialogue_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`);
   const insertDialogue = db.prepare(`INSERT INTO runtime_assistant_dialogues
     (id, chat_id, user_id, last_activity_at) VALUES (?, ?, ?, ?)`);
   const touchDialogue = db.prepare('UPDATE runtime_assistant_dialogues SET last_activity_at = ? WHERE id = ?');
@@ -700,7 +701,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const trimDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id = ? AND id NOT IN (
       SELECT id FROM runtime_assistant_turns WHERE dialogue_id = ?
-      ORDER BY created_at DESC, id DESC LIMIT ?
+      ORDER BY created_at DESC, rowid DESC LIMIT ?
     )`);
   const disposition = db.prepare(`SELECT * FROM runtime_assistant_moderation_dispositions
     WHERE chat_id = ? AND message_id = ?`);
