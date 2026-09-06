@@ -8,10 +8,10 @@ import { createWorkingStateUpdater } from '../../src/working-state-updater.mjs';
 import { openDialogueStore } from './local-dialogue-store.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const hash = (value) => createHash('sha256').update(value).digest('hex');
-const canonical = (v) => JSON.stringify(v, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+export const hash = (value) => createHash('sha256').update(value).digest('hex');
+export const canonical = (v) => JSON.stringify(v, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value);
-function tree(path) {
+export function tree(path) {
   if (lstatSync(path).isSymbolicLink()) throw new Error('managed_pin_symlink');
   if (lstatSync(path).isFile()) return { '.': hash(readFileSync(path)) };
   const files = {};
@@ -25,7 +25,7 @@ function tree(path) {
   }
   visit(path); return files;
 }
-function inside(root, path) { const rel = relative(root, path); return rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }
+export function inside(root, path) { const rel = relative(root, path); return rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }
 function id(value) { if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(value)) throw new Error('managed_identity_invalid'); }
 
 export function buildManagedManifest({ runId, identity, plan, packageDir, methodologyDir, adapterFile, config, maxTurns = plan?.length }) {
