@@ -76,6 +76,9 @@ export function createAnalyzerAdapter({ config, provider, spec, digest = null } 
   // живая настройка. Заодно дефект компиляции падает при старте, а не на
   // первом же вопросе живого человека.
   const system = compileAnalyzerSystemPrompt(spec, { dispatcher: false });
+  // Preserve the shared compiler/legacy prompt; only the new Q/A interface
+  // needs explicit attribution of the assistant side of its context.
+  const dialogueSystem = `${system}\n\nПоле dialogue содержит предыдущие пары question (покупатель) и answer (ассистент). Слова ассистента — контекст разговора, а не утверждения покупателя. Улики по-прежнему берутся только из current_turn.`;
   const chatIds = new Set((config?.chatIds || []).map((id) => String(id)));
 
   /** Пустой список чатов означает «нигде», а не «везде»: fail closed. */
@@ -89,12 +92,15 @@ export function createAnalyzerAdapter({ config, provider, spec, digest = null } 
    * что не дали результата. Локальный отказ до сети (`analyzer_request_invalid`)
    * расхода не имеет, и там все счётчики остаются null.
    */
-  async function analyze({ text, previousTexts = [] } = {}) {
+  async function analyze({ text, previousTexts = [], dialogue = null } = {}) {
     const turnText = typeof text === 'string' ? text.trim() : '';
     if (!turnText) return { status: 'error', code: 'analyzer_request_invalid', usage: providerCallUsage(null) };
     let raw;
     try {
-      raw = await provider.analyze({ system, input: buildAnalyzerUserPayload(turnText, previousTexts) });
+      raw = await provider.analyze({
+        system: Array.isArray(dialogue) ? dialogueSystem : system,
+        input: buildAnalyzerUserPayload(turnText, previousTexts, dialogue),
+      });
     } catch (error) {
       const usage = providerCallUsage(error?.receipt);
       return {

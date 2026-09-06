@@ -26,6 +26,7 @@ import {
   isProviderUnavailableError,
   providerCallUsage,
 } from './provider-adapter.mjs';
+import { assistantDialogue } from './assistant-dialogue.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { ROUTE_ARBITER as routeArbiter } from './route-arbitration.mjs';
 import {
@@ -962,7 +963,7 @@ export function createTelegramRuntime({
    * Учёт, считающий только удачные вызовы, показывал бы систему дешевле, чем
    * она есть, — а нужен ровно обратный эффект.
    */
-  async function routeAssistantQuestion(question, hints = assistantQuestionHints(question.text)) {
+  async function routeAssistantQuestion(question, hints, dialogue) {
     const { operations: courseOperationsHint, value: courseValueHint } = hints;
     let answered;
     try {
@@ -972,6 +973,7 @@ export function createTelegramRuntime({
         userId: question.userId,
         courseOperationsHint,
         courseValueHint,
+        dialogue,
       });
     } catch (error) {
       // Провайдера нет вовсе — вызова не было, и расхода тоже: квитанции здесь
@@ -982,7 +984,7 @@ export function createTelegramRuntime({
     const routerUsage = providerCallUsage(answered?.receipt);
     const route = normalizeAssistantRoleRoute(answered);
     if (!route) return { error: 'assistant_route_invalid', routerUsage };
-    return { ...(await resolveAssistantRoute(question, hints, route)), routerUsage };
+    return { ...(await resolveAssistantRoute(question, hints, route, dialogue)), routerUsage };
   }
 
   /**
@@ -993,7 +995,7 @@ export function createTelegramRuntime({
    * суждения, обязано быть одним кодом: два хвоста разошлись бы на первой же
    * правке, и dispatch-чат получил бы другие правила воздержания.
    */
-  async function resolveAssistantRoute(question, hints, initialRoute) {
+  async function resolveAssistantRoute(question, hints, initialRoute, dialogue) {
     // Арбитраж слоёв маршрута — правило §2.3а, читаемое из спецификации
     // (`route-arbitration.mjs`), а не два `if`-а с зашитой прозой, как было.
     // Хинты по-прежнему уходят ВХОДОМ в модельный роутер и по-прежнему
@@ -1047,6 +1049,8 @@ export function createTelegramRuntime({
     }
     const grounded = await contentRetrieval.forQuestion({
       question: question.text,
+      dialogueTail: dialogue.length
+        ? { user: dialogue.at(-1).question, assistant: dialogue.at(-1).answer } : null,
       // One retrieval session per user per chat: the pack cache and its topic
       // switch detection are about one person's train of thought.
       sessionId: `${question.chatId}:${question.userId}`,
@@ -1165,12 +1169,10 @@ export function createTelegramRuntime({
   }
 
   /** Вызов анализатора с контекстом диалога — общий вход observe и dispatch. */
-  function analyzeAssistantQuestion(question) {
-    const previousTexts = store.recentDialogue(question.chatId, question.userId, {
-      limit: config.assistantDialogueTurnLimit,
-      ttlSeconds: config.assistantDialogueTtlSec,
-    }).map((turn) => turn.question);
-    return analyzer.analyze({ text: question.text, previousTexts });
+  function analyzeAssistantQuestion(question, dialogue) {
+    return analyzer.analyze({
+      text: question.text, previousTexts: dialogue.map((turn) => turn.question), dialogue,
+    });
   }
 
   /**
@@ -1215,10 +1217,10 @@ export function createTelegramRuntime({
    * стоить человеку ответа. Провал тоже журналируется: молчащий журнал читался
    * бы как «анализатор работает», а это противоположный вывод.
    */
-  async function observeAssistantQuestion({ eventId, question, hints, routing }) {
+  async function observeAssistantQuestion({ eventId, question, hints, routing, dialogue }) {
     if (!analyzer?.enabled || !analyzer.appliesTo(question.chatId)) return null;
     try {
-      const observation = await analyzeAssistantQuestion(question);
+      const observation = await analyzeAssistantQuestion(question, dialogue);
       recordAnalyzerObservationRow({ eventId, question, hints, routing, observation });
       return observation;
     } catch (error) {
@@ -1257,10 +1259,10 @@ export function createTelegramRuntime({
    * в журнале и в логе процесса. Диспетчер, который упал, пропускает к
    * эксперту, а не закрывает дверь (ANALYZER-SPEC §9). Молчание запрещено.
    */
-  async function dispatchAssistantQuestion({ eventId, question, hints }) {
+  async function dispatchAssistantQuestion({ eventId, question, hints, dialogue }) {
     let observation;
     try {
-      observation = await analyzeAssistantQuestion(question);
+      observation = await analyzeAssistantQuestion(question, dialogue);
     } catch (error) {
       observation = { status: 'error', code: String(error?.code || error?.message || 'analyzer_failed') };
     }
@@ -1290,8 +1292,8 @@ export function createTelegramRuntime({
         + `status=${observation.status} error=${String(observation.error || observation.code || '').slice(0, 200)}`);
     }
     const routing = mapped
-      ? await resolveAssistantRoute(question, hints, mapped)
-      : await routeAssistantQuestion(question, hints);
+      ? await resolveAssistantRoute(question, hints, mapped, dialogue)
+      : await routeAssistantQuestion(question, hints, dialogue);
     try {
       recordAnalyzerObservationRow({ eventId, question, hints, routing, observation });
     } catch (error) {
@@ -1358,6 +1360,13 @@ export function createTelegramRuntime({
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return result;
       }
+      // Read once before asynchronous routing: later stages must not observe
+      // a different tail after a concurrent turn or TTL boundary. Retention
+      // stays with the store; this is only the existing answer-sized projection.
+      const dialogue = assistantDialogue(store.recentDialogue(question.chatId, question.userId, {
+        limit: config.assistantDialogueTurnLimit,
+        ttlSeconds: config.assistantDialogueTtlSec,
+      }));
       const hints = assistantQuestionHints(question.text);
       // Режим dispatch действует ПО-ЧАТНО (ступень 1 инфраструктурной
       // лестницы): для чата вне списка условие ниже ложно, и ход идёт прежним
@@ -1365,16 +1374,16 @@ export function createTelegramRuntime({
       const dispatched = analyzer?.enabled === true
         && analyzer.mode === ANALYZER_MODES.DISPATCH
         && analyzer.appliesTo(question.chatId)
-        ? await dispatchAssistantQuestion({ eventId, question, hints })
+        ? await dispatchAssistantQuestion({ eventId, question, hints, dialogue })
         : null;
-      const routing = dispatched ? dispatched.routing : await routeAssistantQuestion(question, hints);
+      const routing = dispatched ? dispatched.routing : await routeAssistantQuestion(question, hints, dialogue);
       // Наблюдение анализатора идёт ПОСЛЕ маршрутизации и до ответа: в одной
       // строке журнала должны стоять и диагноз, и маршрут, иначе сверять их
       // потом будет не с чем. Режим observe ничего не меняет в ответе — он
       // только смотрит; сбой анализатора не отменяет ответ человеку.
       // В dispatch-чате журнал уже записан внутри dispatchAssistantQuestion —
       // event_id уникален, второй строки на ход не бывает.
-      if (!dispatched) await observeAssistantQuestion({ eventId, question, hints, routing });
+      if (!dispatched) await observeAssistantQuestion({ eventId, question, hints, routing, dialogue });
       if (routing.error) {
         // Классификация по цене (§2.3) с учётом вызова анализатора: локальный
         // доказуемый выход возвращает квоту, только если и вызов анализатора
@@ -1413,10 +1422,7 @@ export function createTelegramRuntime({
           text: question.text,
           chatId: question.chatId,
           userId: question.userId,
-          dialogue: store.recentDialogue(question.chatId, question.userId, {
-            limit: config.assistantDialogueTurnLimit,
-            ttlSeconds: config.assistantDialogueTtlSec,
-          }),
+          dialogue,
           route: routing.route,
           knowledge: routing.knowledge,
         });

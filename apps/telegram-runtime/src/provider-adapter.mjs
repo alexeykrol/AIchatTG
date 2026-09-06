@@ -1,3 +1,4 @@
+import { assistantDialogue } from './assistant-dialogue.mjs';
 import {
   RUNTIME_ANALYZER_SPEC_PATH,
   compileRouterSystemPrompt,
@@ -376,6 +377,7 @@ function userInput(operation, payload) {
       question: text,
       courseOperationsHint: Boolean(payload.courseOperationsHint),
       courseValueHint: Boolean(payload.courseValueHint),
+      ...(Array.isArray(payload.dialogue) ? { dialogue: assistantDialogue(payload.dialogue) } : {}),
     }) : null;
   }
   const text = questionText(payload.text);
@@ -386,10 +388,7 @@ function userInput(operation, payload) {
   // дальше; пустая история — законное состояние (первый вопрос в диалоге).
   // Живой прогон: служебный ход с пустым вопросом отравлял диалог целиком, и
   // ВСЕ последующие вопросы человека молча падали в provider_request_invalid.
-  const dialogue = payload.dialogue
-    .map((turn) => ({ question: questionText(turn?.question), answer: questionText(turn?.answer) }))
-    .filter((turn) => turn.question && turn.answer)
-    .slice(-3);
+  const dialogue = assistantDialogue(payload.dialogue);
   const route = { action: String(payload.route.action || ''), sourceId: payload.route.sourceId ?? null };
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',
