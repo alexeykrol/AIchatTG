@@ -309,6 +309,13 @@ export function classifyTelegramUpdate({
         // пересчитывается там заново: два независимых вычисления одного факта
         // рано или поздно разойдутся, и разойдутся молча.
         isSyntheticSender,
+        // На случай reason:'reply' — id и текст сообщения, на которое ответил
+        // человек. Рантайм решает по тексту, было ли это служебной подсказкой
+        // (и тогда её стоит убрать после ответа), а не любым сообщением бота:
+        // ответ на настоящий прошлый ответ удалять нельзя.
+        replyToMessageId: message.reply_to_message?.message_id == null
+          ? null : String(message.reply_to_message.message_id),
+        replyToText: message.reply_to_message?.text || message.reply_to_message?.caption || null,
       },
     };
   }

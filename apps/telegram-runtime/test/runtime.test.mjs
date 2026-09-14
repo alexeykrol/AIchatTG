@@ -89,6 +89,7 @@ function adapters(actions) {
     },
     assistantTelegram: {
       async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: 90 } }; },
+      async deleteMessage(input) { actions.push(['assistant_delete', input]); return { ok: true }; },
     },
     notifier: { async notify(input) { actions.push(['notify', input]); return { delivered: true }; } },
   };
@@ -431,13 +432,19 @@ test('the Assistant answers every address to it and stays out of every other con
 
     // Ответ (Telegram reply) на сообщение бота — обращение без /ask и без
     // тега: человек продолжает диалог, который бот начал подсказкой выше.
+    // Реплай на саму подсказку `ASSISTANT_EMPTY_ASK_TEXT` (текст совпадает —
+    // это и был предыдущий шаг сценария) — после ответа человеку подсказка
+    // больше не несёт пользы и удаляется как мусор.
     const replySendsBefore = actions.filter(([kind]) => kind === 'send').length;
-    const replyExtra = { reply_to_message: { message_id: 90, from: { id: assistantBotId, is_bot: true } } };
+    const replyExtra = {
+      reply_to_message: { message_id: 90, from: { id: assistantBotId, is_bot: true }, text: ASSISTANT_EMPTY_ASK_TEXT },
+    };
     await runtime.handleUpdate('moderator', update(660, 660, 'сколько стоит курс?', undefined, replyExtra));
     const replied = await runtime.handleUpdate('assistant', update(661, 660, 'сколько стоит курс?', undefined, replyExtra));
     assert.equal(replied.kind, 'answered');
     assert.match(lastSent(), /сколько стоит курс\?/);
     assert.equal(actions.filter(([kind]) => kind === 'send').length, replySendsBefore + 1);
+    assert.deepEqual(actions.at(-1), ['assistant_delete', { chatId: '-100', messageId: '90' }]);
 
     // Ответ на сообщение ЧУЖОГO бота — не наше обращение, даже с тем же текстом.
     const otherBotReply = { reply_to_message: { message_id: 91, from: { id: assistantBotId + 1, is_bot: true } } };
@@ -754,6 +761,34 @@ test('public profile is deterministic and never discloses or calls the provider'
     assert.deepEqual({ kind: result.kind, route: result.route }, { kind: 'answered', route: 'profile:self' });
     assert.equal(actions.at(-1)[1].text.includes('не раскрываю'), true);
     assert.equal(actions.at(-1)[1].text.includes('какая модель'), false);
+    assert.equal(providerCalls, 0);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// Боевой дефект, пойманный владельцем 2026-09-14: с включённым знанием
+// `assistantDeterministicReply` не вызывался вовсе (он жил только под
+// `assistantKnowledgeEnabled !== true`), и "Что ты можешь?" уходило в поиск
+// по курсу, не находило темы и отвечало boundary-текстом «не уполномочен» —
+// формально честным, но неверным ответом на вопрос про самого бота.
+test('self-description answers instantly even with knowledge enabled, never reaching retrieval', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-self-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let providerCalls = 0;
+  const provider = fakeLlm();
+  provider.routeAssistant = async () => { providerCalls++; throw new Error('must not route self-description'); };
+  provider.answer = async () => { providerCalls++; throw new Error('must not answer self-description'); };
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true }), store: createRuntimeStore(db), provider,
+    knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    await runtime.handleUpdate('moderator', update(240, 240, '/ask Что ты можешь?'));
+    const result = await runtime.handleUpdate('assistant', update(241, 240, '/ask Что ты можешь?'));
+    assert.deepEqual({ kind: result.kind, route: result.route }, { kind: 'answered', route: 'profile:self' });
+    const sent = actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
+    assert.equal(sent.includes('не уполномочен'), false);
+    assert.equal(sent.includes('ИИ-ассистент проекта'), true);
     assert.equal(providerCalls, 0);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });

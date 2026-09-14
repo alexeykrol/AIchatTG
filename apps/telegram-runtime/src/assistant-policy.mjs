@@ -8,8 +8,9 @@ const TOKEN_BOUNDARY = (words) => new RegExp(
 export const ASSISTANT_HELP_TEXT = [
   '🤖 AIchatTG — Telegram-ассистент проекта.',
   '',
-  'Чтобы задать вопрос, обратитесь ко мне как к участнику чата:',
+  'Чтобы задать вопрос, обратитесь ко мне как к участнику чата — любым из способов:',
   '',
+  '↩️ ответом на моё сообщение — весь текст ответа станет вопросом',
   '/ask ваш вопрос',
   '@имя_бота ваш вопрос',
   '',
@@ -183,10 +184,27 @@ export function coverageDeficitCandidateLevel(text) {
   return null;
 }
 
-export function assistantDeterministicReply(text) {
+/**
+ * Presence pings ("бот, ты тут?") and self-referential questions ("что ты
+ * можешь?") are about the assistant itself, not the course — routing them
+ * through knowledge retrieval finds nothing on-topic and produces a wrong or
+ * confusing answer (out-of-coverage boundary text for a question that was
+ * never about coverage). This check is meant to run BEFORE the knowledge
+ * pipeline regardless of whether it is enabled, unlike the rest of
+ * `assistantDeterministicReply` below, which is a fallback for when there is
+ * no knowledge pipeline to hand other questions to at all.
+ */
+export function assistantSelfDescriptionReply(text) {
   const value = String(text || '').trim();
   if (presencePing.test(value)) return { route: 'public:presence', text: 'Я здесь 🙂 Задайте вопрос одним сообщением: /ask ваш вопрос.' };
   if (isAssistantSelfQuestion(value)) return { route: 'profile:self', text: ASSISTANT_PROFILE_TEXT };
+  return null;
+}
+
+export function assistantDeterministicReply(text) {
+  const selfDescription = assistantSelfDescriptionReply(text);
+  if (selfDescription) return selfDescription;
+  const value = String(text || '').trim();
   return {
     route: courseTerms.test(value) ? 'boundary:course_unavailable' : 'boundary:public_redirect',
     text: ASSISTANT_UNAVAILABLE_TEXT,

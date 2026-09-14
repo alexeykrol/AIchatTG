@@ -36,6 +36,7 @@ import {
   ASSISTANT_UNAVAILABLE_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
+  assistantSelfDescriptionReply,
   coverageDeficitCandidateLevel,
   isAbstentionReason,
   isOutOfCoverageReason,
@@ -1105,6 +1106,21 @@ export function createTelegramRuntime({
         + `error=${String(transport.error || '').slice(0, 120)}`);
     }
     const receipt = assistantDeliveryReceipt(transport);
+    // The empty-`/ask` hint (`ASSISTANT_EMPTY_ASK_TEXT`, sent with
+    // `forceReply`) is pure clutter once its own reply has been answered: the
+    // exchange it invited now exists as a real question and a real answer.
+    // Matched on the replied-to text, not merely "was this a reply to the
+    // bot" — replying to a PAST real answer must never delete that answer.
+    // Best-effort: the assistant bot deletes only its own message, which
+    // Telegram always permits without admin rights; a failure here must never
+    // cost the user their answer.
+    if (question.replyToMessageId && question.replyToText === ASSISTANT_EMPTY_ASK_TEXT) {
+      try {
+        await assistantTelegram.deleteMessage({ chatId: question.chatId, messageId: question.replyToMessageId });
+      } catch (error) {
+        console.error(`[runtime] hint cleanup failed event=${eventId} ${runtimeErrorSummary(error)}`);
+      }
+    }
     if (persist) {
       store.recordBoundedAssistantTurn({
         ...question, eventId, question: question.text, answer: answer.text.trim(),
@@ -1362,6 +1378,19 @@ export function createTelegramRuntime({
       if (!request.allowed) {
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: request.reason });
         return { kind: 'skipped', reason: request.reason };
+      }
+      // Presence pings and self-description ("что ты можешь?") are about the
+      // assistant, not the course, and must not reach knowledge retrieval:
+      // there is nothing on-topic to find, and the search fails as an
+      // out-of-coverage boundary reply that reads as wrong for a question that
+      // was never about the course. Checked ahead of the flag below, so it
+      // applies whether or not knowledge retrieval is enabled.
+      const selfDescription = assistantSelfDescriptionReply(question.text);
+      if (selfDescription) {
+        const result = await sendAssistantTurn(eventId, question, { text: selfDescription.text }, selfDescription.route);
+        store.completeAssistantRequest(eventId);
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        return result;
       }
       // During extraction no course/index source package is admitted. Public
       // identity and boundary replies remain useful without allowing a provider
