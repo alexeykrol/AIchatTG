@@ -83,6 +83,14 @@ are historical and kept for provenance; `.handoffs/active-module-registry.md`
 is no longer a live registry. Durable work is tracked in `CHANGELOG.md`,
 `README.md` and the docs under `docs/`, not by per-executor sessions.
 
+`CHANGELOG.md` tracks what shipped, for a reader of the software.
+`docs/OWNER_FEEDBACK_LOG.md` tracks what the Product Owner personally
+reported — a live bug, a stale doc, a missing behaviour — with the
+diagnosis and the recommendation, including items recommended but not yet
+built (`status: proposed`). Append an entry there whenever the Product
+Owner reports something in chat, whether or not it becomes code in the
+same session.
+
 - Evidence statuses (`passed` / `failed` / `not_run` / `inconclusive`) and the
   lifecycle states above apply to every candidate regardless of who prepared
   it.
