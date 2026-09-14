@@ -76,10 +76,19 @@ export function createTelegramAdapter({ botToken = '', fetchFn = globalThis.fetc
   }
 
   return {
-    sendMessage: ({ chatId, text, replyToMessageId, markup = false }) => (
+    // `forceReply` opens the reply compose box for the addressed user in
+    // Telegram's client, so their very next message becomes a genuine reply
+    // — the same channel `detectAssistantQuestion`'s `reason: 'reply'` path
+    // recognises. `selective: true` shows the prompt only to the user being
+    // replied to, not the whole chat. Used only on the plain (non-markup)
+    // path: a rendered model answer never needs it.
+    sendMessage: ({ chatId, text, replyToMessageId, markup = false, forceReply = false }) => (
       markup === true
         ? sendRendered({ chatId, text, replyToMessageId })
-        : call('sendMessage', { chat_id: chatId, text, reply_to_message_id: replyToMessageId })
+        : call('sendMessage', {
+          chat_id: chatId, text, reply_to_message_id: replyToMessageId,
+          ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : {}),
+        })
     ),
     banMember: ({ chatId, userId }) => call('banChatMember', { chat_id: chatId, user_id: userId }),
     banSenderChat: ({ chatId, senderChatId }) => call('banChatSenderChat', { chat_id: chatId, sender_chat_id: senderChatId }),

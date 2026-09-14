@@ -28,8 +28,8 @@ function config(overrides = {}) {
   };
 }
 
-function update(updateId, messageId, text, from = { id: 7, first_name: 'Student', is_bot: false }) {
-  return { update_id: updateId, message: { message_id: messageId, chat: { id: -100 }, from, text } };
+function update(updateId, messageId, text, from = { id: 7, first_name: 'Student', is_bot: false }, extra = {}) {
+  return { update_id: updateId, message: { message_id: messageId, chat: { id: -100 }, from, text, ...extra } };
 }
 
 function editedUpdate(updateId, messageId, text) {
@@ -386,8 +386,15 @@ test('the Assistant answers every address to it and stays out of every other con
   provider.answer = async (input) => { answerCalls++; return answer(input); };
   // Знания включены намеренно: фикстура модели возвращает сам вопрос, и это
   // единственный способ доказать, что из живого текста извлечён верный остаток.
+  // Токен ассистента — с числовым префиксом намеренно: `botIdFromToken`
+  // берёт из него ID, и без него сценарий «ответ на сообщение бота» проверить
+  // нечем — classifyTelegramUpdate получил бы `botId: null`.
+  const assistantBotId = 555444;
   const runtime = createTelegramRuntime({
-    config: config({ assistantKnowledgeEnabled: true }),
+    config: config({
+      assistantKnowledgeEnabled: true,
+      assistant: { chatIds: ['-100'], botToken: `${assistantBotId}:assistant-token`, botUsername: 'assistant_bot', webhookSecret: 'assistant-secret', exemptBotIds: [] },
+    }),
     store: createRuntimeStore(db),
     provider,
     knowledge: availableKnowledge(),
@@ -398,6 +405,7 @@ test('the Assistant answers every address to it and stays out of every other con
     return runtime.handleUpdate('assistant', update(id + 1, id, text));
   };
   const lastSent = () => actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
+  const lastSentInput = () => actions.filter(([kind]) => kind === 'send').at(-1)[1];
   try {
     // Живой текст с командой в середине: вопрос — весь остальной текст.
     const midway = await ask(600, 'а вот скажи /ask сколько стоит курс');
@@ -410,14 +418,31 @@ test('the Assistant answers every address to it and stays out of every other con
     assert.match(lastSent(), /а сколько уроков в курсе\?/);
 
     // Одинокая команда — массовый штатный сценарий (клик по меню Telegram):
-    // ответ содержит готовый шаблон, а не объяснение формата.
+    // ответ содержит готовый шаблон, а не объяснение формата, и уходит с
+    // forceReply — следующее сообщение человека Telegram доставит как ответ.
     const empty = await ask(620, '/ask');
     assert.equal(empty.command, 'ask_empty');
     assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
-    assert.equal(lastSent(), '✍️ Отправьте вопрос одним сообщением: /ask ваш вопрос');
+    assert.equal(lastSent(), '✍️ Задайте вопрос: ответьте на это сообщение или отправьте /ask ваш вопрос одной строкой');
+    assert.equal(lastSentInput().forceReply, true);
     // Один тег без текста — тот же случай.
     assert.equal((await ask(630, '@assistant_bot')).command, 'ask_empty');
     assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
+
+    // Ответ (Telegram reply) на сообщение бота — обращение без /ask и без
+    // тега: человек продолжает диалог, который бот начал подсказкой выше.
+    const replySendsBefore = actions.filter(([kind]) => kind === 'send').length;
+    const replyExtra = { reply_to_message: { message_id: 90, from: { id: assistantBotId, is_bot: true } } };
+    await runtime.handleUpdate('moderator', update(660, 660, 'сколько стоит курс?', undefined, replyExtra));
+    const replied = await runtime.handleUpdate('assistant', update(661, 660, 'сколько стоит курс?', undefined, replyExtra));
+    assert.equal(replied.kind, 'answered');
+    assert.match(lastSent(), /сколько стоит курс\?/);
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, replySendsBefore + 1);
+
+    // Ответ на сообщение ЧУЖОГO бота — не наше обращение, даже с тем же текстом.
+    const otherBotReply = { reply_to_message: { message_id: 91, from: { id: assistantBotId + 1, is_bot: true } } };
+    const notOurs = await runtime.handleUpdate('assistant', update(671, 670, 'сколько стоит курс?', undefined, otherBotReply));
+    assert.equal(notOurs.reason, 'not_assistant_command');
 
     // Снятая команда отвечает детерминированно и не доходит до модели.
     const callsBeforeRetired = answerCalls;

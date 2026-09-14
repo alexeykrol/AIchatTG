@@ -89,6 +89,31 @@ test('a mention of this bot is a full invocation, a foreign bot is not', () => {
   assert.equal(detectAssistantQuestion(message('@assistant_bot привет'), '').isQuestion, false);
 });
 
+test('a reply to the bot\'s own message is a full invocation, a reply to another bot is not', () => {
+  const withReply = (text, replyFromId) => message(text, {
+    reply_to_message: { message_id: 1, from: { id: replyFromId, is_bot: true } },
+  });
+  // Нет /ask, нет тега — только Reply на боевое сообщение бота: весь текст —
+  // вопрос, без вырезания подстроки (вырезать нечего, `/ask`/`@тег` там нет).
+  assert.deepEqual(detectAssistantQuestion(withReply('сколько стоит курс?', 999), 'assistant_bot', 999), {
+    isQuestion: true, reason: 'reply', text: 'сколько стоит курс?',
+  });
+  // Без botId сверять не с чем — Reply не может засчитаться обращением.
+  assert.equal(detectAssistantQuestion(withReply('сколько стоит курс?', 999), 'assistant_bot', null).isQuestion, false);
+  // Reply на ЧУЖОГО бота (тот же чат, другой id) — не наше обращение.
+  assert.equal(detectAssistantQuestion(withReply('сколько стоит курс?', 111), 'assistant_bot', 999).isQuestion, false);
+  // Явная команда внутри Reply — обычный command-путь, не reply-путь.
+  assert.deepEqual(detectAssistantQuestion(withReply('/ask сколько стоит курс?', 999), 'assistant_bot', 999), {
+    isQuestion: true, reason: 'command', text: 'сколько стоит курс?',
+  });
+  // Пересланное сообщение с Reply-полем всё равно не вызывает: пересылка
+  // проверяется раньше, до любой формы обращения.
+  assert.equal(
+    detectAssistantQuestion({ ...withReply('текст', 999), forward_date: 1 }, 'assistant_bot', 999).isQuestion,
+    false,
+  );
+});
+
 test('forwarded and literally quoted invocations never reach the Assistant', () => {
   const quoted = (text, type) => ({
     ...message(text),

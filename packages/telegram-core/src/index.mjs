@@ -129,16 +129,24 @@ function cutAt(raw, offset, length) {
 
 /**
  * Обращение к боту как к участнику чата: командой `/ask` (в любом месте
- * сообщения) или тегом `@имя_бота`. Не обратились — молчим, обратились —
- * отвечаем обязательно.
+ * сообщения), тегом `@имя_бота`, или ОТВЕТОМ (Telegram reply) на собственное
+ * сообщение бота. Не обратились — молчим, обратились — отвечаем обязательно.
+ *
+ * Ответ на сообщение бота равносилен команде: человек, вошедший в диалог
+ * (например, после пустого `/ask`), в реальности продолжает его следующим
+ * сообщением, а не повторяет `/ask` каждый раз. Telegram доставляет такой
+ * ответ боту даже с включённым Privacy Mode — это тот же документированный
+ * канал, что и явная команда, а не расширение прав чтения чата.
  *
  * Защиты сохранены и намеренно закрывают целые классы ошибок, а не отдельные
  * случаи: пересланное сообщение не вызывает (человек делится чужим текстом,
  * а не спрашивает), команда/тег внутри цитаты или кода не вызывает (иначе
  * цитирование инструкции «пишите /ask ваш вопрос» дёргает бота), суффикс
- * `@username` у команды принимается только если это имя ЭТОГО бота.
+ * `@username` у команды принимается только если это имя ЭТОГО бота, ответ
+ * засчитывается только если он адресован СООБЩЕНИЮ ЭТОГО бота (переданный
+ * `botId`), а не любому боту в чате.
  */
-export function detectAssistantQuestion(message, botUsername = '') {
+export function detectAssistantQuestion(message, botUsername = '', botId = null) {
   const raw = message?.text || message?.caption || '';
   if (!raw || isForwardedMessage(message)) return NO_QUESTION;
   const expectedUsername = String(botUsername || '').replace(/^@/, '').toLowerCase();
@@ -158,6 +166,15 @@ export function detectAssistantQuestion(message, botUsername = '') {
     // о снятии команды дешевле молчания, которое читается как поломка бота.
     if (verb === 'ai') return { isQuestion: true, reason: 'command', text: '', isRetiredCommand: true };
     return { isQuestion: true, reason: 'command', text: cutAt(raw, commandOffset, command[0].length) };
+  }
+
+  // Ответ на СВОЁ сообщение бота — обращение, даже без `/ask` или тега в
+  // самом тексте: человек продолжает диалог, который бот уже начал (обычно
+  // подсказкой после пустого `/ask`). `botId` обязателен и сверяется как
+  // строка: у Telegram оба поля числовые, но сравнение через String() не
+  // зависит от того, как они долетели через сериализацию.
+  if (botId != null && String(message?.reply_to_message?.from?.id) === String(botId)) {
+    return { isQuestion: true, reason: 'reply', text: raw.trim() };
   }
 
   if (!expectedUsername) return NO_QUESTION;
@@ -278,7 +295,7 @@ export function classifyTelegramUpdate({
     const isSyntheticSender = Boolean(message.from?.is_bot
       && new Set(syntheticBotIds.map(String)).has(String(message.from.id)));
     if (message.from?.is_bot && !isSyntheticSender) return { kind: 'skip', reason: 'bot_sender' };
-    const question = detectAssistantQuestion(message, botUsername);
+    const question = detectAssistantQuestion(message, botUsername, botId);
     if (!question.isQuestion) return { kind: 'skip', reason: 'not_assistant_command' };
     return {
       kind: 'question',

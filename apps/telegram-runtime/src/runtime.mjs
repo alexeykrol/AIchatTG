@@ -1083,7 +1083,7 @@ export function createTelegramRuntime({
    * настоящий ответ на настоящий вопрос, он остаётся в истории.
    */
   async function sendAssistantTurn(eventId, question, answer, route = null,
-    { persist = true, markup = false, knowledge = null } = {}) {
+    { persist = true, markup = false, knowledge = null, forceReply = false } = {}) {
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
@@ -1093,7 +1093,7 @@ export function createTelegramRuntime({
     // рендер не нужен и добавил бы класс ошибок на ровном месте.
     const transport = await assistantTelegram.sendMessage({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
-      markup,
+      markup, forceReply,
     });
     // Деградация доставки не отменяет квитанцию: ответ дошёл, просто не целиком
     // или без оформления, а повтор целого ответа задвоил бы уже доставленное.
@@ -1169,8 +1169,8 @@ export function createTelegramRuntime({
   }
 
   /** Доставка служебного текста: человек получает ответ, история не трогается. */
-  function sendAssistantServiceReply(eventId, question, text, route) {
-    return sendAssistantTurn(eventId, question, { text }, route, { persist: false });
+  function sendAssistantServiceReply(eventId, question, text, route, { forceReply = false } = {}) {
+    return sendAssistantTurn(eventId, question, { text }, route, { persist: false, forceReply });
   }
 
   /** Вызов анализатора с контекстом диалога — общий вход observe и dispatch. */
@@ -1335,7 +1335,15 @@ export function createTelegramRuntime({
       // Одинокая `/ask` (клик по меню Telegram) — самый массовый служебный ход и
       // источник боевого дефекта: вопроса нет, писать в историю нечего.
       if (!question.text) {
-        const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_EMPTY_ASK_TEXT, 'command:ask_empty');
+        // forceReply: следующее сообщение этого человека Telegram доставит как
+        // ОТВЕТ на эту подсказку — и `detectAssistantQuestion` (reason: 'reply')
+        // примет его без повторного `/ask`. Без этого текст «одним сообщением»
+        // читается двумя способами, и естественный способ (просто ответить)
+        // раньше уходил в молчание: Telegram не доставляет боту произвольное
+        // следующее сообщение без команды, тега или явного Reply.
+        const result = await sendAssistantServiceReply(
+          eventId, question, ASSISTANT_EMPTY_ASK_TEXT, 'command:ask_empty', { forceReply: true },
+        );
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
         return { ...result, command: 'ask_empty' };
       }
