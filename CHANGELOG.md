@@ -3,6 +3,36 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [0.5.1] — 2026-09-14 — Reply to the assistant's own message now counts as addressing it
+
+Deployed 2026-09-14 21:46 UTC (image `f51753f`, `telegram-runtime` container
+recreated). Live bug, caught by the owner in production minutes after 0.5.0
+went out: an empty `/ask` got the correct hint, but the very next message —
+sent without repeating `/ask` or the bot's @tag — silently vanished. Telegram
+never delivers an unaddressed message to a bot's webhook at all (confirmed
+empirically: the moderator's webhook received it, the assistant's did not),
+and even had it arrived, the code only recognised an explicit `/ask` or
+`@mention` as an invocation.
+
+### Fixed
+
+- `detectAssistantQuestion(message, botUsername, botId)`: a Telegram **reply**
+  to the assistant's own message is now a full invocation (`reason: 'reply'`),
+  the whole message text becomes the question. A reply to a different bot, or
+  any reply when `botId` is unknown, still does not count — narrow by design,
+  same guards (forwarded messages, literal quotes) apply.
+- The empty-`/ask` hint is now sent with `force_reply` (`reply_markup`,
+  `selective: true`): Telegram opens the reply compose box for that user
+  automatically, so a plain next message becomes a genuine reply without them
+  needing to know the swipe-to-reply gesture. Hint copy now names both paths
+  ("ответьте на это сообщение или отправьте /ask...") instead of only the
+  one-message form.
+- Tests: `packages/telegram-core` (+1 case: reply to own/foreign bot, missing
+  `botId`, an explicit command inside a reply, a forwarded reply) and
+  `apps/telegram-runtime` (empty-`/ask` scenario rewritten to assert
+  `forceReply`, new reply-to-bot / reply-to-foreign-bot scenario). Full suite:
+  559 tests, 0 failures, 4 skipped (unchanged, missing allcourses paths).
+
 ## [0.5.0] — 2026-09-14 — Shared dialogue snapshot across analyzer, router and answer
 
 Deployed 2026-09-14 21:06 UTC (image `6c582ec`, `telegram-runtime` container
