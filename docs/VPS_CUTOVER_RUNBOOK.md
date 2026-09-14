@@ -85,7 +85,7 @@ and target-container settings before every maintenance candidate. Do not edit
 or truncate Docker-managed log files. A future migration to the `local` driver
 or a Docker Engine version change is a separate maintenance candidate: scope
 it to named services, record rollback/verification, obtain Product Owner
-approval and a controller lease, then recreate only the leased containers.
+approval, then recreate only the named containers.
 
 ## One-way data-migration admission gate
 
@@ -97,7 +97,7 @@ approved normalized JSONL bundle. Its `bundle-manifest.json` must conform to
 - an immutable News source commit, but no source path or SQLite file;
 - a SHA-256 and line count for a sibling file named exactly `records.jsonl`;
 - target `aichattg-telegram-runtime` and schema `runtime-sqlite-v1`;
-- the exact accepted candidate SHA, controller lease ID, and Product Owner
+- the exact accepted candidate SHA and Product Owner
   approval ID.
 
 Validate it without echoing records or values:
@@ -151,6 +151,31 @@ These steps are intentionally not authorized by this candidate alone.
    expected authorization response, internal health, and no conflict with the
    News host/path rules. Register or switch a Telegram webhook only under its
    own explicit lease.
+
+## Configuration-only change (same image)
+
+Used on 2026-09-14 to enable the assistant in a third chat without a new
+build. On the host a release lives at
+`<AICHATTG_HOME>/releases/<source-sha>/{runtime.env,source/}`; the image tag
+is the source SHA. It still requires explicit Product Owner approval for the
+exact variable change.
+
+1. Back up the live file next to itself, mode `0600`:
+   `cp -p releases/<sha>/runtime.env releases/<sha>/runtime.env.pre-YYYYMMDD && chmod 0600 releases/<sha>/runtime.env.pre-YYYYMMDD`.
+2. Edit the one variable in `releases/<sha>/runtime.env` (for example, add a
+   chat id to `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS`). Do not print the file.
+3. Validate the rendered configuration without starting anything:
+   `docker compose --env-file releases/<sha>/runtime.env -f <compose> --profile telegram-runtime config -q`.
+4. Recreate only the changed service with the same image:
+   `docker compose --env-file releases/<sha>/runtime.env -f <compose> --profile telegram-runtime up -d --no-build --no-deps aichattg-telegram-runtime`.
+5. Wait for the container to report healthy; verify the variable inside the
+   container and check the Telegram webhook `pending` counter (expected `0`).
+6. Rollback: restore `runtime.env.pre-YYYYMMDD` over `runtime.env` and repeat
+   steps 3–5.
+
+Known gap: the `org.opencontainers.image.revision` label is empty in
+production builds, so the deployed source SHA is known from the image tag and
+release directory only, not from the image metadata.
 
 ## Gatekeeper configuration gate before route activation
 

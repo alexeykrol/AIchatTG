@@ -1,5 +1,8 @@
 # AIchatTG active-module registry
 
+> **Historical as of 2026-09-14.** This registry is no longer live: the Claude Code session at the repository root is the sole integrator and executor, and the Codex executors below are provenance only.
+> Current governance is described in `AGENTS.md` ("Integrator and executor protocol").
+
 Updated: 2026-08-04 22:19 PDT. Public hostname: `aikrol.questtales.com`.
 
 > **Статус-пометка 2026-08-16.** Таблица ниже описывает организацию работы на

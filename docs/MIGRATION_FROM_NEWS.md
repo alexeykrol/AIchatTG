@@ -31,8 +31,10 @@ Facebook Page moderation responsibilities.
 
 ## Remaining independent stages
 
-- Build and accept a new course index/knowledge snapshot; the old News course
-  artifact is not reused.
+- ~~Build and accept a new course index/knowledge snapshot.~~ Done 2026-08-15:
+  the laboratory-built package `ai-140310bf9472` and the `org`/`value` slices
+  were admitted and are live; the old News course artifact was not reused. See
+  [ASSISTANT_KNOWLEDGE_ENABLEMENT.md](ASSISTANT_KNOWLEDGE_ENABLEMENT.md).
 - Import selected historical state only through the normalized one-way importer
   if the Product Owner later needs it.
 - Activate Gatekeeper only after its scenario and external integrations pass

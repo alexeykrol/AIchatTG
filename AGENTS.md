@@ -53,47 +53,38 @@ prohibited.
   changes are separate, controller-owned maintenance operations and require a
   Product Owner-approved lease.
 
-## Controller and executor protocol
+## Integrator and executor protocol
 
-- The primary Codex task opened at the canonical repository root is the
-  permanent AIchatTG integrator. On first takeover it must read
-  `.handoffs/2026-08-04-2027-aichattg-project-onboarding.md`, run its ground
-  checks, and accept the named controller generation before assigning work.
-- The permanent controller/integrator owns cross-bot contracts, shared core,
-  migrations, the release queue and production integration. An executor owns
-  only its chartered module paths.
-- The permanent integrator creates and governs Product Owner-facing executor
-  sessions for Moderator, Assistant, Gatekeeper/onboarding and future modules.
-  Those executors have the same candidate, evidence and one-time deployment
-  lease contract used by the News project; mechanical deploy authority never
-  transfers shared integration ownership.
-- Before a candidate is submitted, every executor reports: current production
-  version/SHA (or `not_run`), base and candidate SHAs, already deployed versus
-  recovered versus newly written work, files/additions/deletions, migration and
-  runtime/config effects, protected-path effects, rollback consequence, and
-  evidence as `passed` / `failed` / `not_run` / `inconclusive`.
-- A production change requires both explicit Product Owner approval for that
-  exact candidate and a one-time controller lease naming SHA, service, scope,
-  rollback, expiry, verification, and stop conditions. The executor may then
-  do the mechanical exact-Git deployment and return a receipt; it never gains
-  ownership of other modules.
-- A candidate, local test, Git commit, or controller acceptance is not proof
-  of deployment. Report exactly one lifecycle state: `prepared`, `pushed`,
-  `controller-accepted`, `PO-approved`, `leased`, `deployed`, or
-  `production-verified`.
+Governance since 2026-09-14 (Product Owner decision): there is no separate
+Codex integrator or Codex executor sessions anymore.
+
+- The Claude Code session opened at the canonical repository root is the
+  permanent AIchatTG integrator **and** executor. It works autonomously:
+  decomposition, subagents, integration, tests and commits are its own
+  decisions and need no approval.
+- The Product Owner gives goals, approvals and decisions on stops. The
+  integrator raises the Product Owner only on a stop, not for routine work.
+- A production change — deploy, webhook change, env/config change, migration,
+  secret change, paid-model policy — still requires explicit Product Owner
+  approval for that exact change (SHA or variable, service, scope, rollback,
+  verification). A local test, Git commit or merge to `main` is not proof of
+  deployment.
+- Before a production change the integrator reports: current production
+  image/SHA (or `not_run`), candidate SHA, runtime/config effects, rollback
+  consequence, and evidence as `passed` / `failed` / `not_run` /
+  `inconclusive`.
+- Report exactly one lifecycle state per candidate: `prepared`, `pushed`,
+  `PO-approved`, `deployed`, or `production-verified`.
 
 ## Session classification
 
-Every durable task is classified on creation and recorded in
-`.handoffs/active-module-registry.md`.
+The former Codex executor worktrees, charters and handoffs under `.handoffs/`
+are historical and kept for provenance; `.handoffs/active-module-registry.md`
+is no longer a live registry. Durable work is tracked in `CHANGELOG.md`,
+`README.md` and the docs under `docs/`, not by per-executor sessions.
 
-- A `user-visible-workstream` is explicitly requested by the Product Owner,
-  expected to continue, or directly used by the Product Owner. It stays active
-  until the Product Owner replaces or retires it.
-- A `service-child` exists only to return a bounded result to its parent. The
-  parent archives it only after accepting the result, recording durable
-  evidence, confirming no active lease or user attention gate, and checking
-  that its worktree is clean or handed off.
-- Names, sidebar position, idle state and completed turns are not archival
-  criteria. If classification is unclear, preserve the task and ask the
-  controller to classify it.
+- Evidence statuses (`passed` / `failed` / `not_run` / `inconclusive`) and the
+  lifecycle states above apply to every candidate regardless of who prepared
+  it.
+- Subagents spawned by the integrator return a bounded result to it; they do
+  not commit, deploy, or hold production access.

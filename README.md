@@ -44,6 +44,26 @@ rejected whole by Telegram. Deterministic and service replies stay code-owned
 plain text. See [CHANGELOG 0.3.1](CHANGELOG.md) and
 `packages/telegram-core/src/markup.mjs`.
 
+**Current production image: `5e67451`** (built 2026-08-16, deployed
+2026-08-17). It adds the request analyzer (`observe` / `dispatch` modes;
+`dispatch` is on in the test chat only, where the analyzer verdict chooses the
+route and the router model is not called), synthetic testing with one named
+synthetic bot and its own daily cap, durable question → answer records in
+analyzer chats, and token-usage accounting on every paid call including
+moderation. Models: answer `gpt-5.6-terra` (medium, 2000), router
+`gpt-5.6-luna` (low, 256), moderation `gpt-5.6-terra` (medium, 1024). See
+[CHANGELOG 0.4.0](CHANGELOG.md).
+
+**Assistant enabled in 3 chats since 2026-09-14** (configuration only, image
+unchanged): the third chat was added to `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS`
+and only the runtime container was recreated. The moderator covers the same
+3 chats.
+
+**Waves 1–3 are in `main` only, not deployed:** dialogue context snapshot,
+working-state module (default off), managed local dialogue, and two local
+assistant instances with a recorded conversation. They live in scripts, tests
+and local paths, not on the live answer path.
+
 ## Known open defects
 
 - **Acceptance does not judge answer content.** The deterministic leg checks
@@ -52,6 +72,14 @@ plain text. See [CHANGELOG 0.3.1](CHANGELOG.md) and
   knowledge it was given. This is a measured hole, not a hypothesis: a
   factually loose answer passed 4/4 with `expectation_met: true` and was
   caught only by a human. Closing it is an architectural choice, not a bugfix.
+- **No timeouts on Telegram or model calls, and the webhook is handled
+  synchronously.** A hanging upstream call holds the webhook request open.
+- **Dialogue depth is hardcoded to 3 turns** in
+  `apps/telegram-runtime/src/assistant-dialogue.mjs`.
+- **`TELEGRAM_RUNTIME_REWRITE_MODEL` / `..._REWRITE_REASONING_EFFORT` are not
+  passed through Compose**, so enabling `..._RETRIEVAL_REWRITE_ENABLED` would
+  fail at start until the passthrough is added. Rewrite stays off in
+  production.
 
 ## Local checks
 
@@ -67,7 +95,7 @@ npm test
 npm run check:gatekeeper
 ```
 
-## Planned layout
+## Layout
 
 ```text
 apps/
