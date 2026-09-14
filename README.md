@@ -54,15 +54,22 @@ moderation. Models: answer `gpt-5.6-terra` (medium, 2000), router
 `gpt-5.6-luna` (low, 256), moderation `gpt-5.6-terra` (medium, 1024). See
 [CHANGELOG 0.4.0](CHANGELOG.md).
 
-**Assistant enabled in 3 chats since 2026-09-14** (configuration only, image
-unchanged): the third chat was added to `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS`
-and only the runtime container was recreated. The moderator covers the same
-3 chats.
+**Assistant enabled in 3 chats since 2026-09-14** (configuration only, applied
+to image `5e67451` and carried forward): the third chat was added to
+`TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS`. The moderator covers the same 3 chats.
 
-**Waves 1–3 are in `main` only, not deployed:** dialogue context snapshot,
-working-state module (default off), managed local dialogue, and two local
-assistant instances with a recorded conversation. They live in scripts, tests
-and local paths, not on the live answer path.
+**Current production image: `6c582ec`** (deployed 2026-09-14 21:06 UTC,
+`telegram-runtime` container rebuilt and recreated; `operator-console`
+unchanged). The analyzer, router and answer stages now share one snapshot of
+the last three Q/A turns instead of each re-reading dialogue history on its
+own, so a follow-up question in the same conversation is answered as a
+continuation. A working-state module (goals/conditions/decisions) ships
+disabled by default and is not wired into the live path. See
+[CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
+the host.
+
+Two local assistant instances that can hold a recorded conversation with each
+other (wave 3) remain a lab tool in scripts, not on the live answer path.
 
 ## Known open defects
 

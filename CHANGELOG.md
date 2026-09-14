@@ -3,33 +3,40 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
-## Production configuration — 2026-09-14 — Assistant enabled in the third chat
+## [0.5.0] — 2026-09-14 — Shared dialogue snapshot across analyzer, router and answer
 
-Configuration-only change; image unchanged (`5e67451`). The third chat
-(«КвестТКР_Чат») was added to `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS` in the
-release's `runtime.env`, and only the `aichattg-telegram-runtime` container was
-recreated. The previous file is kept next to it as `runtime.env.pre-20260914`
-(rollback = restore and recreate). The assistant now answers in 3 chats; the
-moderator covers the same 3 chats. Webhook `pending=0`, no errors. Procedure:
-[docs/VPS_CUTOVER_RUNBOOK.md](docs/VPS_CUTOVER_RUNBOOK.md), "Configuration-only
-change (same image)".
-
-## Unreleased (main only) — not deployed
-
-Everything after `5e67451` is in `main` and is **not** on the production image.
-All of it lives in scripts, tests and local paths, not on the live answer path.
+Deployed 2026-09-14 21:06 UTC (image `6c582ec`, `telegram-runtime` container
+recreated; `operator-console` untouched — its code did not change). Rollback:
+previous image `5e67451` is still present on the host.
 
 ### Added
 
-- **Wave 1 + 2** (`f162456`, merged 2026-09-06): dialogue context snapshot,
-  a working-state module (default off), and a managed local dialogue with the
-  assistant.
-- **Wave 3** (`07e69d3`, merged 2026-09-06): two local assistant instances and a
-  recorded conversation between them; the fixture's expectation is taken from
-  the closed list of judges (`f096db0`).
+- **Wave 1 + 2** (`f162456`, merged 2026-09-06): the analyzer, router and
+  answer stages now read one shared snapshot of the last three Q/A turns
+  instead of each stage re-reading dialogue history independently, so a
+  follow-up question ("а на Windows?", "а как это настроить?") is answered as
+  a continuation instead of a question with no context. Fixes a tie-break bug
+  in turn ordering when two turns share the same second. A working-state
+  module (goals/conditions/decisions, one extra guarded model call) ships
+  disabled by default and is not wired into the live path.
+- **Wave 3** (`07e69d3`, merged 2026-09-06): two local assistant instances
+  that can hold a recorded conversation with each other — a lab tool for
+  testing dialogue depth and memory without live users, not on the live path.
 - `scripts/aichattg/docker-logs-safe.sh` (`a112179`, 2026-09-14): a bounded
   wrapper for `docker logs` on the shared VPS (line, time and deadline limits),
   plus the diagnostic rule in `AGENTS.md` and the runbook.
+
+### Production configuration — 2026-09-14 21:06 UTC
+
+Assistant enabled in the third chat («КвестТКР_Чат», config-only, same image
+`5e67451`, applied 20:21 UTC then carried into this build unchanged) alongside
+the code deploy above. `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS` now lists all 3
+chats the moderator covers. Previous `runtime.env` for `5e67451` is kept as
+`runtime.env.pre-20260914` (rollback = restore and recreate). Webhook
+`pending=0`, no startup errors, knowledge slices admitted (org 36, value 17),
+analyzer `mode=dispatch` in the test chat. Procedure:
+[docs/VPS_CUTOVER_RUNBOOK.md](docs/VPS_CUTOVER_RUNBOOK.md), "Configuration-only
+change (same image)".
 
 ## [0.4.0] — 2026-08-16 — Analyzer, synthetic testing and honest usage accounting
 
