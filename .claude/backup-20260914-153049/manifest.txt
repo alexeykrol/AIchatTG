@@ -1,0 +1,7 @@
+Backup created: Mon Sep 14 15:30:49 PDT 2026
+Mode: migrate
+Project type: code
+Content type: 
+Files backed up:
+  manifest.md
+  .gitignore

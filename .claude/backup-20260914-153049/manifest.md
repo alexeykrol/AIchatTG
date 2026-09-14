@@ -1,0 +1,5 @@
+project_name=AIchatTG
+repo_access=private-solo
+project_type=web_application
+project_priority=
+market_analysis=true
