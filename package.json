@@ -13,7 +13,8 @@
     "telegram:ops": "node scripts/aichattg/telegram-ops.mjs",
     "test:knowledge-snapshot": "node --test scripts/aichattg/test/course-knowledge-snapshot.test.mjs",
     "test:infra": "node --test scripts/aichattg/test/compose-contract.test.mjs",
+    "test:ops": "node --test scripts/aichattg/test/docker-logs-safe.test.mjs",
     "test:operator-console": "npm --prefix apps/operator-console test",
-    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:infra && npm run test:operator-console"
+    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:infra && npm run test:ops && npm run test:operator-console"
   }
 }

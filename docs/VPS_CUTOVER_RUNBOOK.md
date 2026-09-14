@@ -57,6 +57,36 @@ bash scripts/aichattg/verify-release-source.sh "$AICHATTG_SOURCE_SHA"
 It rejects a source SHA mismatch, any tracked or untracked overlay, whitespace
 errors, and a Compose reference to a News service, data root, or hostname.
 
+## Docker-log diagnostic safety
+
+The VPS is shared infrastructure. The permanent AIchatTG integrator is the
+only owner of AIchatTG Docker diagnostics; a product executor must not start a
+remote log reader or leave one running. This policy does not authorize a
+container, Docker-daemon, logging-driver, or host change.
+
+Use the checked-in wrapper rather than invoking `docker logs` directly:
+
+```bash
+scripts/aichattg/docker-logs-safe.sh aichattg-aichattg-telegram-runtime-1
+scripts/aichattg/docker-logs-safe.sh aichattg-aichattg-telegram-runtime-1 --follow
+```
+
+The finite command reads at most 200 lines from the last 10 minutes and has a
+20-second deadline. `--follow` reads at most 100 initial lines from the last
+10 minutes and has a five-minute deadline. In either case, timeout status
+`124` means the Docker client did not complete in time: retain the command,
+container, start time, and exit status as incident evidence; do not retry it
+in a loop. Check and terminate the stale client before considering any restart
+of a container or `dockerd`. Do not retain, commit, or paste raw log output,
+which may contain private user data.
+
+The audited host used bounded `json-file` rotation; re-check the live daemon
+and target-container settings before every maintenance candidate. Do not edit
+or truncate Docker-managed log files. A future migration to the `local` driver
+or a Docker Engine version change is a separate maintenance candidate: scope
+it to named services, record rollback/verification, obtain Product Owner
+approval and a controller lease, then recreate only the leased containers.
+
 ## One-way data-migration admission gate
 
 No database file belongs in a release archive, a Compose mount, or this

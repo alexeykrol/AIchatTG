@@ -39,6 +39,20 @@ prohibited.
 - Never commit credentials, private user data, or production database files.
 - Classify evidence as `passed`, `failed`, `not_run`, or `inconclusive`.
 
+## Shared-VPS diagnostic safety
+
+- The permanent integrator owns remote Docker diagnostics on the shared VPS.
+  Product executors must not independently run or leave Docker-log readers on
+  that host.
+- Never invoke `docker logs` directly from an operational script. Use
+  `scripts/aichattg/docker-logs-safe.sh`, which bounds both finite reads and
+  `--follow` sessions. A timeout exit (`124`) is an incident signal: record it
+  and stop rather than retrying in a loop.
+- A stale Docker-log client is terminated before any container, daemon, or
+  host restart is considered. Host-wide logging-driver or Docker-version
+  changes are separate, controller-owned maintenance operations and require a
+  Product Owner-approved lease.
+
 ## Controller and executor protocol
 
 - The primary Codex task opened at the canonical repository root is the
