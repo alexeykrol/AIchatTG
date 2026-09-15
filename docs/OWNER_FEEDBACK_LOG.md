@@ -19,6 +19,25 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Assistant deployment oversight
+
+**Requested:** «Контролируй деплой, а то Интегратор иногда засыпает. Он
+деплоит, но контролируешь ты. Запиши это.»
+
+**Operating rule:** for every Assistant candidate, the integrator remains the
+sole technical production writer and the owner of the exact release lease. The
+Assistant executor controls the candidate's release readiness and observes its
+lifecycle through `production-verified`: it records the base, candidate and
+production SHA; checks the scope, version gate, tests and rollback before the
+lease; and does not mark the change live without the integrator's deployment
+receipt and verification evidence. Missing progress or incomplete evidence is
+reported as `prepared`, `PO-approved`, `deployed`, or `inconclusive`, never as
+`production-verified`.
+
+**Status: prepared.** This records an ownership and verification practice. It
+does not authorize an Assistant executor to deploy, change Telegram, use
+secrets, or bypass the Product Owner approval and exact release-lease gates.
+
 ## 2026-09-15 — Implement and release the restored version footer
 
 **Requested:** «Исправь, закомить, запуш и задеплой это» after the version/footer
