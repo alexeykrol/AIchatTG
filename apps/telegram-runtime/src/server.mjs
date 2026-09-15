@@ -14,8 +14,11 @@ import { botIdFromToken } from '@aichattg/telegram-core';
 import { createTelegramRuntime } from './runtime.mjs';
 import { createTelegramRuntimeHttpServer } from './http-server.mjs';
 import { createModeratorRecoveryWorker } from './moderator-recovery.mjs';
+import { loadDomainCatalog } from './assistant-domains.mjs';
 
 const config = loadRuntimeConfig();
+const domainCatalog = loadDomainCatalog({ indexPath: config.assistantDomainIndexPath });
+console.log(`[telegram-runtime] domain registry count=${domainCatalog.domains.length}; digest=${domainCatalog.digest}`);
 const database = openRuntimeDatabase(config.databasePath);
 const moderatorTelegram = createTelegramAdapter(config.moderator);
 const guard = createGuardAdapter({
@@ -68,7 +71,7 @@ if (contentRetrieval && !contentRetrieval.available) {
 // Анализатор запроса. Спецификация — данные выката: её дайджест печатается в
 // лог, потому что тот же файл живёт в лаборатории, и расхождение стенда с боем
 // обязано быть видимым, а не обнаруживаться по странным цифрам замера.
-const provider = createProviderAdapter(config.provider);
+const provider = createProviderAdapter(config.provider, { domainCatalog });
 const analyzerSpec = config.analyzer.mode === 'off'
   ? { valid: false, code: 'analyzer_disabled', spec: null, digest: null }
   : loadAnalyzerSpec(config.analyzer.specPath);
@@ -78,7 +81,7 @@ if (config.analyzer.mode !== 'off' && !analyzerSpec.valid) {
   throw new Error(`analyzer spec unavailable: ${analyzerSpec.code} (${config.analyzer.specPath})`);
 }
 const analyzer = createAnalyzerAdapter({
-  config: config.analyzer, provider, spec: analyzerSpec.spec, digest: analyzerSpec.digest,
+  config: config.analyzer, provider, spec: analyzerSpec.spec, digest: analyzerSpec.digest, domainCatalog,
 });
 console.log(`[telegram-runtime] analyzer mode=${analyzer.mode}; enabled=${analyzer.enabled}; `
   + `reason=${analyzer.reason || 'none'}; chats=${config.analyzer.chatIds.length}; `
@@ -87,6 +90,7 @@ const runtime = createTelegramRuntime({
   config,
   store: createRuntimeStore(database),
   provider,
+  domainCatalog,
   knowledge,
   contentRetrieval,
   analyzer,

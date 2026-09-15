@@ -9,7 +9,8 @@ import Database from 'better-sqlite3';
 import { isCourseOperationsSupportQuestion, isCourseValueQuestion } from '@aichattg/telegram-core';
 import { answerSystemPrompt } from '../src/provider-adapter.mjs';
 import { STATE_CONTEXT_INSTRUCTION } from '../src/assistant-working-state.mjs';
-import { ASSISTANT_OUT_OF_COVERAGE_TEXT } from '../src/assistant-policy.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
+import { domainBoundaryReply } from '../src/assistant-domain-routing.mjs';
 import {
   buildRolePackage, collapseWhitespace, renderRoleText, renderTranscript, runDualDialogue, withRoleInSystemMessage,
 } from '../scripts/lib/dual-dialogue.mjs';
@@ -283,14 +284,19 @@ test('unknown outcome of an external call: uncertain, never a repeat', async () 
 });
 
 test('boundary answer is legal visible text: abstention is committed and the run continues', async () => {
-  // The synthetic says nothing the expert bank covers; the expert abstains with its canonical text.
+  // The router chooses a known domain, but the expert bank cannot ground the
+  // synthetic's continuation. It must name a knowledge gap, not unknown scope.
   const fixture = rig({ wrappers: { rolePatch: `const answer = result.provider.answer; result.provider.answer = async (input) => ({ ...(await answer(input)), text: 'Ну ладно. А дальше что?' });` } });
   try {
     const result = await runDualDialogue(fixture.options);
     assert.equal(result.status, 'completed'); assert.equal(result.messages.length, 6);
-    assert.equal(result.messages[2].from, EXPERT); assert.equal(result.messages[2].text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
+    const boundary = domainBoundaryReply({ reason: 'domain_knowledge_missing',
+      domainRoutes: [DEFAULT_DOMAIN_CATALOG.routeFor('content')] }, DEFAULT_DOMAIN_CATALOG).text;
+    assert.equal(result.messages[2].from, EXPERT); assert.equal(result.messages[2].text, boundary);
+    assert.match(boundary, /Вопрос относится к моей области/);
+    assert.match(boundary, /нет достаточных сведений/);
     assert.equal(result.messages[2].receipt.status, 'completed');
-    assert.ok(readFileSync(join(fixture.runDir, 'transcript.md'), 'utf8').includes(ASSISTANT_OUT_OF_COVERAGE_TEXT));
+    assert.ok(readFileSync(join(fixture.runDir, 'transcript.md'), 'utf8').includes(boundary));
   } finally { fixture.close(); }
 });
 

@@ -196,9 +196,9 @@ function intentsBlock(spec) {
 export function compileAnalyzerSystemPrompt(spec, { dispatcher = false } = {}) {
   const shape = { ...spec.output_contract.shape, ...(dispatcher ? DISPATCHER_FIELDS : {}) };
   const extra = dispatcher ? DISPATCHER_EXTRA : '';
-  return `Ты — внутренний анализатор вопросов ассистента курса. Твоё суждение никогда не показывается собеседнику: оно только выбирает регистр и источник ответа.
+  return `Ты — внутренний анализатор вопросов ${spec.domainCatalogDigest ? 'ассистента с подключённым индексом доменов' : 'ассистента курса'}. Твоё суждение никогда не показывается собеседнику: оно только выбирает регистр и источник ответа.
 
-Тебе дают ОДИН текущий ход покупателя и короткий контекст его предыдущих реплик. Диагностируй только текущий ход по трём осям.
+Тебе дают ОДИН текущий ход ${spec.domainCatalogDigest ? 'пользователя' : 'покупателя'} и короткий контекст его предыдущих реплик. Диагностируй только текущий ход по трём осям.
 
 ## Ось 1. Темы (выбери 1–3, по убыванию главности)
 ${topicsBlock(spec)}
@@ -358,7 +358,9 @@ export function parseAnalyzerVerdict(text, spec, turnText) {
   const knownTopics = new Set(analyzerSpecIds(spec, 'topics'));
   const topics = parsed.topics;
   if (!Array.isArray(topics) || topics.length < 1 || topics.length > 3
-    || !topics.every((topic) => knownTopics.has(topic))) {
+    || new Set(topics).size !== topics.length
+    || !topics.every((topic) => knownTopics.has(topic))
+    || (topics.includes('out_of_corpus') && topics.length > 1)) {
     problems.push(`topics ${JSON.stringify(topics)} вне контракта`);
   }
 
@@ -379,6 +381,11 @@ export function parseAnalyzerVerdict(text, spec, turnText) {
   }
 
   if (typeof parsed.context_dependent !== 'boolean') problems.push('context_dependent не bool');
+  const riskFlags = parsed.risk_flags ?? [];
+  if (!Array.isArray(riskFlags) || riskFlags.length > 3 || new Set(riskFlags).size !== riskFlags.length
+    || riskFlags.some((flag) => !['abuse', 'prompt_injection', 'privacy'].includes(flag))) {
+    problems.push('risk_flags вне контракта');
+  }
 
   if (problems.length) {
     return { status: 'invalid', error: problems.join('; '), raw: cleaned.slice(0, MAX_RAW_ECHO) };
@@ -387,6 +394,7 @@ export function parseAnalyzerVerdict(text, spec, turnText) {
   const verdict = {
     status: 'ok',
     topics,
+    riskFlags,
     topicsEvidence: String(parsed.topics_evidence || ''),
     contextDependent: parsed.context_dependent,
     level: {

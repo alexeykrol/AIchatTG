@@ -1,4 +1,7 @@
 import { STATE_CONTEXT_INSTRUCTION } from './assistant-working-state.mjs';
+import { createHash } from 'node:crypto';
+import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
+import { composeDomainAnalyzerSpec } from './assistant-domain-routing.mjs';
 /**
  * Анализатор запроса — отдельный модуль-диспетчер. Здесь его рантайм-обёртка:
  * спецификация → промпт → один дешёвый вызов → строгий разбор вердикта.
@@ -61,7 +64,7 @@ export function accumulateLevels(observations, spec) {
   return { reached, totals: Object.fromEntries(totals), threshold };
 }
 
-export function createAnalyzerAdapter({ config, provider, spec, digest = null } = {}) {
+export function createAnalyzerAdapter({ config, provider, spec, digest = null, domainCatalog = DEFAULT_DOMAIN_CATALOG } = {}) {
   const mode = String(config?.mode || ANALYZER_MODES.OFF);
   if (mode === ANALYZER_MODES.OFF) return unavailable('analyzer_disabled');
   // Неизвестный режим — это выключенный анализатор, а не «как observe»:
@@ -72,6 +75,8 @@ export function createAnalyzerAdapter({ config, provider, spec, digest = null } 
   }
   if (!spec) return unavailable('analyzer_spec_unavailable');
   if (typeof provider?.analyze !== 'function') return unavailable('analyzer_provider_unavailable');
+  spec = composeDomainAnalyzerSpec(spec, domainCatalog);
+  digest = createHash('sha256').update(JSON.stringify(spec)).digest('hex');
 
   // Промпт компилируется ОДИН раз на старте: спецификация — данные выката, а не
   // живая настройка. Заодно дефект компиляции падает при старте, а не на
@@ -122,5 +127,7 @@ export function createAnalyzerAdapter({ config, provider, spec, digest = null } 
     return { status: 'ok', verdict, modelId: raw?.modelId || usage.modelId, usage };
   }
 
-  return Object.freeze({ enabled: true, mode, reason: null, digest, appliesTo, analyze });
+  return Object.freeze({ enabled: true, mode, reason: null, digest,
+    domainCatalogDigest: domainCatalog.digest,
+    domainPrimacyRules: spec.routing.main_topic_primacy.rules, appliesTo, analyze });
 }

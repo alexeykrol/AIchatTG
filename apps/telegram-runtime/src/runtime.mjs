@@ -9,12 +9,8 @@ import {
   classifyTelegramUpdate,
   incomingEventId,
   messageIdentity,
-  isCourseOperationsSupportQuestion,
-  isCourseValueQuestion,
   isDefinitiveDomainRouteReason,
-  isNoTimeToLearnSignal,
   normalizeAssistantDisposition,
-  normalizeAssistantRoleRoute,
   normalizeSafetyClassification,
   planTelegramSafetyAction,
   WARNING_FINAL,
@@ -29,7 +25,8 @@ import {
 } from './provider-adapter.mjs';
 import { assistantDialogue } from './assistant-dialogue.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
-import { ROUTE_ARBITER as routeArbiter } from './route-arbitration.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
+import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainTopics } from './assistant-domain-routing.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
@@ -37,7 +34,6 @@ import {
   ASSISTANT_UNAVAILABLE_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
-  assistantSelfDescriptionReply,
   coverageDeficitCandidateLevel,
   isAbstentionReason,
   isOutOfCoverageReason,
@@ -45,27 +41,9 @@ import {
 
 function roleConfig(config, role) { return role === BOT_ROLES.MODERATOR ? config.moderator : config.assistant; }
 
-/**
- * Детекторы кода, работающие ДО модели. Порядок доменов — контракт:
- * операционный первый (деньги, доступ, документы сильнее), value — второй,
- * содержание — по умолчанию. Приоритет вшит в сами подсказки, чтобы провайдер
- * не мог его переиграть.
- *
- * Вынесено в функцию, потому что у подсказок появился второй потребитель:
- * журнал анализатора. Считать их дважды было бы двумя источниками истины о
- * маршруте одного хода.
- *
- * `pill` маршрут НЕ определяет: это узкий сигнал пилюльной посылки, он
- * журналируется как улика и не даёт права никуда свернуть.
- */
-function assistantQuestionHints(text) {
-  const operations = isCourseOperationsSupportQuestion(text);
-  const value = !operations && isCourseValueQuestion(text);
-  return { operations, value, pill: isNoTimeToLearnSignal(text) };
-}
-
+/** Journal only the exact examples that supported a registry decision. */
 function firedHintNames(hints) {
-  return ['operations', 'value', 'pill'].filter((name) => hints?.[name] === true);
+  return hints?.domains || [];
 }
 
 function storedDisposition(row) {
@@ -177,6 +155,9 @@ function assistantDeliveryReceipt(result) {
 function isDefinitiveAssistantRoutingExit(errorCode) {
   const code = String(errorCode || '');
   return code === 'assistant_route_invalid'
+    || code === 'domain_knowledge_invalid'
+    || code === 'domain_context_too_large'
+    || code === 'domain_retrieval_unavailable'
     || code === 'course_operations_route_required'
     || code === 'course_value_route_required'
     || code === 'knowledge_unavailable'
@@ -376,6 +357,8 @@ export function createTelegramRuntime({
   // deployment that has not admitted a package keeps the previous snapshot
   // behaviour instead of failing closed on a path it never enabled.
   contentRetrieval = null,
+  domainCatalog = DEFAULT_DOMAIN_CATALOG,
+  sourceRetrievals = {},
   // Анализатор запроса. Отсутствует по умолчанию: деплой, который его не
   // включал, обязан вести себя ровно как прежде — без вызова и без записи.
   analyzer = null,
@@ -385,7 +368,18 @@ export function createTelegramRuntime({
   // Test-only crash injection. Production bootstrap never supplies hooks.
   testHooks = null,
 }) {
-  const modelProvider = provider || llm || createProviderAdapter({ enabled: false });
+  const modelProvider = provider || llm || createProviderAdapter({ enabled: false }, { domainCatalog });
+  for (const consumer of [modelProvider, analyzer]) {
+    if (consumer?.domainCatalogDigest && consumer.domainCatalogDigest !== domainCatalog.digest) {
+      throw new Error('assistant_domain_catalog_mismatch');
+    }
+  }
+  const retrievals = sourceRetrievals instanceof Map ? new Map(sourceRetrievals) : new Map(Object.entries(sourceRetrievals));
+  // Compatibility adapter for the already admitted course package. New sources
+  // use sourceRetrievals; the resolver itself never assumes a subject.
+  if (contentRetrieval && !retrievals.has(ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT)) {
+    retrievals.set(ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, contentRetrieval);
+  }
   const guardAdapter = guard;
 
   async function completeEnforcement(claim, status, receipt, errorCode = null) {
@@ -1027,15 +1021,13 @@ export function createTelegramRuntime({
    * она есть, — а нужен ровно обратный эффект.
    */
   async function routeAssistantQuestion(question, hints, dialogue, workingState) {
-    const { operations: courseOperationsHint, value: courseValueHint } = hints;
     let answered;
     try {
       answered = await modelProvider.routeAssistant({
         text: question.text,
         chatId: question.chatId,
         userId: question.userId,
-        courseOperationsHint,
-        courseValueHint,
+        domainHints: hints,
         dialogue,
         ...(workingState ? { working_state: workingState } : {}),
       });
@@ -1046,89 +1038,14 @@ export function createTelegramRuntime({
       throw error;
     }
     const routerUsage = providerCallUsage(answered?.receipt);
-    const route = normalizeAssistantRoleRoute(answered);
-    if (!route) return { error: 'assistant_route_invalid', routerUsage };
-    return { ...(await resolveAssistantRoute(question, hints, route, dialogue)), routerUsage };
+    const selection = normalizeDomainSelection(answered, domainCatalog);
+    if (!selection) return { error: 'assistant_route_invalid', routerUsage };
+    return { ...(await resolveAssistantRoute(question, hints, selection, dialogue)), routerUsage };
   }
 
-  /**
-   * Общий хвост маршрута: арбитраж слоёв, воздержание, добыча знания. Вынесен
-   * из routeAssistantQuestion, когда у маршрута появился второй источник
-   * суждения — вердикт анализатора в режиме dispatch (Ф4). Источник маршрута
-   * в каждый момент один (модельный роутер ЛИБО вердикт), а всё, что после
-   * суждения, обязано быть одним кодом: два хвоста разошлись бы на первой же
-   * правке, и dispatch-чат получил бы другие правила воздержания.
-   */
-  async function resolveAssistantRoute(question, hints, initialRoute, dialogue) {
-    // Арбитраж слоёв маршрута — правило §2.3а, читаемое из спецификации
-    // (`route-arbitration.mjs`), а не два `if`-а с зашитой прозой, как было.
-    // Хинты по-прежнему уходят ВХОДОМ в модельный роутер и по-прежнему
-    // перебивают его действие при срабатывании: детектор — слой с доказанной
-    // на голде точностью (0 ложных на голд-190). Живой прогон skep-10 показал
-    // цену обратного: пилюльный ход «пусть ваш ИИ сам всё соберёт» при
-    // сработавшем value-хинте роутер отправил в redirect, и клиент получил
-    // «эта тема за пределами курса» на ЯДРО домена ценности.
-    //
-    // Что изменилось: молчание детектора больше не трактуется как аргумент
-    // против суждения. Домен, уверенно названный моделью при молчащем
-    // детекторе, остаётся её доменом; спор двух назвавших слоёв пишется как
-    // долг детектора и попадает в журнал наблюдений — молча выигранный спор
-    // скрыл бы пробел детектора и выглядел бы успехом.
-    const arbitration = routeArbiter.arbitrate({ hints, route: initialRoute });
-    const route = arbitration.route;
-    // Redirect — законный вердикт роутера «вопрос вне покрытия», а НЕ повод
-    // идти дальше без знания: ответный вызов без источника отвергается
-    // адаптером (provider_request_invalid) и превращается в молчание клиенту.
-    // Живой прогон skep-10: три пустых ответа подряд, синтетик ушёл
-    // неудовлетворённым. Redirect обслуживается тем же путём, что воздержание:
-    // ответственный текст «не уполномочен» + журнал дефицита.
-    if (route.action === ASSISTANT_ROLE_ACTIONS.REDIRECT) {
-      return {
-        route, knowledge: null, abstain: true,
-        reason: DOMAIN_ROUTE_REASONS.NO_SIGNAL, arbitration,
-      };
-    }
-
-    // Operations and value questions keep the v1 text path: each source is a
-    // reviewed snapshot of a handful of entries with no chunks, dictionary or
-    // domain, so there is nothing for the retriever to search and passing it
-    // whole is correct rather than a shortcut.
-    if (route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS
-      || route.sourceId === ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE) {
-      const sourceKnowledge = knowledge.forSource(route.sourceId);
-      if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
-      return { route, knowledge: sourceKnowledge.snapshot, arbitration };
-    }
-
-    // The content domain goes through the retriever. The whole snapshot is no
-    // longer an option: the corpus is a package of tens of thousands of chunks,
-    // and the provider accepts 128 entries.
-    if (!contentRetrieval) {
-      const sourceKnowledge = knowledge.forSource(route.sourceId);
-      if (!sourceKnowledge?.available) return { error: sourceKnowledge?.reason || 'knowledge_unavailable' };
-      return { route, knowledge: sourceKnowledge.snapshot, arbitration };
-    }
-    if (!contentRetrieval.available) {
-      return { error: contentRetrieval.reason || 'knowledge_unavailable' };
-    }
-    const grounded = await contentRetrieval.forQuestion({
-      question: question.text,
-      dialogueTail: dialogue.length
-        ? { user: dialogue.at(-1).question, assistant: dialogue.at(-1).answer } : null,
-      // One retrieval session per user per chat: the pack cache and its topic
-      // switch detection are about one person's train of thought.
-      sessionId: `${question.chatId}:${question.userId}`,
-    });
-    // Abstention is an answer, not silence. A question the corpus cannot ground
-    // gets an honest deterministic reply, because a bot that says nothing reads
-    // as broken and invites the user to retry into the same wall.
-    if (!grounded.grounded) {
-      if (isAbstentionReason(grounded.reason)) {
-        return { route, knowledge: null, abstain: true, reason: grounded.reason, trace: grounded.trace || null, arbitration };
-      }
-      return { error: grounded.reason || 'knowledge_unavailable' };
-    }
-    return { route, knowledge: grounded.knowledge, trace: grounded.trace || null, arbitration };
+  /** Both router modes resolve the same registered source capabilities. */
+  async function resolveAssistantRoute(question, hints, selection, dialogue) {
+    return resolveDomainSelection(selection, { catalog: domainCatalog, knowledge, retrievals, question, dialogue, hints });
   }
 
   /**
@@ -1319,26 +1236,8 @@ export function createTelegramRuntime({
     }
   }
 
-  /**
-   * Режим dispatch (Ф4): домен и форму ответа задаёт вердикт анализатора.
-   *
-   * Один источник маршрута в каждый момент: здесь вызов анализатора ЗАМЕНЯЕТ
-   * отдельный вызов модельного роутера, а не добавляется к нему — двух
-   * суждений об одном ходе не бывает, и ход не дорожает. Отображение вердикта
-   * в {action, sourceId} — детерминированное §2.2 (`routeOfTopic`): главная
-   * тема → пакет; различение teach/navigate внутри content остаётся суждению,
-   * и раз сегодняшний контракт вердикта его не несёт, content идёт действием
-   * по умолчанию (эталон — лабораторный диспетчер), а не догадкой кода.
-   *
-   * Хинты кода при этом никуда не деваются: вердикт проходит ТОГО ЖЕ арбитра
-   * §2.3а, что и модельный роутер (общий хвост `resolveAssistantRoute`) —
-   * сработавший детектор перебивает, отказ законен только при молчании обоих
-   * слоёв, спор пишется долгом детектора в ту же строку журнала.
-   *
-   * Деградация fail-open: любой сбой анализатора (невалидный вердикт, таймаут,
-   * ошибка провайдера) откатывает ход на прежний путь роутера, а сбой остаётся
-   * в журнале и в логе процесса. Диспетчер, который упал, пропускает к
-   * эксперту, а не закрывает дверь (ANALYZER-SPEC §9). Молчание запрещено.
+  /** Analyzer dispatch replaces the router call and retains all selected domains.
+   * Invalid analysis falls back to the same catalog-backed router.
    */
   async function dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState }) {
     let observation;
@@ -1347,27 +1246,14 @@ export function createTelegramRuntime({
     } catch (error) {
       observation = { status: 'error', code: String(error?.code || error?.message || 'analyzer_failed') };
     }
-    // Нормализация тем же контрактом, что у модельного роутера: спроецированный
-    // из данных маршрут обязан пройти ту же проверку пары action↔sourceId,
-    // которую проходит маршрут провайдера, — у ответной модели один вход.
-    // Главная тема — не «первая названная», а результат правил первенства из
-    // тех же данных (см. mainTopic): на пилюльном классе порядок тем от модели
-    // давал ответ в предметной форме, то есть подтверждал посылку «учиться не
-    // надо». Правила лежат в спеке вместе с недопустимым исходом.
-    const primacy = observation.status === 'ok'
-      ? routeArbiter.mainTopic({
-        topics: observation.verdict.topics,
-        level: observation.verdict.level?.hypothesis ?? null,
-        intent: observation.verdict.intent?.kind ?? null,
-      })
-      : { topic: null, applied: null };
-    const mapped = primacy.topic
-      ? normalizeAssistantRoleRoute(routeArbiter.routeOfTopic(primacy.topic))
-      : null;
-    if (primacy.applied) {
-      console.info(`[runtime] analyzer primacy event=${eventId} rule=${primacy.applied.rule} `
-        + `${primacy.applied.from}→${primacy.applied.to}`);
-    }
+    // The analyzer and router share domain IDs, validation and source resolution.
+    const topics = observation.status === 'ok'
+      ? diagnosticDomainTopics(observation.verdict, analyzer.domainPrimacyRules, domainCatalog) : null;
+    const mapped = topics && !(topics.includes('out_of_corpus') && topics.length > 1)
+      ? normalizeDomainSelection({
+        domains: topics[0] === 'out_of_corpus' ? [] : topics,
+        riskFlags: observation.verdict.riskFlags || [],
+      }, domainCatalog) : null;
     if (!mapped) {
       console.error(`[runtime] analyzer dispatch degraded to the previous router event=${eventId} `
         + `status=${observation.status} error=${String(observation.error || observation.code || '').slice(0, 200)}`);
@@ -1439,19 +1325,6 @@ export function createTelegramRuntime({
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: request.reason });
         return { kind: 'skipped', reason: request.reason };
       }
-      // Presence pings and self-description ("что ты можешь?") are about the
-      // assistant, not the course, and must not reach knowledge retrieval:
-      // there is nothing on-topic to find, and the search fails as an
-      // out-of-coverage boundary reply that reads as wrong for a question that
-      // was never about the course. Checked ahead of the flag below, so it
-      // applies whether or not knowledge retrieval is enabled.
-      const selfDescription = assistantSelfDescriptionReply(question.text);
-      if (selfDescription) {
-        const result = await sendAssistantTurn(eventId, question, { text: selfDescription.text }, selfDescription.route);
-        store.completeAssistantRequest(eventId);
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
-        return result;
-      }
       // During extraction no course/index source package is admitted. Public
       // identity and boundary replies remain useful without allowing a provider
       // to fill the missing corpus from general knowledge.
@@ -1471,7 +1344,7 @@ export function createTelegramRuntime({
       }));
       const workingState = workingStateProvider
         ? structuredClone(await workingStateProvider({ chatId: question.chatId, userId: question.userId })) : null;
-      const hints = assistantQuestionHints(question.text);
+      const hints = domainQuestionHints(question.text, domainCatalog);
       // Режим dispatch действует ПО-ЧАТНО (ступень 1 инфраструктурной
       // лестницы): для чата вне списка условие ниже ложно, и ход идёт прежним
       // путём байт-в-байт — без вызова анализатора и без строки в журнале.
@@ -1503,10 +1376,10 @@ export function createTelegramRuntime({
       // is delivered like any other, and the request is completed rather than
       // released, because a delivered answer is what the quota pays for.
       if (routing.abstain === true) {
-        const abstention = assistantAbstentionReply(routing.reason);
+        const abstention = domainBoundaryReply(routing, domainCatalog) || assistantAbstentionReply(routing.reason);
         // An uncovered topic is logged as a deficit before delivery: the signal
         // is the question itself, and it stays valuable even if the send fails.
-        if (isOutOfCoverageReason(routing.reason)) {
+        if (isOutOfCoverageReason(routing.reason) || routing.reason === 'domain_knowledge_missing') {
           store.recordCoverageDeficit({
             chatId: question.chatId,
             userId: question.userId,
@@ -1530,6 +1403,11 @@ export function createTelegramRuntime({
           ...(workingState ? { working_state: workingState } : {}),
           route: routing.route,
           knowledge: routing.knowledge,
+          domainRoutes: routing.domainRoutes,
+          domainCoverage: routing.domainCoverage,
+          missingDomains: routing.missingDomains,
+          riskFlags: routing.riskFlags,
+          registryDigest: routing.registryDigest,
         });
       } catch (error) {
         if (isProviderUnavailableError(error)) {

@@ -19,6 +19,32 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Domain index instead of a fixed set of course routes
+
+**Reported by:** the owner showed refusals to “На какие вопросы ты отвечаешь?”
+and “Кто ты и как тебя зовут?”, and an incomplete answer about the retired
+`/ai` command. They asked for an extensible Markdown domain index and separate
+knowledge for each domain, with domain architecture and knowledge optimization
+treated as independent work. They authorized using useful design ideas from
+other projects and preparing the implementation.
+
+**Diagnosis:** the current source couples a fixed course route vocabulary with
+special-case identity detection; the compound identity phrasing can miss that
+bypass and be treated as outside the course. Public identity/usage facts,
+domain recognition and knowledge availability need separate contracts. The
+screenshots establish observed failures, not the internal route taken on every
+pictured turn. No fresh production trace was requested or collected.
+
+**Candidate:** a validated Markdown registry shared by router, analyzer,
+source resolver and answer provider; current domains plus public self and
+internal-boundary evidence; multi-domain coverage; exact labelled regression
+cases; generic new-domain acceptance tests. No other-project runtime or data
+import. See [architecture and limitations](ASSISTANT_DOMAIN_REGISTRY_V1.md).
+
+**Status: prepared.** Local candidate only. Real-model recognition/answer
+quality and production behavior remain unverified. Source package optimization
+and the separate menu-cleanup incident are not claimed resolved.
+
 ## 2026-09-15 — Menu command still remains; recover the requirement history
 
 **Reported by:** owner supplied a screenshot of the bare

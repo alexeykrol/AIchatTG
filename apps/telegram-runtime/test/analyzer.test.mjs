@@ -28,6 +28,8 @@ import {
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { ROUTER_SYSTEM_PROMPT, createProviderAdapter } from '../src/provider-adapter.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
+import { compileDomainRouterPrompt } from '../src/assistant-domain-routing.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 
 const SPEC_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'analyzer-spec.json');
@@ -90,8 +92,8 @@ function adapters(actions) {
 function fakeProvider() {
   return {
     async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'fake' }; },
-    async routeAssistant({ courseOperationsHint }) {
-      return courseOperationsHint
+    async routeAssistant({ domainHints }) {
+      return domainHints?.domains.includes('operations')
         ? { action: 'support', sourceId: 'course-operations-v1' }
         : { action: 'teach', sourceId: 'course-content-v1' };
     },
@@ -222,27 +224,29 @@ const ROUTER_PROMPT_BEFORE_SPEC = [
   'a value question may only be advise or redirect. Do not add Markdown.',
 ].join(' ');
 
-test('the router prompt compiled from the spec is byte-identical to the shipped one', () => {
+test('the legacy JSON router compiler retains its compatibility prompt', () => {
   assert.equal(compileRouterSystemPrompt(SPEC.spec), ROUTER_PROMPT_BEFORE_SPEC);
-  assert.equal(ROUTER_SYSTEM_PROMPT, ROUTER_PROMPT_BEFORE_SPEC,
-    'адаптер провайдера обязан брать промпт из спецификации, а не из своей константы');
 });
 
-// Промпт — дериватив словаря маршрутов. Если бы он был рукописным, правка
-// `routing.map` не меняла бы в нём ни символа: код считал бы одно, модель
-// слышала другое, и разошлись бы они молча.
-test('the router prompt follows the routing vocabulary, not a hand-written copy', () => {
-  for (const [topic, entry] of Object.entries(SPEC.spec.routing.map)) {
-    for (const action of entry.actions) {
-      assert.ok(ROUTER_SYSTEM_PROMPT.includes(action), `${topic}: действие ${action} не названо модели`);
+// Боевой роутер теперь выбирает домены из Markdown. Старый JSON-компилятор
+// выше остаётся контрактом совместимости, но не источником боевого промпта.
+test('the runtime router prompt follows the Markdown catalog, not the legacy action vocabulary', () => {
+  assert.equal(ROUTER_SYSTEM_PROMPT, compileDomainRouterPrompt(DEFAULT_DOMAIN_CATALOG));
+  for (const domain of DEFAULT_DOMAIN_CATALOG.domains) {
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes(`## ${domain.id}:`));
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes(domain.description));
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes(domain.includes));
+    assert.ok(ROUTER_SYSTEM_PROMPT.includes(domain.excludes));
+    for (const example of [...domain.examples, ...domain.negativeExamples]) {
+      assert.ok(ROUTER_SYSTEM_PROMPT.includes(JSON.stringify(example)));
     }
-    assert.ok(ROUTER_SYSTEM_PROMPT.includes(entry.sourceId || 'null'), `${topic}: пакет не назван модели`);
   }
-  const renamed = JSON.parse(JSON.stringify(SPEC.spec));
-  renamed.routing.map.value.sourceId = 'course-value-v2';
-  renamed.hints.map.value.sourceId = 'course-value-v2';
-  assert.ok(compileRouterSystemPrompt(renamed).includes('course-value-v2'),
-    'правка данных обязана доехать до модели без правки кода');
+  assert.match(ROUTER_SYSTEM_PROMPT, /"domains"/);
+  assert.match(ROUTER_SYSTEM_PROMPT, /"riskFlags"/);
+  const changed = { domains: DEFAULT_DOMAIN_CATALOG.domains.map((domain, i) => i === 0
+    ? { ...domain, description: 'CHANGED_CATALOG_DESCRIPTION' } : domain) };
+  assert.ok(compileDomainRouterPrompt(changed).includes('CHANGED_CATALOG_DESCRIPTION'),
+    'правка описания должна доехать до модели без правки кода');
 });
 
 test('a verdict outside the contract is invalid rather than repaired', () => {
@@ -399,7 +403,7 @@ withRuntime('the journal records the verdict, the fired hints and the route toge
     config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
     analyzer: adapter, ...adapters(actions),
   });
-  // Вопрос ловится боевым value-детектором: в одной строке обязаны сойтись
+  // Вопрос совпадает с полным примером value из Markdown: в одной строке обязаны сойтись
   // диагноз модели, сработавший хинт и итоговый маршрут — иначе сверять их
   // потом будет не с чем.
   await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
@@ -430,7 +434,7 @@ withRuntime('a layer conflict is journaled as detector debt, not swallowed', asy
     config: config(), store, provider: fakeProvider(), knowledge: availableKnowledge(),
     analyzer: adapter, ...adapters(actions),
   });
-  // Value-детектор ловит вопрос, роутер-заглушка отвечает `teach`: домены
+  // Полный пример value из Markdown совпадает с вопросом, роутер-заглушка отвечает `teach`: домены
   // разные, побеждает детектор.
   const result = await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
   assert.equal(result.kind, 'answered');
@@ -439,7 +443,7 @@ withRuntime('a layer conflict is journaled as detector debt, not swallowed', asy
   assert.deepEqual(row.detectorDebt, {
     kind: 'domain_conflict',
     detector: 'value',
-    detectorName: 'isCourseValueQuestion',
+    detectorName: 'registry_exact_example',
     model: 'content',
     modelAction: 'teach',
     resolvedTo: 'value',
@@ -533,7 +537,7 @@ withRuntime('dispatch routes by the verdict and does not call the model router',
   assert.equal(routerCalls.length, 0, 'вердикт заменяет роутер, а не дублирует его');
   assert.equal(calls.length, 1, 'ровно одно суждение на ход');
   // §2.2: главная тема вердикта детерминированно задаёт пакет и действие.
-  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.deepEqual(result.route, { domainId: 'value', action: 'advise', sourceId: 'course-value-v1' });
   assert.ok(actions.at(-1)[1].text.endsWith(':advise'), 'ответ собран в форме домена вердикта');
   const [row] = store.listAnalyzerObservations();
   assert.equal(row.status, 'ok');
@@ -556,17 +560,17 @@ withRuntime('dispatch still yields to a fired detector and records the debt', as
     config: config(), store, provider, knowledge: availableKnowledge(),
     analyzer: adapter, ...adapters(actions),
   });
-  // Вопрос ловится боевым value-детектором, вердикт-заглушка называет content:
-  // спор решает слой с доказанной на голде точностью, проигравший голос — в журнал.
+  // Вопрос совпадает с полным примером value из Markdown, вердикт-заглушка называет content:
+  // спор решает явно записанный пример реестра, проигравший голос — в журнал.
   const result = await runQuestion(runtime, '/ask подрядчики есть, мне бы просто их проверять уметь');
   assert.equal(result.kind, 'answered');
   assert.equal(routerCalls.length, 0);
-  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.deepEqual(result.route, { domainId: 'value', action: 'advise', sourceId: 'course-value-v1' });
   const [row] = store.listAnalyzerObservations();
   assert.deepEqual(row.detectorDebt, {
     kind: 'domain_conflict',
     detector: 'value',
-    detectorName: 'isCourseValueQuestion',
+    detectorName: 'registry_exact_example',
     model: 'content',
     modelAction: 'teach',
     resolvedTo: 'value',
@@ -589,7 +593,7 @@ withRuntime('dispatch: a verdict refusal over a fired detector is overridden, no
   assert.equal(result.kind, 'answered');
   assert.notEqual(result.abstained, true, 'покрытая тема не получает «не уполномочен»');
   assert.equal(routerCalls.length, 0);
-  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' });
+  assert.deepEqual(result.route, { domainId: 'value', action: 'advise', sourceId: 'course-value-v1' });
   const [row] = store.listAnalyzerObservations();
   assert.equal(row.detectorDebt.kind, 'model_refusal_overridden');
 });
@@ -688,7 +692,11 @@ withRuntime('dispatch outside the chat list changes nothing and calls no analyze
 // за наш дефект); неоднозначный отказ анализатора после выхода в сеть фенсит
 // резервацию, как фенсится любой неоднозначный платный вызов.
 withRuntime('the analyzer call declares its billing class on a definitive local exit', async ({ db, store }) => {
-  const failingKnowledge = { forSource() { return { available: false, reason: 'knowledge_source_unavailable' }; } };
+  // Отсутствующее знание теперь даёт честный ответ о пробеле. Здесь проверяем
+  // именно локальный дефект допуска: адаптер выдал снимок чужого источника.
+  const failingKnowledge = { forSource() { return { available: true,
+    snapshot: { sourceId: 'wrong-source-v1', entries: [{ id: 'wrong', content: 'Must never reach the answer model.' }] },
+  }; } };
   const reservation = db.prepare(
     'SELECT status FROM runtime_assistant_request_reservations WHERE event_id = ?',
   );
@@ -703,8 +711,9 @@ withRuntime('the analyzer call declares its billing class on a definitive local 
   });
   const refunded = await runQuestion(okRuntime, '/ask В курсе что такое агент?', { updateId: 10, messageId: 70 });
   assert.equal(refunded.kind, 'skipped');
-  assert.equal(refunded.reason, 'knowledge_source_unavailable');
+  assert.equal(refunded.reason, 'domain_knowledge_invalid');
   assert.equal(reservation.get(refunded.eventId), undefined, 'квота возвращена — резервация снята');
+  assert.deepEqual(paid, [], 'локальный дефект знания не доходит до отправки ответа');
 
   // Отказ анализатора после выхода в сеть неоднозначен: даже локальный
   // доказуемый выход деградационного пути не возвращает квоту — резервация
@@ -717,8 +726,9 @@ withRuntime('the analyzer call declares its billing class on a definitive local 
   });
   const kept = await runQuestion(brokenRuntime, '/ask В курсе что такое агент?', { updateId: 20, messageId: 71 });
   assert.equal(kept.kind, 'skipped');
-  assert.equal(kept.reason, 'knowledge_source_unavailable');
+  assert.equal(kept.reason, 'domain_knowledge_invalid');
   assert.equal(reservation.get(kept.eventId)?.status, 'uncertain', 'неоднозначный вызов фенсится');
+  assert.deepEqual(fenced, [], 'неоднозначность вызова не разрешает отправить ответ по чужому знанию');
 });
 
 // ── Транспорт ───────────────────────────────────────────────────────────────
@@ -891,7 +901,7 @@ withRuntime('a pill turn is answered in the value form, not with course content'
   });
   const result = await runQuestion(runtime, '/ask А мне-то самому что надо знать, чтобы их контролировать?');
   assert.equal(result.kind, 'answered', JSON.stringify(result));
-  assert.deepEqual(result.route, { action: 'advise', sourceId: 'course-value-v1' },
+  assert.deepEqual(result.route, { domainId: 'value', action: 'advise', sourceId: 'course-value-v1' },
     'главной темой при L3 берётся ценность, а не содержание');
   assert.ok(actions.at(-1)[1].text.endsWith(':advise'));
 });
@@ -907,5 +917,5 @@ withRuntime('a subject turn keeps the content form', async ({ store }) => {
   });
   const result = await runQuestion(runtime, '/ask Что такое эмбеддинги простыми словами?');
   assert.equal(result.kind, 'answered', JSON.stringify(result));
-  assert.deepEqual(result.route, { action: 'teach', sourceId: 'course-content-v1' });
+  assert.deepEqual(result.route, { domainId: 'content', action: 'teach', sourceId: 'course-content-v1' });
 });

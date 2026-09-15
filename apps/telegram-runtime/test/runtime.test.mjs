@@ -8,6 +8,7 @@ import test from 'node:test';
 import Database from 'better-sqlite3';
 import { ASSISTANT_SOURCE_PACKAGES, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
@@ -103,8 +104,8 @@ function fakeLlm({ safetyRoute = 'clean', abuseLevel = null } = {}) {
     async moderate() {
       return { safetyRoute, abuseLevel, confidence: 0.98, reason: 'offline-fixture', modelId: 'fake' };
     },
-    async routeAssistant({ courseOperationsHint }) {
-      return courseOperationsHint
+    async routeAssistant({ domainHints }) {
+      return domainHints?.domains.includes('operations')
         ? { action: 'support', sourceId: 'course-operations-v1' }
         : { action: 'teach', sourceId: 'course-content-v1' };
     },
@@ -135,6 +136,9 @@ test('default configuration does not plan Telegram side effects or polling', () 
   assert.equal(loaded.moderationBanLinks, true);
   assert.equal(loaded.moderationAntichannelPin, true);
   assert.equal(loaded.assistantKnowledgeEnabled, false);
+  assert.equal(loaded.assistantDomainIndexPath, undefined);
+  assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_DOMAIN_INDEX_PATH: 'domains/INDEX.md' },
+    { cwd: '/tmp/aichattg-test' }).assistantDomainIndexPath, '/tmp/aichattg-test/domains/INDEX.md');
   assert.equal(loaded.assistantCooldownSec, 20);
   assert.equal(loaded.assistantDailyPerUser, 20);
   assert.equal(loaded.assistantDialogueTtlSec, 604_800);
@@ -584,22 +588,23 @@ test('a redirect route answers with the out-of-coverage text instead of falling 
     // Платный ответный вызов не делается: знания нет, отвечать нечем.
     assert.equal(answerCalls, 0);
     const sent = actions.filter(([kind]) => kind === 'send').at(-1);
-    assert.ok(sent[1].text.includes('не уполномочен'));
+    assert.match(sent[1].text, /Не нашёл подходящей области знаний/);
+    for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(sent[1].text.includes(domain.capability));
+    assert.doesNotMatch(sent[1].text, /не уполномочен/);
     // Вопрос попадает в журнал дефицитов — это сигнал спроса, не мусор.
     assert.equal(store.listCoverageDeficits({ limit: 10 }).length, 1);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
-// Порядок доменов — контракт: операционный вопрос сильнее value-вопроса, а
-// value-вопрос не имеет права уезжать в содержательный маршрут молча.
+// Подсказки опубликованных примеров берутся из данных, а не двух булевых флагов.
 test('course-value hints coerce content routing and answer from the isolated value snapshot', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-value-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   const provider = fakeLlm();
   const hints = [];
-  provider.routeAssistant = async ({ courseOperationsHint, courseValueHint }) => {
-    hints.push({ courseOperationsHint, courseValueHint });
+  provider.routeAssistant = async ({ domainHints }) => {
+    hints.push(domainHints);
     return { action: 'teach', sourceId: 'course-content-v1' };
   };
   const runtime = createTelegramRuntime({ config: config({ assistantKnowledgeEnabled: true }), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
@@ -610,16 +615,16 @@ test('course-value hints coerce content routing and answer from the isolated val
     const coerced = await runtime.handleUpdate('assistant', update(21, 80, '/ask зачем это мне как руководителю'));
     assert.equal(coerced.kind, 'answered');
     assert.deepEqual(coerced.route, { action: 'advise', sourceId: 'course-value-v1' });
-    assert.deepEqual(hints.at(-1), { courseOperationsHint: false, courseValueHint: true });
+    assert.deepEqual(hints.at(-1), { domains: ['value'] });
 
-    // Операционный вопрос гасит value-подсказку: деньги и доступ сильнее.
-    provider.routeAssistant = async ({ courseOperationsHint, courseValueHint }) => {
-      hints.push({ courseOperationsHint, courseValueHint });
+    // Отдельный пример организационного домена выбирает только его.
+    provider.routeAssistant = async ({ domainHints }) => {
+      hints.push(domainHints);
       return { action: 'support', sourceId: 'course-operations-v1' };
     };
     await runtime.handleUpdate('moderator', update(22, 81, '/ask сколько стоит и какие тарифы'));
     await runtime.handleUpdate('assistant', update(23, 81, '/ask сколько стоит и какие тарифы'));
-    assert.deepEqual(hints.at(-1), { courseOperationsHint: true, courseValueHint: false });
+    assert.deepEqual(hints.at(-1), { domains: ['operations'] });
 
     // Хинт побеждает и redirect: детектор уже доказал покрытие домена, поэтому
     // «вне покрытия» от модели на хинтованном вопросе — ложное «не уполномочен»
@@ -771,34 +776,50 @@ test('public profile is deterministic and never discloses or calls the provider'
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
-// Боевой дефект, пойманный владельцем 2026-09-14: с включённым знанием
-// `assistantDeterministicReply` не вызывался вовсе (он жил только под
-// `assistantKnowledgeEnabled !== true`), и "Что ты можешь?" уходило в поиск
-// по курсу, не находило темы и отвечало boundary-текстом «не уполномочен» —
-// формально честным, но неверным ответом на вопрос про самого бота.
-test('self-description answers instantly even with knowledge enabled, never reaching retrieval', async () => {
+// При включённом знании публичная личность — обычный домен с Markdown-знанием,
+// а не детерминированный обход. Вопрос о себе по-прежнему не ищется в уроках.
+test('knowledge-enabled self-description routes and answers from public Markdown without course retrieval', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-self-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
-  let providerCalls = 0;
+  let routeCalls = 0;
+  let answerCalls = 0;
+  let retrievalCalls = 0;
+  let knowledgeCalls = 0;
+  let answerInput;
   const provider = fakeLlm();
-  provider.routeAssistant = async () => { providerCalls++; throw new Error('must not route self-description'); };
-  provider.answer = async () => { providerCalls++; throw new Error('must not answer self-description'); };
+  provider.routeAssistant = async () => { routeCalls++; return { domainId: 'assistant-self' }; };
+  provider.answer = async (input) => {
+    answerCalls++;
+    answerInput = input;
+    return { text: input.knowledge.entries[0].content, modelId: 'fake' };
+  };
   const runtime = createTelegramRuntime({
     config: config({ assistantKnowledgeEnabled: true }), store: createRuntimeStore(db), provider,
-    knowledge: availableKnowledge(), ...adapters(actions),
+    knowledge: { forSource() { knowledgeCalls++; throw new Error('must not read course snapshots'); } },
+    contentRetrieval: { async ground() { retrievalCalls++; throw new Error('must not search course'); } },
+    ...adapters(actions),
   });
   try {
     await runtime.handleUpdate('moderator', update(240, 240, '/ask Что ты можешь?'));
     const result = await runtime.handleUpdate('assistant', update(241, 240, '/ask Что ты можешь?'));
-    assert.deepEqual({ kind: result.kind, route: result.route }, { kind: 'answered', route: 'profile:self' });
+    assert.equal(result.kind, 'answered');
+    assert.deepEqual(result.route, { domainId: 'assistant-self', action: 'self', sourceId: 'assistant-self-v1' });
+    assert.equal(answerInput.knowledge.sourceId, 'assistant-self-v1');
+    assert.ok(answerInput.knowledge.entries.some((entry) => entry.id === 'assistant-self:knowledge'));
+    assert.ok(answerInput.knowledge.entries.every((entry) => entry.id.startsWith('assistant-self:') || entry.id === 'registry:public-capabilities'));
+    const capabilities = answerInput.knowledge.entries.find((entry) => entry.id === 'registry:public-capabilities');
+    assert.ok(capabilities);
+    for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(capabilities.content.includes(domain.capability));
     const sent = actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
     assert.equal(sent.includes('не уполномочен'), false);
     assert.match(sent, /ИИ Навигатор/);
     assert.match(sent, /уроки.*ссылки/);
-    assert.match(sent, /последовательности/);
+    assert.match(sent, /последовательност[ьи]/);
     assert.equal(sent.includes('инфраструктуру'), false);
-    assert.equal(providerCalls, 0);
+    assert.deepEqual({ routeCalls, answerCalls, retrievalCalls, knowledgeCalls }, {
+      routeCalls: 1, answerCalls: 1, retrievalCalls: 0, knowledgeCalls: 0,
+    });
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
@@ -968,7 +989,8 @@ test('an abstention answer stays in dialogue history because it answers a real q
     const remembered = store.recentDialogue('-100', '7', { limit: 3 });
     assert.equal(remembered.length, 1);
     assert.equal(remembered[0].question, 'посоветуйте crm для салона красоты');
-    assert.ok(remembered[0].answer.includes('не уполномочен'));
+    assert.match(remembered[0].answer, /Не нашёл подходящей области знаний/);
+    for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(remembered[0].answer.includes(domain.capability));
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 

@@ -263,6 +263,8 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     // opt-in prevents a configured provider from treating an absent/unreviewed
     // source as permission to answer from general knowledge.
     assistantKnowledgeEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED', false),
+    assistantDomainIndexPath: String(env.TELEGRAM_RUNTIME_DOMAIN_INDEX_PATH || '').trim()
+      ? resolve(cwd, String(env.TELEGRAM_RUNTIME_DOMAIN_INDEX_PATH).trim()) : undefined,
     // The retriever over the admitted v2 content package. Off by default like
     // every other knowledge switch: enabling it is a cutover decision, not a
     // deployment side effect.

@@ -13,6 +13,10 @@ publication to a Telegram channel — remain in the separate News Digest project
 
 ## Architecture principle
 
+Prepared Assistant candidate: [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md).
+It separates domain recognition from knowledge organization; it is not yet a
+production release.
+
 The VPS and Traefik are shared infrastructure. AIchatTG is nevertheless a
 separate application: it owns its repository, release archive, containers,
 database, data root, secrets, bot webhook paths, health endpoint, and release

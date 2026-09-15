@@ -8,6 +8,7 @@ import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeRetrieval } from '../src/knowledge-retrieval.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
 
 /**
  * The whole answer path on hand-built ports: an admitted package, a retriever
@@ -269,8 +270,8 @@ function adapters(actions) {
 function provider({ onAnswer = null, sourceId = 'course-content-v1', action = 'teach' } = {}) {
   return {
     async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'fake' }; },
-    async routeAssistant({ courseOperationsHint }) {
-      return courseOperationsHint
+    async routeAssistant({ domainHints }) {
+      return domainHints?.domains.includes('operations')
         ? { action: 'support', sourceId: 'course-operations-v1' }
         : { action, sourceId };
     },
@@ -278,7 +279,7 @@ function provider({ onAnswer = null, sourceId = 'course-content-v1', action = 't
   };
 }
 
-async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300 }) {
+async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300, providerRoute = {} }) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-retrieval-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
@@ -286,7 +287,7 @@ async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300 }
   const runtime = createTelegramRuntime({
     config: config(),
     store: createRuntimeStore(db),
-    provider: provider({ onAnswer: (input) => { answers.push(input); onAnswer?.(input); } }),
+    provider: provider({ ...providerRoute, onAnswer: (input) => { answers.push(input); onAnswer?.(input); } }),
     knowledge: admittedKnowledge(),
     contentRetrieval,
     ...adapters(actions),
@@ -325,15 +326,15 @@ test('a course question reaches the model with retrieved entries carrying title 
   assert.equal(actions.at(-1)[0], 'send');
 });
 
-test('a question outside the domain gets the out-of-coverage reply and a journal entry', async () => {
-  // Both layers refuse: no dictionary signal and an empty search. The fixture
-  // states the corpus verdict; a ready pack here would mean the corpus can
-  // serve the question and the runtime would answer it instead.
-  const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
+test('a router-unknown question gets catalog capabilities and a journal entry without retrieval', async () => {
+  // Scope is the router's verdict; empty retrieval is not an unknown domain.
+  const retriever = fakeRetriever({ status: 'not_found' });
+  const layer = retrieval({}, { retriever });
   const { result, answers, actions, reservation, deficits } = await runOnce({
     question: '/ask посоветуй рецепт борща',
     contentRetrieval: layer,
     messageId: 320,
+    providerRoute: { action: 'redirect', sourceId: null },
   });
 
   assert.equal(result.kind, 'answered');
@@ -344,8 +345,11 @@ test('a question outside the domain gets the out-of-coverage reply and a journal
   // "Переформулируйте" is deliberately absent: no rephrasing brings an
   // uncovered topic into the corpus, so the reply points elsewhere instead.
   assert.equal(actions.at(-1)[0], 'send');
-  assert.match(actions.at(-1)[1].text, /не уполномочен/);
+  assert.match(actions.at(-1)[1].text, /Не нашёл подходящей области знаний/);
+  for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(actions.at(-1)[1].text.includes(domain.capability));
+  assert.doesNotMatch(actions.at(-1)[1].text, /не уполномочен/);
   assert.doesNotMatch(actions.at(-1)[1].text, /переформулировать/);
+  assert.equal(retriever.asked.length, 0);
   assert.match(result.route, /^boundary:out_of_coverage:/);
   // A delivered answer is what the quota pays for, so the reservation completes.
   assert.equal(reservation.status, 'completed');
@@ -362,6 +366,7 @@ test('an out-of-coverage business question is journaled with the L2 candidate la
     question: '/ask как поднять продажи в моем салоне',
     contentRetrieval: layer,
     messageId: 330,
+    providerRoute: { action: 'redirect', sourceId: null },
   });
 
   assert.equal(result.abstained, true);
@@ -379,13 +384,16 @@ test('a question the corpus cannot ground is abstained rather than answered from
   });
 
   assert.equal(result.abstained, true);
-  assert.equal(result.reason, GROUNDING_REASONS.NOT_FOUND);
+  assert.equal(result.reason, 'domain_knowledge_missing');
   assert.equal(answers.length, 0);
-  // A hole inside the domain keeps the rephrase advice and stays out of the
-  // deficits journal: the domain is covered, the corpus just missed here.
-  assert.match(actions.at(-1)[1].text, /не буду угадывать/);
-  assert.match(result.route, /^boundary:not_in_materials:/);
-  assert.equal(deficits.length, 0);
+  // A known-domain gap is distinguished from an unknown domain and journaled
+  // with its own reason; it never becomes an ungrounded model answer.
+  assert.match(actions.at(-1)[1].text, /Вопрос относится к моей области/);
+  assert.match(actions.at(-1)[1].text, /нет достаточных сведений/);
+  assert.match(actions.at(-1)[1].text, /не буду заменять.*догадкой/);
+  assert.equal(result.route, 'boundary:domain_knowledge_missing');
+  assert.equal(deficits.length, 1);
+  assert.equal(deficits[0].reason, 'domain_knowledge_missing');
 });
 
 test('an operations question keeps the v1 snapshot path and never touches the retriever', async () => {
