@@ -8,6 +8,15 @@ updated: 2026-09-15
 
 ## Next
 
+- [ ] MODERATOR-REVIEW-1: PO-start verified; local synthetic private review/
+      Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
+      storage integration and release; recipient/principal/retention unknown,
+      production collection/delivery disabled. Charter:
+      `docs/proposals/2026-09-15-moderator-review-charter-v1.md`.
+- [ ] CONSOLE-COST-V1: PO-start last-five question costs/averages; Analytics
+      worker isolated from Moderation. No guessed usage/zero costs; shared hooks
+      root-owned. Incorporates pushed3.1.1 copy fixes, standalone release held.
+      `docs/proposals/2026-09-15-console-cost-charter-v1.md`.
 - [ ] CONSOLE-V311: candidate `5e55101` lifecycle `pushed`, исправлены
       склонение и pricing-подпись;33Console tests passed. Для production
       нужны точное PO-разрешение/новая lease/fresh preflight. На сервере3.1.0.

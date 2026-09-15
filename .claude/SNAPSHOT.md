@@ -4,6 +4,13 @@
 
 ## Текущее состояние
 
+- **Новые feature workstreams, local-only:** PO-start Moderation review и
+  Analytics last-five costs проверены. База9d326f4; страницы/new modules
+  разделены, общие Console/runtime entrypoints/schema/env/Compose/root docs
+  пишет только интегратор. Charters в `docs/proposals/2026-09-15-*-charter-v1.md`.
+  Recipient/principal/retention Moderator не утверждены; реальные сбор/уведомления
+  выключены. Standalone3.1.1 held для объединённого analytics candidate.
+  Production остаётся3.1.0/eb0f7fe + runtime335a35a; активной lease/SSH нет.
 - **Ожидает точного production-разрешения, lifecycle `pushed`:** Console3.1.1
   candidate `5e55101` исправляет только склонение «чат» и человекочитаемые
   тарифные подписи/дату в Analytics. Root779passed/5fixture-skips/0failed;

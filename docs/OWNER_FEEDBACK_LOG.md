@@ -19,6 +19,49 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Start the private Moderator review workflow
+
+**Requested:** in task «Модератор», actual message
+`01a0a72a-ed5c-7da1-9b0d-95ecb4d1668c`: «Работа с админокой завершена - может
+начинать проект. Твоя часть админки - модерация. Делай, все, что мы обсудили,
+потом комить, деплой и контролируй.»
+
+**Plan / boundaries:** implement the agreed local cycle of suspicion/repetition
+evidence, private case, fake owner alert/deep link, Admin human verdict and
+versioned pattern drafts/history. V2 replaces Telegram decision buttons with
+Admin-only decisions. New suspicions never imply sanctions or active learning.
+The worker owns isolated feature files/Moderation page; the root owns shared
+entrypoints/contracts/storage integration and release. Analytics is a separate
+concurrent workstream, not a second writer on those protected files.
+
+**Status: proposed; implementation chartered.** No feature candidate is accepted
+yet. Code base9d326f4 includes pushed3.1.1 copy fixes, while last verified live
+Console remains3.1.0/eb0f7fe and runtime335a35a. No approved private notification
+destination/reviewer identity or review-data retention policy was found in
+current checked-in sources. Existing notifier is a disabled seam; recovery TTL
+and project-transcript preservation are not review-data permission. Continue
+with synthetic local fixtures and disabled defaults; exact product/data/cost
+decisions and a release lease are required before real collection/delivery.
+[Charter](proposals/2026-09-15-moderator-review-charter-v1.md).
+
+## 2026-09-15 — Explain apparent zero prices and add last-five question costs
+
+**Requested:** in task «Админка», actual message
+`01a0a72c-6e0d-7722-8dba-1ac2e4fd24d7`: «Фокус на раздел админки аналитика -
+цена вопросов. Пока по 0. Добавь цену последний 5 вопросов, потом средние и т.п.
+Если нужен источник данных - исследуй и реализуй.»
+
+**Plan / boundaries:** inspect the actual usage/rate source, expose the latest
+five unique questions and correctly defined averages, distinguish known zero,
+partial and unknown costs. Last live receipt had75 unknown-cost records; it
+does not prove a zero bill. Missing historical usage must not be invented.
+Use a separate isolated Analytics worker; root integrates any shared runtime,
+storage or API hooks. Existing3.1.1 Russian labels are already in the base.
+
+**Status: proposed; implementation chartered.** Standalone3.1.1 release is held
+for a combined analytic candidate, not silently deployed. No new release/paid
+authority or production access is granted by this implementation start.
+[Charter](proposals/2026-09-15-console-cost-charter-v1.md).
 ## 2026-09-15 — Analytics copy follow-up from the Console visual acceptance
 
 **Context:** independent Chrome acceptance of the owner's all-Russian Console
