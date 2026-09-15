@@ -5,9 +5,10 @@
 - Task ID: moderator-review-v1
 - Work kind: implementation
 - Status: chartered
+- Ownership acknowledgement: accepted; local implementation ongoing
 - Project root: `/Users/alexeykrolmini/Code/AIchatTG`
 - Base ref: `9d326f419818b616d1c8045ae4d9a812f6a0ad04`
-- Worktree/branch: `/Users/alexeykrolmini/.codex/worktrees/d85f/AIchatTG`, `codex/aichattg-moderator-executor-v1`
+- Worktree/branch: `/Users/alexeykrolmini/.codex/worktrees/d85f/AIchatTG`, `codex/moderation-review-v1-20260915`
 - Controller: root integrator `019fd019-af89-7b50-a16d-8c7928753f24`
 - Result owner: task Moderator `019fd023-a949-7961-87cd-693bcb893e2c`
 
@@ -39,6 +40,14 @@
   taxonomy/counterexamples only where not superseded by v2.
 - Current code at the base above supersedes both proposals' older UI anchors.
   Actual page is `apps/operator-console/public/moderation-v3.html`.
+- PO retention message `01a0a734-795a-7be0-b11d-c1e4ca568c14`, re-read in the
+  same task: retain source comments/context indefinitely until manual removal.
+  This is not a claim that storage is free or approval for a quota increase.
+- Worker contracts `2026-09-15-moderation-review-contract-v1.md`, `-v2.md`
+  and `-v3.md` in the same proposal directory are accepted for synthetic local
+  implementation, newest definition prevailing. Namespace:
+  `/api/operator/moderation-review/v1`; insufficient evidence is audit-only,
+  never a trainable example. Existing legacy write rejection stays intact.
 
 ## Ownership
 
@@ -68,10 +77,15 @@
   recipient/principal/retention, new real collection or outbound send.
 - Production: blocked pending exact integrated candidate approval and lease,
   explicit private recipient/reviewer principal, evidence fields/limits,
-  case/example retention/deletion policy, config/migration review and rollback.
+  backup/copy deletion handling, config/migration review and rollback.
+  Retention choice is settled: explicit `retentionMs:null`, no expiry/eviction.
+  Local private-store erasure is accepted with exact target/version/request/
+  principal fencing, second UI confirmation, transactional linked-data removal
+  and minimal content-free receipt. It never deletes Telegram/runtime data.
+  SQLite logical erasure is not a guarantee of physical media/backup erasure.
 - Spending: blocked pending explicit model-call purpose, limits/currency,
   duration and stop strategy; local transports remain fake/offline.
-- No existing approved review destination or retention was found in current
+- No existing approved review destination/principal was found in current
   checked-in sources. Notification config only has enabled=false; bootstrap
   injects no sender. Existing recovery TTL and transcript preservation rules
   are not review-data permission. Disabled defaults must fail closed.

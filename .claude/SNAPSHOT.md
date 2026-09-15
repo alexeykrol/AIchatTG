@@ -8,9 +8,17 @@
   Analytics last-five costs проверены. База9d326f4; страницы/new modules
   разделены, общие Console/runtime entrypoints/schema/env/Compose/root docs
   пишет только интегратор. Charters в `docs/proposals/2026-09-15-*-charter-v1.md`.
-  Recipient/principal/retention Moderator не утверждены; реальные сбор/уведомления
-  выключены. Standalone3.1.1 held для объединённого analytics candidate.
+  Оба worker приняли ownership. Moderator retention утверждён: бессрочно до
+  ручного удаления; local contract v1/v2/v3 accepted, private erase с повторным
+  подтверждением, uncertain verdict audit-only. Recipient/principal/production
+  limits ещё не утверждены; реальные сбор/уведомления выключены.
+  Standalone3.1.1 held для объединённого analytics candidate.
   Production остаётся3.1.0/eb0f7fe + runtime335a35a; активной lease/SSH нет.
+- **Cost diagnosis, read-only passed22:33:50UTC:** из последних5 записей все
+  имеют answer/analyzer tokens,4 имеют exact event-level no-router proof,1 нет.
+  Это ещё не4 подтверждённых цены: rate/eligibility/stage checks впереди.
+  Один bounded query7.18ms,0writes/private-text exports; app snapshots identical.
+  SSH closed22:34:16UTC. `docs/reports/2026-09-15-console-cost-metadata-diagnostic.md`.
 - **Ожидает точного production-разрешения, lifecycle `pushed`:** Console3.1.1
   candidate `5e55101` исправляет только склонение «чат» и человекочитаемые
   тарифные подписи/дату в Analytics. Root779passed/5fixture-skips/0failed;

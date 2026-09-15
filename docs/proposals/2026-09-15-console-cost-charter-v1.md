@@ -5,6 +5,7 @@
 - Task ID: console-question-cost-v1
 - Work kind: implementation
 - Status: chartered
+- Ownership acknowledgement: accepted; local implementation ongoing
 - Project root: `/Users/alexeykrolmini/Code/AIchatTG`
 - Base ref: `9d326f419818b616d1c8045ae4d9a812f6a0ad04`
 - Worktree/branch: `/Users/alexeykrolmini/.codex/worktrees/analytics-cost-last5/AIchatTG`, `codex/analytics-cost-last5-20260915`
@@ -78,6 +79,11 @@
 - Depends on: root acceptance for any runtime/provider/storage hook; request
   content-free production metadata checks from root only if local sources
   cannot answer a necessary question. No worker reconnection to the VPS.
+- Root completed one bounded metadata-only query at22:33:50UTC: all five
+  latest records have answer/analyzer tokens; four have exact event-level
+  no-router proof, one remains unknown. This is not yet a price/eligibility
+  result. Report: `docs/reports/2026-09-15-console-cost-metadata-diagnostic.md`.
+  SSH master closed22:34:16UTC; zero production writes/provider calls.
 - Unblocks: one reviewed analytics candidate incorporating3.1.1 copy fixes.
   Standalone3.1.1 activation is held; no old lease may be reused.
 

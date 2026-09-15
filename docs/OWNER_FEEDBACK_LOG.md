@@ -19,6 +19,26 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Retain private review materials until manual removal
+
+**Requested:** actual owner message `01a0a734-795a-7be0-b11d-c1e4ca568c14`
+in «Модератор»: «без ограничений ... По необходимости после анализа буду
+удалять руками до иных инструкций.»
+
+**Decision / local contract:** explicit indefinite retention, no automatic
+expiry or eviction. Manual exact-case erasure requires authentication, version
+fencing, idempotent request binding and a second UI confirmation. It removes
+linked private evidence/notes/drafts/delivery metadata in one transaction and
+keeps only a minimal content-free receipt. No Telegram or runtime data deletion.
+SQLite erasure does not guarantee erasure from backups or physical media.
+
+**Status: proposed; contract accepted, implementation ongoing.** The owner's
+retention choice is recorded, not a free-storage claim, quota increase or
+production collection approval. Recipient/reviewer identity, production field
+limits, copies/backup handling and exact release remain separate gates.
+Worker contracts v1/v2/v3 are accepted for synthetic local work, newest wins.
+[Charter](proposals/2026-09-15-moderator-review-charter-v1.md).
+
 ## 2026-09-15 — Start the private Moderator review workflow
 
 **Requested:** in task «Модератор», actual message
@@ -37,8 +57,8 @@ concurrent workstream, not a second writer on those protected files.
 **Status: proposed; implementation chartered.** No feature candidate is accepted
 yet. Code base9d326f4 includes pushed3.1.1 copy fixes, while last verified live
 Console remains3.1.0/eb0f7fe and runtime335a35a. No approved private notification
-destination/reviewer identity or review-data retention policy was found in
-current checked-in sources. Existing notifier is a disabled seam; recovery TTL
+destination/reviewer identity was found in current checked-in sources. The
+later explicit retention choice is recorded above. Existing notifier is a disabled seam; recovery TTL
 and project-transcript preservation are not review-data permission. Continue
 with synthetic local fixtures and disabled defaults; exact product/data/cost
 decisions and a release lease are required before real collection/delivery.
@@ -62,6 +82,16 @@ storage or API hooks. Existing3.1.1 Russian labels are already in the base.
 for a combined analytic candidate, not silently deployed. No new release/paid
 authority or production access is granted by this implementation start.
 [Charter](proposals/2026-09-15-console-cost-charter-v1.md).
+
+**Measured diagnosis, 22:33:50 UTC:** one bounded metadata-only production
+query passed: all five latest records have answer/analyzer tokens; four also
+have exact completed event-matched `analyzer_dispatch` no-router evidence.
+The fifth remains unknown for that stage. Current missing-router logic loses
+that distinction. This is not proof of four fully priced questions: rates,
+eligibility and other stage coverage still need review. No texts/IDs exported,
+no writes/provider calls; unchanged healthy apps, SSH closed22:34:16UTC.
+[Diagnostic evidence](reports/2026-09-15-console-cost-metadata-diagnostic.md).
+
 ## 2026-09-15 — Analytics copy follow-up from the Console visual acceptance
 
 **Context:** independent Chrome acceptance of the owner's all-Russian Console
