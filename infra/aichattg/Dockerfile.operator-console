@@ -14,6 +14,8 @@ RUN npm ci --omit=dev
 COPY apps/operator-console/src/ ./src/
 COPY apps/operator-console/public/ ./public/
 COPY apps/telegram-runtime/src/safety-artifacts/ ./safety-artifacts/
+COPY apps/telegram-runtime/src/assistant-domains.mjs /app/apps/telegram-runtime/src/assistant-domains.mjs
+COPY apps/telegram-runtime/src/domains/ /app/apps/telegram-runtime/src/domains/
 RUN chown -R node:node /app
 
 USER node

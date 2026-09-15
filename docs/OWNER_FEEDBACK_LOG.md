@@ -19,6 +19,39 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Release the Russian Console v3 separately from Assistant
+
+**Reported / requested:** after the Assistant footer release the owner asked
+«Похоже деплоя новой админки еще не было?» and then explicitly said «Деплой».
+The integrator confirmed that the Console was still on `5e67451`; the prior
+release affected only Assistant `2.4.37` and must not be presented as a Console
+deployment.
+
+**Preparation:** merge the three Console commits ending at `c62701c` onto
+current `1bd8bd8`, preserving both feedback histories. Release scope is only
+`aichattg-operator-console`, its bundled domain sources and separate versioned
+draft directory; runtime DB remains read-only. Existing route/auth and runtime
+image `335a35a` remain unchanged. The five added Console env fields expose
+domain/draft paths and actual chat/dialogue/synthetic settings without changing
+bot configuration. Read-only preflight found no existing-setting drift.
+
+**Release review:** reproduced a v3 Markdown editor race where switching domains
+while a read was pending could save the previous text into the newly selected
+domain draft. The integrated candidate adds a domain/state fence and nine
+regressions for pending/out-of-order reads and in-flight saves. No production
+draft or runtime data was affected. Root tests780/780, original historical
+receipt checks29/29 and migration safety9/9 passed; Console30/30 is included.
+
+**Release oversight:** the owner's task-specific instruction is that the
+requesting Console task controls follow-through and final evidence review,
+while the integrator remains the sole technical production writer and lease
+owner. The analogous Assistant/Moderator oversight requests do not authorize
+their separate menu candidates or change the current Console-only scope.
+
+**Status: prepared.** Exact-source integration, tests and Console-only release
+are in progress; deployment is not yet claimed. Menu localization and the
+separate Moderator command-removal proposal are explicitly outside this release.
+
 ## 2026-09-15 — Implement and release the restored version footer
 
 **Requested:** «Исправь, закомить, запуш и задеплой это» after the version/footer
@@ -112,6 +145,55 @@ boundary, unchanged env/schema/routes/Console and retained rollback `5600afd`.
 Focused checks passed 72/72; root 688/688, frozen-source receipt checks 29/29,
 migration 9/9 and scenario/isolation checks passed. New paid and Telegram
 acceptance are `not_run`. See the [receipt](reports/2026-09-15-runtime-0b54148-deployment.md).
+
+## 2026-09-15 — Open the local Console in an existing full Chrome tab
+
+**Reported by:** the owner said «ничего не запущено», rejected the in-app
+browser as inconvenient, and requested a full tab in an already open browser.
+The supplied screenshot showed `ERR_INVALID_AUTH_CREDENTIALS` at `127.0.0.1`.
+
+**Diagnosis / passed:** the local Console process was listening on
+`127.0.0.1:8790` and unauthenticated `/health` returned HTTP 200. The in-app
+browser failed at the Basic-auth boundary. A tab created through the Chrome
+browser integration also returned `ERR_BLOCKED_BY_CLIENT` for both the Console
+and its public `/health` route. This was a browser access failure, not evidence
+that the server was stopped.
+
+**Resolution / passed:** in the owner's already open Chrome window, a normal
+tab outside the integration-created group opened the same localhost URL. Basic
+sign-in completed and Chrome's accessibility state showed the Assistant
+settings page, navigation and editable candidate fields. No credential was
+saved by the agent; no application code or production system was changed.
+
+**Status: partial.** Local browser access is verified for this running process.
+Automatic restart after a reboot and production data access are `not_run`.
+
+## 2026-09-15 — Edit domain Markdown and show Assistant question costs
+
+**Reported by:** the owner agreed with editable Assistant parameters and added:
+«у нас для нескольких доменов - база для ответа в MD файле - проверь и эти
+файлы тоже надо сделать редактируемыми. Для них отдельную вкладку. Плюс
+отдельная вкладка по аналитике, включая затраты на вопросы - средние, за
+день, за неделю и т.п.»
+
+**Diagnosis:** the current domain catalog binds two answer sources to local
+Markdown (`assistant-self.md`, `assistant-abuse.md`); the other four use signed
+lesson retrieval or snapshots. Existing durable Assistant answer receipts
+in normal runtime cover analyzer-enabled chats, so all-chat cost and invoice
+totals cannot be inferred from the available data. The old Console has no
+candidate editor or separate cost page.
+
+**Recommendation / implementation:** a local v2 candidate adds Settings,
+Domain knowledge and Analytics tabs. Markdown and setting saves create
+versioned, validated candidates without changing the Telegram runtime.
+Analytics reports known estimated spend and average only for fully priced
+recorded questions, separately exposing unknown cost and current coverage.
+See [candidate report](candidates/2026-09-15-operator-console-v2.md).
+
+**Status: partial.** The local Console candidate is `prepared`; it is not
+merged or live. All-chat usage, failed paid attempts and cached-token invoice
+cost remain `proposed` pending a metadata-only usage ledger. Production,
+Telegram messages and paid calls were `not_run`.
 
 ## 2026-09-15 — Add a clarification suggestion without rewriting the boundary reply
 
@@ -532,3 +614,23 @@ losing that would silently turn "open and tracked" into "forgotten."
    that 3 is the real ceiling and the outer config only trims further down,
    never up. Current candidate removes the inner cap and tests a wider retained
    window. **Status: fixed.**
+
+## 2026-09-15 — Смешаны старое и новое меню панели
+
+**Сообщил владелец:** при переключении вкладок «Модерация», «Ассистент» и
+«Тесты» открывалась старая русская панель с тремя пунктами, а «Настройки»,
+«Базы ответов» и «Аналитика» показывали новый англоязычный интерфейс с шестью
+пунктами. Владелец попросил единый вариант полностью на русском, включая меню
+и подписи; приложил снимки всех состояний.
+
+**Диагноз:** сервер отдавал три старые страницы и три новые напрямую. У новых
+страниц была собственная навигация, а старые страницы сохраняли прежнюю,
+поэтому разные вкладки фактически переключали версии интерфейса.
+
+**Рекомендация / исправление:** подготовить единую русскую версию v3 всех шести
+вкладок с одинаковым меню и оформлением; обычные старые адреса направлять на
+соответствующую страницу v3. Оригиналы v1/v2 оставить по отдельным адресам
+для сравнения и проверки истории. Проверить все вкладки в обычной вкладке
+внешнего браузера.
+
+**Статус:** подготовлен локальный кандидат; выпуск в production не выполнялся.

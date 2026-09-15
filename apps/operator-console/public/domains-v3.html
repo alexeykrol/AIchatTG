@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Базы ответов · AIchatTG</title><link rel="stylesheet" href="/console-v3.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">Панель управления AIchatTG</p><h1>Базы ответов</h1>
+      <p class="subhead">Редактируйте базы ответов в Markdown-файлах. Каждое сохранение создаёт проверенную версию.</p></div>
+    <span class="badge">Черновики Markdown</span>
+  </div>
+  <nav class="nav" aria-label="Разделы панели управления">
+    <a href="/moderation-v3.html">Модерация</a>
+    <a href="/assistant-v3.html">Ассистент</a>
+    <a href="/settings-v3.html">Настройки</a>
+    <a class="active" aria-current="page" href="/domains-v3.html">Базы ответов</a>
+    <a href="/analytics-v3.html">Аналитика</a>
+    <a href="/tests-v3.html">Тесты</a>
+  </nav>
+  <div id="notice" class="status">Загружаем список доменов…</div>
+  <div class="grid">
+    <section class="card wide"><h2>Зарегистрированные домены</h2>
+      <p>В реестре шесть доменов. Здесь редактируются только домены с локальным Markdown-файлом. Остальные базы поступают из других источников.</p>
+      <div id="list" class="domain-list"></div>
+    </section>
+    <section id="editor" class="card wide" hidden>
+      <h2 id="title"></h2><p id="binding"></p>
+      <div class="fieldrow">
+        <div class="field"><label for="released">Текущий Markdown</label><textarea id="released" readonly></textarea><small>Содержимое, включённое в работающую версию.</small></div>
+        <div class="field"><label for="candidate">Черновик Markdown</label><textarea id="candidate" spellcheck="false"></textarea><small>Начните с заголовка # и добавьте содержательные сведения. Максимум — 16 000 символов.</small></div>
+      </div>
+      <div class="actions"><button id="save" class="primary">Сохранить новую версию</button><button id="reset" class="secondary">Вернуть текущий текст</button><span id="revision" class="micro mono"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+  let catalog, selected, state;
+  let selectionRevision = 0, savePending = false;
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  function editable() { return state && state.id === selected && state.editingEnabled && !state.stale; }
+  function updateEditorLock() {
+    const locked = !editable() || savePending;
+    for (const id of ['candidate', 'save', 'reset']) document.getElementById(id).disabled = locked;
+  }
+  async function api(path, options) {
+    const response = await fetch(path, options); const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+    return data;
+  }
+  function sourceLabel(kind) {
+    return ({ retrieval: 'поиск по источникам', snapshot: 'снимок данных', markdown: 'Markdown-файл' })[kind] || 'другой источник';
+  }
+  function renderList() {
+    const list = document.getElementById('list'); list.replaceChildren();
+    for (const domain of catalog.domains) {
+      const button = document.createElement('button'); button.type = 'button';
+      button.className = 'domain-button' + (selected === domain.id ? ' active' : '');
+      const name = document.createElement('strong'); name.textContent = domain.title;
+      const detail = document.createElement('span');
+      detail.textContent = domain.knowledgeFile ? 'Markdown-файл: ' + domain.knowledgeFile : sourceLabel(domain.sourceKind);
+      button.append(name, detail); button.addEventListener('click', () => select(domain.id)); list.append(button);
+    }
+  }
+  async function select(id) {
+    const revision = ++selectionRevision;
+    state = null;
+    document.getElementById('editor').hidden = true;
+    selected = id; renderList();
+    updateEditorLock();
+    const domain = catalog.domains.find((entry) => entry.id === id);
+    if (!domain.knowledgeFile) {
+      say(domain.title + ' использует разрешённый источник: ' + sourceLabel(domain.sourceKind) + '. Локальный Markdown-файл ответов к этому домену не привязан.');
+      return;
+    }
+    try {
+      const loaded = await api('/api/operator/domains/' + encodeURIComponent(id));
+      if (revision !== selectionRevision || selected !== id) return;
+      if (loaded.id !== id) throw new Error('domain_response_mismatch');
+      state = loaded;
+      document.getElementById('editor').hidden = false;
+      document.getElementById('title').textContent = state.title;
+      document.getElementById('binding').textContent = 'Файл базы: ' + state.knowledgeFile + '. Описание домена и правила ответа остаются в проверенном реестре.';
+      document.getElementById('released').value = state.releasedText;
+      document.getElementById('candidate').value = state.candidateText ?? state.releasedText;
+      document.getElementById('revision').textContent = state.candidateDigest
+        ? 'Черновик ' + state.candidateDigest.slice(0, 12) + ' · ' + state.candidateCreatedAt
+        : 'Текущая версия ' + state.sourceDigest.slice(0, 12);
+      updateEditorLock();
+      say(state.stale ? 'Реестр изменился после создания черновика. Перед сохранением проверьте его заново.'
+        : state.editingEnabled ? 'При сохранении проверяется весь черновик реестра. Работающий бот не изменяется.'
+        : 'Хранилище черновиков не настроено. Markdown доступен только для просмотра.', state.stale ? 'warn' : '');
+      return loaded;
+    } catch (error) {
+      if (revision !== selectionRevision || selected !== id) return;
+      state = null; updateEditorLock();
+      document.getElementById('editor').hidden = true; say('Домен недоступен: ' + error.message, 'error');
+    }
+  }
+  document.getElementById('reset').addEventListener('click', () => {
+    if (editable() && !savePending) document.getElementById('candidate').value = state.releasedText;
+  });
+  document.getElementById('save').addEventListener('click', async () => {
+    if (!editable() || savePending) return;
+    const savingState = state, revision = selectionRevision;
+    const text = document.getElementById('candidate').value;
+    savePending = true; updateEditorLock();
+    try {
+      await api('/api/operator/domains/' + encodeURIComponent(savingState.id) + '/candidates', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-operator-intent': 'candidate-draft' },
+        body: JSON.stringify({ text, baseDigest: savingState.baseDigest }),
+      });
+      if (revision !== selectionRevision || selected !== savingState.id) return;
+      const reloaded = await select(savingState.id);
+      if (reloaded && state === reloaded) say('Новая версия Markdown сохранена. Работающий бот не изменился.', 'good');
+    } catch (error) {
+      if (revision === selectionRevision && selected === savingState.id) say('Версию не удалось сохранить: ' + error.message, 'error');
+    } finally { savePending = false; updateEditorLock(); }
+  });
+  async function boot() {
+    try { catalog = await api('/api/operator/domains'); renderList();
+      const first = catalog.domains.find((entry) => entry.knowledgeFile);
+      if (first) await select(first.id); else say('Локальные Markdown-файлы ответов не зарегистрированы.');
+    } catch (error) { say('Список доменов недоступен: ' + error.message, 'error'); }
+  }
+  boot();
+</script>
+</body>
+</html>

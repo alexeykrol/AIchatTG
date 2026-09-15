@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Domain knowledge · AIchatTG</title><link rel="stylesheet" href="/console-v2.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">AIchatTG Operator Console</p><h1>Domain knowledge</h1>
+      <p class="subhead">Edit Markdown answer evidence for domains bound to local files. Each save creates a checked, versioned copy.</p></div>
+    <span class="badge">Markdown candidates</span>
+  </div>
+  <nav class="nav" aria-label="Operator pages">
+    <a href="/moderation.html">Moderation</a><a href="/settings-v2.html">Settings</a>
+    <a class="active" href="/domains.html">Domain knowledge</a><a href="/analytics.html">Analytics</a>
+    <a href="/eval.html">Tests</a><a href="/assistant.html">Legacy assistant view</a>
+  </nav>
+  <div id="notice" class="status">Loading domain catalog…</div>
+  <div class="grid">
+    <section class="card wide"><h2>Registered domains</h2>
+      <p>The registry currently has six domains. Local Markdown evidence is bound only to the domains marked “Markdown”. Other knowledge comes from admitted sources and is reviewed elsewhere.</p>
+      <div id="list" class="domain-list"></div>
+    </section>
+    <section id="editor" class="card wide" hidden>
+      <h2 id="title"></h2><p id="binding"></p>
+      <div class="fieldrow">
+        <div class="field"><label for="released">Released Markdown</label><textarea id="released" readonly></textarea><small>Content packaged with the running release.</small></div>
+        <div class="field"><label for="candidate">Candidate Markdown</label><textarea id="candidate" spellcheck="false"></textarea><small>Must start with a # title and contain nonempty evidence. Maximum 16,000 characters.</small></div>
+      </div>
+      <div class="actions"><button id="save" class="primary">Save new version</button><button id="reset" class="secondary">Copy released text</button><span id="revision" class="micro mono"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+  let catalog, selected, state;
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  async function api(path, options) {
+    const response = await fetch(path, options); const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+    return data;
+  }
+  function renderList() {
+    const list = document.getElementById('list'); list.replaceChildren();
+    for (const domain of catalog.domains) {
+      const button = document.createElement('button'); button.type = 'button';
+      button.className = 'domain-button' + (selected === domain.id ? ' active' : '');
+      const name = document.createElement('strong'); name.textContent = domain.title;
+      const detail = document.createElement('span');
+      detail.textContent = domain.id + ' · ' + (domain.knowledgeFile ? 'Markdown: ' + domain.knowledgeFile : domain.sourceKind + ' source');
+      button.append(name, detail); button.addEventListener('click', () => select(domain.id)); list.append(button);
+    }
+  }
+  async function select(id) {
+    selected = id; renderList();
+    const domain = catalog.domains.find((entry) => entry.id === id);
+    if (!domain.knowledgeFile) {
+      document.getElementById('editor').hidden = true;
+      say(domain.title + ' uses an admitted ' + domain.sourceKind + ' source. No local Markdown answer file is bound to this domain.');
+      return;
+    }
+    try {
+      state = await api('/api/operator/domains/' + encodeURIComponent(id));
+      document.getElementById('editor').hidden = false;
+      document.getElementById('title').textContent = state.title;
+      document.getElementById('binding').textContent = 'Bound file: ' + state.knowledgeFile + '. The domain descriptor and answer policy remain in the reviewed registry.';
+      document.getElementById('released').value = state.releasedText;
+      document.getElementById('candidate').value = state.candidateText ?? state.releasedText;
+      document.getElementById('revision').textContent = state.candidateDigest
+        ? 'Candidate ' + state.candidateDigest.slice(0, 12) + ' · ' + state.candidateCreatedAt
+        : 'Released ' + state.sourceDigest.slice(0, 12);
+      const locked = !state.editingEnabled || state.stale;
+      document.getElementById('candidate').disabled = locked;
+      document.getElementById('save').disabled = locked;
+      say(state.stale ? 'The released catalog changed after this candidate. It must be reviewed again before saving.'
+        : state.editingEnabled ? 'Saving checks the entire candidate catalog. It does not modify the running bot.'
+        : 'Candidate storage is not configured. Markdown is available for review only.', state.stale ? 'warn' : '');
+    } catch (error) { document.getElementById('editor').hidden = true; say('Domain unavailable: ' + error.message, 'error'); }
+  }
+  document.getElementById('reset').addEventListener('click', () => { if (state) document.getElementById('candidate').value = state.releasedText; });
+  document.getElementById('save').addEventListener('click', async () => {
+    if (!state) return;
+    try {
+      await api('/api/operator/domains/' + encodeURIComponent(selected) + '/candidates', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-operator-intent': 'candidate-draft' },
+        body: JSON.stringify({ text: document.getElementById('candidate').value, baseDigest: state.baseDigest }),
+      });
+      await select(selected); say('A new Markdown candidate was saved. The running bot was not changed.', 'good');
+    } catch (error) { say('Candidate not saved: ' + error.message, 'error'); }
+  });
+  async function boot() {
+    try { catalog = await api('/api/operator/domains'); renderList();
+      const first = catalog.domains.find((entry) => entry.knowledgeFile);
+      if (first) await select(first.id); else say('No local Markdown answer files are registered.');
+    } catch (error) { say('Domain catalog unavailable: ' + error.message, 'error'); }
+  }
+  boot();
+</script>
+</body>
+</html>

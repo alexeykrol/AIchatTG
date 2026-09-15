@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistant analytics · AIchatTG</title><link rel="stylesheet" href="/console-v2.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">AIchatTG Operator Console</p><h1>Assistant analytics</h1>
+      <p class="subhead">Question volume and token-price estimates from durable Assistant receipts. Missing usage remains visible.</p></div>
+    <span class="badge">Read-only</span>
+  </div>
+  <nav class="nav" aria-label="Operator pages">
+    <a href="/moderation.html">Moderation</a><a href="/settings-v2.html">Settings</a>
+    <a href="/domains.html">Domain knowledge</a><a class="active" href="/analytics.html">Analytics</a>
+    <a href="/eval.html">Tests</a><a href="/assistant.html">Legacy assistant view</a>
+  </nav>
+  <div id="notice" class="status">Loading Assistant receipts…</div>
+  <div class="grid">
+    <section class="card wide"><h2>Coverage</h2><p id="coverage"></p><div id="pricing" class="micro"></div></section>
+    <section class="card"><h2>Last 24 hours</h2><p>Rolling 24-hour window ending now.</p><div id="today" class="metric-grid"></div></section>
+    <section class="card"><h2>Last 7 days</h2><p>Rolling 168-hour window ending now.</p><div id="week" class="metric-grid"></div></section>
+    <section class="card wide"><h2>Recorded history</h2><p>All durable Assistant answer receipts in this AIchatTG database, within the tracked scope.</p><div id="total" class="metric-grid"></div></section>
+  </div>
+</main>
+<script>
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(6) : '—'; }
+  function metric(label, value, detail) {
+    const cell = document.createElement('div'); cell.className = 'metric';
+    const l = document.createElement('div'); l.className = 'label'; l.textContent = label;
+    const v = document.createElement('div'); v.className = 'value'; v.textContent = String(value);
+    const d = document.createElement('div'); d.className = 'detail'; d.textContent = detail;
+    cell.append(l, v, d); return cell;
+  }
+  function bucket(target, data) {
+    const node = document.getElementById(target); node.replaceChildren(
+      metric('Recorded Q&A', data.count, 'Durable answer receipts'),
+      metric('Fully priced', data.pricedCount, data.unknownCount + ' unknown'),
+      metric('Known estimate', money(data.knownEstimatedUsd), 'Priced questions only'),
+      metric('Mean per priced question', money(data.averageCostUsd), 'Fully priced denominator'),
+      metric('Full estimate', money(data.cost), data.unknownCount ? 'Unavailable: some costs are unknown' : 'All recorded questions priced'),
+    );
+  }
+  async function load() {
+    try {
+      const response = await fetch('/api/operator/analytics'); const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+      if (data.status !== 'available') { say('Analytics unavailable: ' + (data.reason || 'unknown reason'), 'error'); return; }
+      bucket('today', data.today); bucket('week', data.week); bucket('total', data.total);
+      document.getElementById('coverage').textContent =
+        'Current historical coverage is the analyzer-chat answer journal, not every Assistant chat. ' +
+        data.coverage.observedChatCount + ' chat(s) have recorded answers. Failed paid attempts and optional retrieval-rewrite usage are not fully captured.';
+      document.getElementById('pricing').textContent = 'Price version ' + data.pricing.version +
+        ' · verified ' + data.pricing.verifiedAt + ' · Standard uncached text-token estimate; not an invoice.';
+      say(data.total.unknownCount ? 'Some question costs are unknown. Means exclude those questions, and full estimates remain unavailable.'
+        : 'The tracked receipts have complete priced stages. All-chat spending still needs a wider usage ledger.',
+        data.total.unknownCount ? 'warn' : '');
+    } catch (error) { say('Analytics unavailable: ' + error.message, 'error'); }
+  }
+  load();
+</script>
+</body>
+</html>

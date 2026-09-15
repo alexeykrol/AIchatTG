@@ -219,11 +219,28 @@ perform Telegram, provider, or public-routing activity.
 
 `aichattg-operator-console` is a separate optional service at
 `https://aikrol.questtales.com/`. It serves the ported Moderator, Assistant and
-Tests pages, has no write API, and mounts only the Telegram runtime SQLite
-directory read-only. The route remains disabled until
+Tests pages. The v3 candidate adds Settings, Domain knowledge and Analytics;
+its only write APIs create versioned Console-owned drafts, never apply changes
+to the running bots. The Telegram runtime SQLite directory remains read-only.
+The route remains disabled until
 both `AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED=true` and a non-empty
 runtime-only `AICHATTG_OPERATOR_TOKEN` are present. Its Basic-auth user name is
 fixed to `operator`; never reuse a News Digest session, cookie, or token.
+
+For v3, prepare a dedicated non-symlink `${AICHATTG_DATA_ROOT}/operator-console`
+and `candidates` subdirectory owned by `1000:1000`, mode `0700`, before the
+Console-only recreation (`create_host_path:false`). No runtime database copy
+or migration is needed. Verify draft-directory writability separately from
+`/health`. Preserve the exact previous Console image/config for rollback and
+retain new drafts even when rolling back the image.
+
+Compare the rendered Console settings with the unchanged running runtime;
+the Console's env values are a displayed snapshot, not an apply channel.
+Keep domain Markdown bundled from the exact release. Probe authenticated
+read endpoints without printing question/answer bodies or credentials, and
+bound the analytics check: it currently scans the stored journal synchronously.
+Capture row counts/latency and stop on a resource regression. Production draft
+write smoke tests require their own exact target and retained-artifact scope.
 
 ## Rollback boundary
 

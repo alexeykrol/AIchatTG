@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Модерация · AIchatTG</title>
+  <link rel="stylesheet" href="/console-v3.css">
+</head>
+<body>
+<main class="shell">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Панель управления AIchatTG</p>
+      <h1>Модерация</h1>
+      <p class="subhead">Режим защиты чатов, решения по сообщениям и действующая версия правил. Данные доступны только для просмотра.</p>
+    </div>
+    <span class="badge">Только просмотр</span>
+  </header>
+  <nav class="nav" aria-label="Разделы панели управления">
+    <a class="active" aria-current="page" href="/moderation-v3.html">Модерация</a>
+    <a href="/assistant-v3.html">Ассистент</a>
+    <a href="/settings-v3.html">Настройки</a>
+    <a href="/domains-v3.html">Базы ответов</a>
+    <a href="/analytics-v3.html">Аналитика</a>
+    <a href="/tests-v3.html">Тесты</a>
+  </nav>
+  <div id="notice" class="status" role="status" aria-live="polite">Загрузка данных модерации…</div>
+  <div class="grid">
+    <section class="card">
+      <h2>Действующий режим</h2>
+      <p>Параметры запущенного Telegram-рантайма. Изменения здесь не выполняются.</p>
+      <div class="metric-grid">
+        <div class="metric"><div class="label">Режим</div><div class="value" id="mode">—</div><div class="detail" id="mode-detail">—</div></div>
+        <div class="metric"><div class="label">Модель безопасности</div><div class="value mono" id="safety-model">—</div><div class="detail" id="safety-effort">—</div></div>
+        <div class="metric"><div class="label">Версия правил</div><div class="value mono" id="policy-version">—</div><div class="detail">Из релиза рантайма</div></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Решения и расход</h2>
+      <p>Счётчики относятся к записям модерации в базе AIchatTG; стоимость в долларах США этим источником не измеряется. При недоступной базе сервис также может вернуть пустые счётчики.</p>
+      <div class="metric-grid">
+        <div class="metric"><div class="label">Всего событий</div><div class="value" id="events-total">—</div></div>
+        <div class="metric"><div class="label">Чисто</div><div class="value" id="clean-total">—</div></div>
+        <div class="metric"><div class="label">Подозрение</div><div class="value" id="suspect-total">—</div></div>
+        <div class="metric"><div class="label">Бан</div><div class="value" id="ban-total">—</div></div>
+        <div class="metric"><div class="label">Токены, вход / выход</div><div class="value" id="tokens-total">—</div></div>
+        <div class="metric"><div class="label">Стоимость, долл. США</div><div class="value" id="cost-total">—</div><div class="detail">«—» означает, что сумма не измерена</div></div>
+      </div>
+    </section>
+    <section class="card wide">
+      <h2>Последние решения</h2>
+      <p>До 100 последних записей. Текст сообщений в этой проекции не хранится; показаны только идентификаторы и результат проверки.</p>
+      <div id="events-status" class="status">Загрузка записей…</div>
+      <div id="events" style="overflow-x:auto"></div>
+      <div class="actions"><button class="secondary" id="refresh" type="button">Обновить данные</button></div>
+    </section>
+    <section class="card wide">
+      <h2>Действующий текст правил</h2>
+      <p>Файл правил из установленного релиза. Версии можно читать, но их нельзя менять на этой странице.</p>
+      <div class="metric-grid">
+        <div class="metric"><div class="label">Активная версия</div><div class="value mono" id="prompt-version">—</div></div>
+        <div class="metric"><div class="label">Доступных версий</div><div class="value" id="prompt-count">—</div></div>
+      </div>
+      <div class="field"><label for="prompt-text">Текст правил</label><textarea id="prompt-text" readonly aria-label="Текст действующих правил"></textarea></div>
+    </section>
+  </div>
+</main>
+<script>
+  const notice = document.getElementById('notice');
+  const eventsStatus = document.getElementById('events-status');
+  const text = (id, value) => { document.getElementById(id).textContent = value; };
+  const number = (value) => Number.isFinite(Number(value)) && value !== null && value !== undefined ? String(Number(value)) : '—';
+  const tokens = (value) => Number.isSafeInteger(value) && value >= 0 ? String(value) : '—';
+  const modeLabel = (value) => value === 'live' ? 'Боевой' : value === 'shadow' ? 'Наблюдение' : 'Неизвестно';
+  const effortLabel = (value) => ({ none: 'без рассуждения', minimal: 'минимальный', low: 'низкий', medium: 'средний', high: 'высокий', xhigh: 'очень высокий', max: 'максимальный', ultra: 'предельный' })[value] || 'не указан';
+  const versionLabel = (value) => {
+    const match = /(?:^|-)v(\d+)$/i.exec(String(value || ''));
+    return match ? `Версия ${match[1]}` : '—';
+  };
+  const verdictLabel = (value) => value === 'clean' ? 'Чисто' : value === 'suspect' ? 'Подозрение' : value === 'ban' ? 'Бан' : 'Неизвестно';
+  const reasonLabel = (value) => {
+    const reason = String(value || '').toLowerCase();
+    if (!reason) return 'Не указана';
+    if (reason.includes('exempt')) return 'Исключение из проверки';
+    if (reason.includes('threat')) return 'Угроза';
+    if (reason.includes('strong')) return 'Серьёзное нарушение';
+    if (reason.includes('weak') || reason.includes('abuse')) return 'Нарушение общения';
+    if (reason.includes('clean')) return 'Нарушений не выявлено';
+    return 'Причина не расшифрована';
+  };
+  const actionLabel = (value) => {
+    const action = String(value || '').toLowerCase();
+    if (!action) return 'Не указано';
+    if (action.includes('ban')) return 'Бан и удаление';
+    if (action.includes('delete')) return 'Удаление';
+    if (action.includes('warn')) return 'Предупреждение';
+    if (action.includes('exempt')) return 'Без действия';
+    return 'Действие не расшифровано';
+  };
+  const date = (value) => {
+    if (value === null || value === undefined || value === '') return '—';
+    const seconds = typeof value === 'number' ? value : /^\d{9,12}$/.test(String(value)) ? Number(value) : null;
+    const parsed = seconds === null ? new Date(value) : new Date(seconds * 1000);
+    return Number.isNaN(parsed.getTime()) ? '—' : new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(parsed);
+  };
+  function say(node, message, tone = '') { node.textContent = message; node.className = `status ${tone}`.trim(); }
+  async function get(path) {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error('Ответ сервиса недоступен');
+    return response.json();
+  }
+  function renderMode(mode) {
+    text('mode', modeLabel(mode.mode));
+    text('mode-detail', mode.telegramConfigured ? 'Флаг входящих включён' : 'Флаг входящих не включён');
+    text('safety-model', mode.telegramSafety?.model || mode.model || '—');
+    text('safety-effort', `Режим рассуждения: ${effortLabel(mode.telegramSafety?.reasoningEffort)}`);
+    text('policy-version', versionLabel(mode.telegramSafety?.policyVersion));
+  }
+  function renderStats(stats) {
+    const verdicts = stats.byVerdict || {};
+    text('events-total', number(stats.totalEvents));
+    text('clean-total', number(verdicts.clean));
+    text('suspect-total', number(verdicts.suspect));
+    text('ban-total', number(verdicts.ban));
+    text('tokens-total', `${tokens(stats.tokens?.input)} / ${tokens(stats.tokens?.output)}`);
+    text('cost-total', Number.isFinite(stats.cost?.total) ? `$${stats.cost.total.toFixed(4)}` : '—');
+  }
+  function renderEvents(events) {
+    const node = document.getElementById('events');
+    node.replaceChildren();
+    if (!Array.isArray(events)) { say(eventsStatus, 'Формат записей недоступен.', 'error'); return; }
+    if (!events.length) { say(eventsStatus, 'Ответ сервиса не содержит записей. Пустая выборка не подтверждает отсутствие событий.'); return; }
+    say(eventsStatus, `Показано записей: ${events.length}.`, 'good');
+    const table = document.createElement('table'); table.className = 'review-table';
+    const head = document.createElement('thead'); const heading = document.createElement('tr');
+    for (const label of ['Время', 'Чат / сообщение', 'Автор', 'Решение', 'Уверенность', 'Причина', 'Действие', 'Модель', 'Токены вх / исх']) {
+      const th = document.createElement('th'); th.textContent = label; heading.append(th);
+    }
+    head.append(heading); table.append(head);
+    const body = document.createElement('tbody');
+    for (const event of events) {
+      const row = document.createElement('tr');
+      const confidence = Number.isFinite(event.confidence) ? `${Math.round(event.confidence * 100)} %` : '—';
+      const values = [date(event.created_at), event.platform_comment_id || '—',
+        event.platform_author_id || '—', verdictLabel(event.verdict), confidence,
+        reasonLabel(event.reason), actionLabel(event.action_taken), event.model || '—',
+        `${tokens(event.input_tokens)} / ${tokens(event.output_tokens)}`];
+      values.forEach((value, index) => {
+        const td = document.createElement('td'); td.textContent = value;
+        if (index === 1 || index === 2 || index === 7) td.className = 'mono';
+        row.append(td);
+      });
+      body.append(row);
+    }
+    table.append(body); node.append(table);
+  }
+  function renderPrompts(prompts) {
+    text('prompt-version', versionLabel(prompts.active));
+    text('prompt-count', number(Array.isArray(prompts.versions) ? prompts.versions.length : null));
+    document.getElementById('prompt-text').value = prompts.activeText || 'Текст действующих правил недоступен.';
+  }
+  async function load() {
+    say(notice, 'Загрузка данных модерации…');
+    const requests = [
+      get('/api/moderation/mode'), get('/api/moderation/stats'),
+      get('/api/moderation/events?limit=100'), get('/api/moderation/prompts?platform=telegram'),
+    ];
+    const results = await Promise.allSettled(requests);
+    if (results[0].status === 'fulfilled') renderMode(results[0].value);
+    if (results[1].status === 'fulfilled') renderStats(results[1].value);
+    if (results[2].status === 'fulfilled') renderEvents(results[2].value);
+    else say(eventsStatus, 'Последние решения недоступны.', 'error');
+    if (results[3].status === 'fulfilled') renderPrompts(results[3].value);
+    const missing = results.filter((result) => result.status === 'rejected').length;
+    say(notice, missing === 0 ? 'Данные загружены. Страница доступна только для просмотра.'
+      : missing === results.length ? 'Данные модерации недоступны.' : 'Часть данных модерации недоступна.',
+    missing ? 'warn' : 'good');
+  }
+  document.getElementById('refresh').addEventListener('click', load);
+  load();
+</script>
+</body>
+</html>
