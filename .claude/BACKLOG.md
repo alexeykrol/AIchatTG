@@ -8,12 +8,12 @@ updated: 2026-09-15
 
 ## Next
 
-- [ ] VERSION-1: восстановить номер версии ассистента и дату релиза внизу
-      каждого ответа. Старый код `0a818c5d`/`ef1c6ea` содержал footer `2.4.x`;
-      в текущем `0b54148` он отсутствует. Последний номер changelog `0.5.1`
-      не описывает новые SHA-релизы, npm `0.1.0` — scaffold. Нужны единая
-      component metadata, решение о продолжении нумерации и release/transport
-      regressions. Диагноз: `docs/OWNER_FEEDBACK_LOG.md` (2026-09-15).
+- [x] VERSION-1: Assistant `2.4.37` от `15.09.2026` выложен в image `335a35a`.
+      Footer всех существующих send paths, final-part-only transport, bare
+      model memory, canonical metadata и version-bump release guard покрыты
+      тестами; правила общие для Codex/Claude. История `2.4.35`/`2.4.36`
+      сохранена как provenance. Новая live Telegram приёмка `not_run`.
+      Receipt: `docs/reports/2026-09-15-assistant-2.4.37-deployment.md`.
 - [x] COVERAGE-COPY-1: финальные три абзаца владельца из `541a2de` заменили
       additive-вариант; дословно выложены в `0b54148`. Исправлено перекрытие
       текста в domain boundary; санкции/модерация не менялись. Receipt:

@@ -3,6 +3,27 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.37] — 2026-09-15 — Restored reply version footer
+
+Lifecycle `production-verified`; runtime image `335a35a` started 21:01:48 UTC.
+The public Assistant component
+continues its historical `2.4.x` line, distinct from repository versions and
+npm scaffold metadata. Rollback `0b54148` is retained. See the
+[release receipt](docs/reports/2026-09-15-assistant-2.4.37-deployment.md).
+
+- Restored the code-owned `Версия 2.4.37 от 15.09.2026` footer on every existing
+  Assistant reply path. Multipart answers show it once, at the bottom of the
+  final part, including markup fallback and emoji-heavy messages.
+- Approved body text, forceReply, one-shot delivery fences and body-only model
+  memory remain unchanged. Durable answer receipts and local visible dialog
+  transcripts include the logical delivered footer. No new replies on silent exits.
+- Added canonical component metadata and a static committed-source release
+  gate: Assistant-affecting releases must increase the version versus production.
+  Codex, Claude Code and deployment instructions use the same contract.
+- Tests: 758/758 root, 29/29 original historical receipts, 9/9 migration safety.
+  Four offline transport cases passed inside the deployed image; all 57 source
+  files matched. No new paid or real Telegram acceptance was run.
+
 ## [0b54148] — 2026-09-15 UTC — Menu-first Help and approved boundary copy
 
 Lifecycle `production-verified`; runtime started 20:16:45 UTC. Only runtime was recreated;

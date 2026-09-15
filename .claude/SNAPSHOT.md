@@ -4,7 +4,17 @@
 
 ## Текущее состояние
 
-- **Production, lifecycle `production-verified`:** `0b54148`, запуск 20:16:45 UTC,
+- **Production, lifecycle `production-verified`:** Assistant **2.4.37 от 15.09.2026**, image `335a35a`, запуск
+  21:01:48 UTC. Восстановлен footer в каждом фактически отправленном ответе,
+  один раз внизу последней части. Body-only память и утверждённый текст сохранены.
+  Единая metadata и release guard закреплены для Codex/Claude; 758 root tests,
+  29 исторических, 9 migration safety passed. Проверка 21:02:15 UTC: healthy/
+  restart 0, 57 source-файлов совпали, четыре offline transport cases passed;
+  env/schema/routes/mounts/Console не изменены. Rollback `0b54148`.
+  Повторная проверка 21:04:31 UTC прошла; lease/master закрыты. Receipt:
+  `docs/reports/2026-09-15-assistant-2.4.37-deployment.md`.
+  Новые paid/Telegram проверки `not_run`; старые live acceptance gaps открыты.
+- **Предыдущий production, lifecycle `production-verified`:** `0b54148`, запуск 20:16:45 UTC,
   healthy/restart 0. Выложены menu-first Help и финальные три абзаца владельца
   дословно (supersedes additive `183d7f9`). Исправлено перекрытие текста в
   knowledge-enabled domain boundary. Правила модерации/санкции не менялись.

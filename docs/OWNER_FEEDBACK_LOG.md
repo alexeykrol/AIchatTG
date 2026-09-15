@@ -42,11 +42,16 @@ Current dual-dialogue tests now account for their existing whitespace
 normalization with multiline replies; raw ledger/receipt checks remain intact.
 Historical frozen sources/gold/paid artifacts were not modified.
 
-**Status: fixed.** Local candidate, lifecycle `prepared`. Root tests passed
+**Status: deployed.** Lifecycle `production-verified`, exact source `335a35a`.
+Runtime started 21:01:48 UTC; verification at 21:02:15 and 21:04:31 UTC passed:
+healthy/restart0, 57 source-file matches, four offline footer transport cases,
+unchanged env/schema/routes/mounts/Console and retained rollback `0b54148`.
+Public health200, unauthenticated webhook401/401. Root tests passed
 758/758 (including 61 release-guard checks), explicit historical receipt lane
 29/29, migration safety 9/9, scenario/isolation and independent review passed.
-Commit/push/deploy are requested; exact release preflight and production
-verification are pending. New paid and Telegram acceptance are `not_run`.
+Code committed/pushed/deployed; lease and SSH master closed. New paid and
+Telegram acceptance are `not_run`. See the
+[release receipt](reports/2026-09-15-assistant-2.4.37-deployment.md).
 
 ## 2026-09-15 — Restore the Assistant version number and release footer
 

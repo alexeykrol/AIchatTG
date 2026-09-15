@@ -74,14 +74,26 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
+**Current Assistant version: `2.4.37` — 15.09.2026.** Production image
+`335a35a` started 2026-09-15 21:01:48 UTC. Every delivered Assistant reply now
+ends with `Версия 2.4.37 от 15.09.2026`, once on the final part for long answers.
+Approved body copy and body-only dialogue memory are preserved. Public component
+metadata and a pre-release version-bump guard are shared by Codex and Claude Code.
+Root tests 758/758, historical receipt checks 29/29 and migration checks 9/9
+passed; all 57 deployed runtime/core source files match the exact archive.
+Config, schema, routes, knowledge and Console are unchanged. Rollback `0b54148`
+is retained; new live Telegram acceptance was not run. See the
+[current release receipt](docs/reports/2026-09-15-assistant-2.4.37-deployment.md)
+for lifecycle and production verification evidence.
+
+**Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph
 out-of-coverage response are live. The knowledge-enabled boundary now uses
 the same approved copy. No moderation rules, config, schema, routes, knowledge
 or model limits changed. Root tests 688/688, historical receipt checks 29/29,
 migration checks 9/9 and exact 55-file production source match passed.
 Rollback `5600afd` retained. New live Telegram/client acceptance was not run.
-See the [current receipt](docs/reports/2026-09-15-runtime-0b54148-deployment.md).
+See its [release receipt](docs/reports/2026-09-15-runtime-0b54148-deployment.md).
 
 **Previous production image: `5600afd`** (started 2026-09-15 16:07:36 UTC;
 lifecycle `deployed`). Bundled six-domain routing, multi-domain attribution and
