@@ -8,15 +8,22 @@ updated: 2026-09-15
 
 ## Next
 
+- [ ] CONSOLE-V32: integrated source `f650fe8`, lifecycle `prepared`, local
+      only. Last-five question cost estimates/known stages/mean denominator,
+     3.1.1 labels and Help integrated. Root787passed/5skips/0failed, Console41/41,
+      source guard/independent review/Chrome synthetic QA passed. Needs exact
+      approval, push and Console-only lease; production remains3.1.0.
+      `docs/reports/2026-09-15-console-v32-candidate.md`.
 - [ ] MODERATOR-REVIEW-1: PO-start verified; local synthetic private review/
       Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
       storage integration and release; retention approved indefinite until
-      manual removal, local erase contract accepted; recipient/principal unknown,
+      manual removal, local erase/retained observation visibility contracts
+      throughv4 accepted; recipient/principal unknown,
       production collection/delivery disabled. Charter:
       `docs/proposals/2026-09-15-moderator-review-charter-v1.md`.
-- [ ] CONSOLE-COST-V1: PO-start last-five question costs/averages; Analytics
-      worker isolated from Moderation. No guessed usage/zero costs; shared hooks
-      root-owned. Incorporates pushed3.1.1 copy fixes, standalone release held.
+- [x] CONSOLE-COST-V1 local implementation: integrated into3.2.0/f650fe8;
+      production acceptance remains CONSOLE-V32 above. No guessed usage/zero
+      costs; worker backend preserved. Incorporates pushed3.1.1 copy fixes.
       Metadata-only diagnostic passed: latest5 all have answer/analyzer tokens,
       4 have exact no-router proof; rate/eligibility/stage checks still needed.
       SSH closed, apps unchanged. Report:
@@ -24,7 +31,8 @@ updated: 2026-09-15
       `docs/proposals/2026-09-15-console-cost-charter-v1.md`.
 - [ ] CONSOLE-V311: candidate `5e55101` lifecycle `pushed`, исправлены
       склонение и pricing-подпись;33Console tests passed. Для production
-      нужны точное PO-разрешение/новая lease/fresh preflight. На сервере3.1.0.
+      standalone release superseded by CONSOLE-V32; separate deploy не нужен.
+      На сервере3.1.0.
       `docs/reports/2026-09-15-console-v311-candidate.md`.
 - [x] CONSOLE-V31: Console3.1.0 `eb0f7fe` production-verified, семь общих
       version/date/time headers + русская Помощь, лишние плашки убраны.

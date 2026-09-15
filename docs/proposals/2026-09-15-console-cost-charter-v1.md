@@ -5,7 +5,7 @@
 - Task ID: console-question-cost-v1
 - Work kind: implementation
 - Status: chartered
-- Ownership acknowledgement: accepted; local implementation ongoing
+- Ownership acknowledgement: accepted; local implementation integrated into f650fe8
 - Project root: `/Users/alexeykrolmini/Code/AIchatTG`
 - Base ref: `9d326f419818b616d1c8045ae4d9a812f6a0ad04`
 - Worktree/branch: `/Users/alexeykrolmini/.codex/worktrees/analytics-cost-last5/AIchatTG`, `codex/analytics-cost-last5-20260915`
@@ -110,6 +110,12 @@ Root reruns integrated tests and release guards before any production decision.
   progressing while an external decision or future integration is pending.
 
 ## Result Contract
+
+Accepted result: worker `c10a837`, integrated Console3.2.0 `f650fe8`; runtime,
+rates, schema and production unchanged. Root787passed/5fixture-skips/0failed,
+Console41/41, source guard/review/synthetic Chrome passed. Release remains
+`prepared`, requiring the exact decision in
+`docs/reports/2026-09-15-console-v32-candidate.md`.
 
 Return actual diff/artifact, exact worktree/base, evidence and remaining gaps,
 changed data contracts, proposed shared hook patch, and next owner/action.

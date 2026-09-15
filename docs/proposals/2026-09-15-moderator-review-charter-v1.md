@@ -43,11 +43,14 @@
 - PO retention message `01a0a734-795a-7be0-b11d-c1e4ca568c14`, re-read in the
   same task: retain source comments/context indefinitely until manual removal.
   This is not a claim that storage is free or approval for a quota increase.
-- Worker contracts `2026-09-15-moderation-review-contract-v1.md`, `-v2.md`
-  and `-v3.md` in the same proposal directory are accepted for synthetic local
+- Worker contracts `2026-09-15-moderation-review-contract-v1.md`, `-v2.md`,
+  `-v3.md` and `-v4.md` in the same proposal directory are accepted for synthetic local
   implementation, newest definition prevailing. Namespace:
   `/api/operator/moderation-review/v1`; insufficient evidence is audit-only,
   never a trainable example. Existing legacy write rejection stays intact.
+  V4 requires non-suspect retained observations to be visible and erasable,
+  with no suspicion/alert implication, same-chat coalescing only from untouched
+  retained cases, fully visible supporting evidence and stale-target fencing.
 
 ## Ownership
 

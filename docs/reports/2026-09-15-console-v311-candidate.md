@@ -4,6 +4,11 @@ Lifecycle: `pushed`. Exact candidate
 `5e55101da4032dc584b87ba381d3f4d83b4e62f0`.
 Production deployment is **not authorized by the consumed 3.1.0 lease**.
 
+Later decision: standalone3.1.1 activation is held/superseded by the integrated
+[Console3.2.0 candidate](2026-09-15-console-v32-candidate.md), which inherits
+these fixes. The original evidence/decision below is historical; do not deploy
+both candidates or treat this older proposal as current approval.
+
 ## Change and evidence
 
 The independent ordinary-Chrome review of the owner's Console cleanup found

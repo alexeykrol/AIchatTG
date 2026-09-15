@@ -36,7 +36,10 @@ SQLite erasure does not guarantee erasure from backups or physical media.
 retention choice is recorded, not a free-storage claim, quota increase or
 production collection approval. Recipient/reviewer identity, production field
 limits, copies/backup handling and exact release remain separate gates.
-Worker contracts v1/v2/v3 are accepted for synthetic local work, newest wins.
+Worker contracts v1–v4 are accepted for synthetic local work, newest wins.
+V4 closes an assurance finding: non-suspect retained observations must also be
+visible and manually erasable, without becoming suspicions, alerts or training
+examples. Their production collection is still not approved.
 [Charter](proposals/2026-09-15-moderator-review-charter-v1.md).
 
 ## 2026-09-15 — Start the private Moderator review workflow
@@ -78,9 +81,13 @@ does not prove a zero bill. Missing historical usage must not be invented.
 Use a separate isolated Analytics worker; root integrates any shared runtime,
 storage or API hooks. Existing3.1.1 Russian labels are already in the base.
 
-**Status: proposed; implementation chartered.** Standalone3.1.1 release is held
-for a combined analytic candidate, not silently deployed. No new release/paid
-authority or production access is granted by this implementation start.
+**Status: prepared.** Integrated Console3.2.0 source `f650fe8` implements the
+accepted five-question read model/UI and inherits3.1.1 labels. Help and persistent
+regressions are included; root787passed/5fixture-skips/0failed, Console41/41,
+independent review/source guard/Chrome synthetic QA passed. Local only, not
+pushed/deployed. Standalone3.1.1 is superseded by this combined release candidate.
+No new release/paid authority is granted by the implementation start.
+[Exact release decision](reports/2026-09-15-console-v32-candidate.md).
 [Charter](proposals/2026-09-15-console-cost-charter-v1.md).
 
 **Measured diagnosis, 22:33:50 UTC:** one bounded metadata-only production

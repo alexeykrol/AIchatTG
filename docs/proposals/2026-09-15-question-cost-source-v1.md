@@ -46,8 +46,11 @@ metadata coverage counts, **not** measured costs. The Console candidate
 could therefore price four of the latest five if their delivery, models and
 rate dates also pass its checks; actual post-release values are `not_run`.
 
-The content-free diagnostic receipt is local ignored evidence at
-`output/console-cost-diagnostic-20260915/metadata.json`. The candidate's synthetic complete/partial/no-call
+The portable diagnostic evidence is the root's committed
+[metadata report](../reports/2026-09-15-console-cost-metadata-diagnostic.md).
+The content-free receipt is ignored local evidence in the canonical root
+checkout at `output/console-cost-diagnostic-20260915/metadata.json`; it need not
+exist in a worker checkout. The candidate's synthetic complete/partial/no-call
 tests are the reproducible proof of the read-model contract.
 
 ## Limits and next source work
