@@ -24,21 +24,16 @@ import { exportCoverageDeficits } from '../scripts/export-deficits.mjs';
 /**
  * The two abstentions and the deficits journal. One reply class ("не нашёл,
  * переформулируйте") used to cover two different facts — a hole inside the
- * covered domain and a topic outside it — and a live run proved the advice is
- * harmful for the second: the user rephrased three times into the same wall.
- * The owner later approved one topic/lesson/task clarification suggestion,
- * preserving the original boundary text and external alternatives verbatim.
+ * covered domain and a topic outside it.
  */
 
 test('the two abstention verdicts carry different routes and different texts', () => {
   const outOfCoverage = assistantAbstentionReply(DOMAIN_ROUTE_REASONS.NO_SIGNAL);
   assert.equal(outOfCoverage.route, 'boundary:out_of_coverage:domain_no_signal');
   assert.equal(outOfCoverage.text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
-  // Warm and useful: names the boundary, points at a place that can help, and
-  // asks for a concrete topic rather than promising an answer after any rewording.
   assert.match(outOfCoverage.text, /не уполномочен/);
   assert.match(outOfCoverage.text, /ChatGPT|Claude/);
-  assert.match(outOfCoverage.text, /назовите тему, урок или задачу/);
+  assert.match(outOfCoverage.text, /иначе сформулировать вопрос/);
 
   for (const reason of [
     GROUNDING_REASONS.NOT_FOUND,
@@ -52,17 +47,12 @@ test('the two abstention verdicts carry different routes and different texts', (
   }
 });
 
-test('the out-of-coverage response preserves every original sentence and adds only the approved suggestion', () => {
-  const original = [
-    'Хороший вопрос, но эта тема за пределами курса, и отвечать на неё я не уполномочен.',
-    'Такой вопрос лучше задать универсальному чату — ChatGPT или Claude — или профильному консультанту.',
-    'А со всем, что касается курса, помогу с радостью: материал уроков, организация обучения,',
-    'выбор курса и подойдёт ли он именно вам.',
-  ];
-  const addition = 'Возможно, вам стоит сформулировать вопрос иначе: назовите тему, урок или задачу — тогда я смогу попробовать найти ответ.';
-  assert.equal(ASSISTANT_OUT_OF_COVERAGE_TEXT, [original[0], addition, ...original.slice(1)].join(' '));
-  assert.equal(ASSISTANT_OUT_OF_COVERAGE_TEXT.replace(` ${addition}`, ''), original.join(' '));
-  assert.doesNotMatch(ASSISTANT_OUT_OF_COVERAGE_TEXT, /туп|навечно|3 попыт|модератор/iu);
+test('the out-of-coverage copy stays byte-exactly as approved', () => {
+  assert.equal(ASSISTANT_OUT_OF_COVERAGE_TEXT, [
+    'Хороший вопрос, но эта тема за пределами курса, и отвечать на неё я не уполномочен. Такой вопрос лучше задать универсальному чату — ChatGPT или Claude — или профильному консультанту.',
+    'Также, возможно, вам стоит иначе сформулировать вопрос, и тогда я смогу найти ответить. Вы, люди - очень мудреные, и иногда ваши формулировки вопросов бывают такими заковыристыми, что сам черт ногу сломит. Со всем, что касается ИИ, я помогу с радостью: материал уроков, организация обучения, выбор курса и подойдёт ли он именно вам.',
+    'Важно: Не рекомендую тестировать меня тупыми провокационными вопросами, которые немедленно квалифицируются как абьюз, передаются боту модератору, который после 3 попыток выпиливает вас навечно. Ничего личного и со всем уважением.',
+  ].join('\n\n'));
 });
 
 test('only the domain no-signal verdict classifies as out of coverage', () => {
