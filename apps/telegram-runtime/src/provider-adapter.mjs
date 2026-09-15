@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { STATE_CONTEXT_INSTRUCTION } from './assistant-working-state.mjs';
-import { assistantDialogue } from './assistant-dialogue.mjs';
+import {
+  ASSISTANT_PROVIDER_INPUT_MAX_CHARS,
+  boundedAssistantInput,
+} from './assistant-dialogue.mjs';
 import {
   RUNTIME_ANALYZER_SPEC_PATH,
   compileRouterSystemPrompt,
@@ -20,12 +23,13 @@ const OPENAI_VENDOR = 'openai';
 const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_OUTPUT_TOKENS = 4_096;
-const MAX_INPUT_CHARS = 60_000;
+const MAX_INPUT_CHARS = ASSISTANT_PROVIDER_INPUT_MAX_CHARS;
 // Потолок вывода анализатора: вердикт с тремя цитатами не помещается в
 // роутерный лимит, а обрезанный JSON неотличим от плохого суждения.
 const ANALYZER_MIN_OUTPUT_TOKENS = 1_536;
 const MAX_TITLE_CHARS = 200;
 const MAX_URL_CHARS = 2_048;
+export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
 
 const TUPLE_NAMES = Object.freeze({
   moderatorSafety: 'moderatorSafety',
@@ -236,10 +240,16 @@ export function validateProviderRuntimeConfig(config) {
     modelTuples[tupleName] = tuple;
   }
   if (!isSafetyTuple(modelTuples.moderatorSafety)) return invalid('provider_safety_tuple_invalid');
+  const requestTimeoutMs = config.requestTimeoutMs == null
+    ? PROVIDER_REQUEST_TIMEOUT_MS : Number(config.requestTimeoutMs);
+  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1_000 || requestTimeoutMs > 120_000) {
+    return invalid('provider_timeout_invalid');
+  }
   return {
     valid: true,
     config: Object.freeze({
-      enabled: true, vendor: OPENAI_VENDOR, endpoint, apiKey, modelTuples: Object.freeze(modelTuples),
+      enabled: true, vendor: OPENAI_VENDOR, endpoint, apiKey,
+      requestTimeoutMs, modelTuples: Object.freeze(modelTuples),
     }),
   };
 }
@@ -375,13 +385,17 @@ function userInput(operation, payload) {
   if (!plainObject(payload)) return null;
   if (operation === 'assistantRouter') {
     const text = questionText(payload.text);
-    return text ? boundedJson({
+    if (!text) return null;
+    const build = (dialogue) => ({
       question: text,
       courseOperationsHint: Boolean(payload.courseOperationsHint),
       courseValueHint: Boolean(payload.courseValueHint),
-      ...(Array.isArray(payload.dialogue) ? { dialogue: assistantDialogue(payload.dialogue) } : {}),
+      ...(Array.isArray(payload.dialogue) ? { dialogue } : {}),
       ...(payload.working_state ? { working_state: payload.working_state } : {}),
-    }) : null;
+    });
+    return Array.isArray(payload.dialogue)
+      ? boundedAssistantInput(payload.dialogue, build)
+      : boundedJson(build([]));
   }
   const text = questionText(payload.text);
   if (!text || !plainObject(payload.route) || !Array.isArray(payload.dialogue) || !plainObject(payload.knowledge)) return null;
@@ -391,7 +405,6 @@ function userInput(operation, payload) {
   // дальше; пустая история — законное состояние (первый вопрос в диалоге).
   // Живой прогон: служебный ход с пустым вопросом отравлял диалог целиком, и
   // ВСЕ последующие вопросы человека молча падали в provider_request_invalid.
-  const dialogue = assistantDialogue(payload.dialogue);
   const route = { action: String(payload.route.action || ''), sourceId: payload.route.sourceId ?? null };
   const knowledge = {
     sourceId: typeof payload.knowledge.sourceId === 'string' ? payload.knowledge.sourceId : '',
@@ -399,7 +412,13 @@ function userInput(operation, payload) {
       ? payload.knowledge.entries.map((entry) => knowledgeEntry(entry)) : null,
   };
   if (!knowledge.sourceId || !knowledge.entries || knowledge.entries.length === 0 || knowledge.entries.length > 128) return null;
-  return boundedJson({ question: text, route, dialogue, knowledge, ...(payload.working_state ? { working_state: payload.working_state } : {}) });
+  return boundedAssistantInput(payload.dialogue, (dialogue) => ({
+    question: text,
+    route,
+    dialogue,
+    knowledge,
+    ...(payload.working_state ? { working_state: payload.working_state } : {}),
+  }));
 }
 
 /**
@@ -438,6 +457,10 @@ async function callOnce({ config, fetchFn, operation, tuple, system, input, maxO
     response = await fetchFn(`${config.endpoint}chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify(requestFor({ tuple, system, input, maxOutputTokens, responseFormat })),
+      // One attempt, one deadline. A timeout can happen after the provider has
+      // accepted a billable request, so it retains the ambiguous transport
+      // classification and is never retried automatically.
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
   } catch { throw new ProviderRequestError('provider_transport_failed'); }
   const status = Number(response?.status) || 0;
@@ -456,8 +479,12 @@ async function callOnce({ config, fetchFn, operation, tuple, system, input, maxO
  * router call plus, only for abuse, one severity call. No automatic retry can
  * produce a second bill or repeat an ambiguous action boundary.
  */
-export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {}) {
-  const validated = validateProviderRuntimeConfig(config);
+export function createProviderAdapter(config, {
+  fetchFn = globalThis.fetch,
+  requestTimeoutMs = config?.requestTimeoutMs,
+} = {}) {
+  const configured = requestTimeoutMs == null ? config : { ...config, requestTimeoutMs };
+  const validated = validateProviderRuntimeConfig(configured);
   if (!validated.valid) return unavailable(validated.code);
   if (typeof fetchFn !== 'function') return unavailable('provider_transport_unavailable');
 
@@ -538,7 +565,9 @@ export function createProviderAdapter(config, { fetchFn = globalThis.fetch } = {
   return Object.freeze({
     // Public identity hashes the normalized route actually used, excluding credentials.
     configurationFingerprint: createHash('sha256').update(JSON.stringify({
-      vendor: validated.config.vendor, endpoint: validated.config.endpoint, modelTuples: validated.config.modelTuples,
+      vendor: validated.config.vendor, endpoint: validated.config.endpoint,
+      requestTimeoutMs: validated.config.requestTimeoutMs,
+      modelTuples: validated.config.modelTuples,
     })).digest('hex'),
     moderate,
     routeAssistant: (payload) => invokeAssistant(TUPLE_NAMES.assistantRouter, payload),

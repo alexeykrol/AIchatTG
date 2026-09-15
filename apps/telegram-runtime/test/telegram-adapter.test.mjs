@@ -78,6 +78,65 @@ test('any other refusal is never resent: delivery there is ambiguous', async () 
   assert.equal(calls.length, 1);
 });
 
+test('every Telegram request has one bounded deadline and a timeout is never retried', async () => {
+  let calls = 0;
+  const adapter = createTelegramAdapter({
+    botToken: 'T',
+    requestTimeoutMs: 100,
+    fetchFn: async (_url, init) => {
+      calls++;
+      assert.equal(init.signal instanceof AbortSignal, true);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    },
+  });
+
+  // AbortSignal.timeout() is intentionally unref'ed by Node. Keep the test
+  // event loop alive long enough to observe the real deadline firing.
+  const keepAlive = setTimeout(() => {}, 250);
+  try {
+    await assert.rejects(adapter.sendMessage({ chatId: -1, text: 'bounded' }), /abort|timeout/i);
+  } finally {
+    clearTimeout(keepAlive);
+  }
+  assert.equal(calls, 1);
+});
+
+test('headers without a readable Telegram receipt remain ambiguous and are never retried', async () => {
+  let calls = 0;
+  const adapter = createTelegramAdapter({
+    botToken: 'T', requestTimeoutMs: 100,
+    fetchFn: async (_url, init) => {
+      calls++;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+          });
+        },
+      };
+    },
+  });
+  const keepAlive = setTimeout(() => {}, 250);
+  try {
+    await assert.rejects(adapter.sendMessage({ chatId: -1, text: 'receipt required' }), /abort|timeout/i);
+  } finally {
+    clearTimeout(keepAlive);
+  }
+  assert.equal(calls, 1);
+});
+
+test('an invalid Telegram request deadline is rejected before transport', () => {
+  let calls = 0;
+  assert.throws(() => createTelegramAdapter({
+    botToken: 'T', requestTimeoutMs: 0, fetchFn: async () => { calls++; },
+  }), /requestTimeoutMs/);
+  assert.equal(calls, 0);
+});
+
 test('a long answer is delivered in parts, only the first one replying to the question', async () => {
   const { calls, fetchFn } = recorder();
   const adapter = createTelegramAdapter({ botToken: 'T', fetchFn });

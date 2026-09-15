@@ -19,19 +19,32 @@ MANIFEST="$PROJECT_DIR/manifest.md"
 get_repo_access() {
     if [ -f "$MANIFEST" ]; then
         local value
-        value=$(awk -F= '/^repo_access=/{print $2; exit}' "$MANIFEST" 2>/dev/null || true)
+        if ! value=$(awk -F= '/^repo_access=/{print $2; exit}' "$MANIFEST" 2>/dev/null); then
+            echo "framework-state: cannot read repo_access from $MANIFEST" >&2
+            return 2
+        fi
         if [ -n "${value:-}" ]; then
-            printf '%s\n' "$value"
-            return 0
+            case "$value" in
+                public|private-shared|private-solo)
+                    printf '%s\n' "$value"
+                    return 0
+                    ;;
+                *)
+                    echo "framework-state: invalid repo_access=$value" >&2
+                    return 2
+                    ;;
+            esac
         fi
     fi
     printf 'private-solo\n'
 }
 
 is_shared_mode() {
-    case "$(get_repo_access)" in
+    local repo_access
+    repo_access="$(get_repo_access)" || return $?
+    case "$repo_access" in
         public|private-shared) return 0 ;;
-        *) return 1 ;;
+        private-solo) return 1 ;;
     esac
 }
 
@@ -48,11 +61,18 @@ list_tracked_framework_paths() {
 }
 
 should_commit_framework_state() {
+    local status
     if is_shared_mode; then
         printf 'false\n'
+        return 0
     else
-        printf 'true\n'
+        status=$?
     fi
+    if [ "$status" -eq 1 ]; then
+        printf 'true\n'
+        return 0
+    fi
+    return "$status"
 }
 
 check_safe_mode() {
@@ -60,17 +80,17 @@ check_safe_mode() {
         return 0
     fi
 
-    if ! is_shared_mode; then
-        return 0
-    fi
+    local repo_access
+    repo_access="$(get_repo_access)" || return $?
+    [ "$repo_access" = "private-solo" ] && return 0
 
     local tracked
     tracked="$(list_tracked_framework_paths)"
     if [ -n "$tracked" ]; then
         echo "framework-state: BLOCKER"
-        echo "repo_access=$(get_repo_access), but framework files are still tracked:"
+        echo "repo_access=$repo_access, but framework files are still tracked:"
         echo "$tracked"
-        echo "Run: scripts/switch-repo-access.sh $(get_repo_access)"
+        echo "Run: scripts/switch-repo-access.sh $repo_access"
         return 2
     fi
 

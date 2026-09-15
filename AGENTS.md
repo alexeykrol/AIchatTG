@@ -55,13 +55,15 @@ prohibited.
 
 ## Integrator and executor protocol
 
-Governance since 2026-09-14 (Product Owner decision): there is no separate
-Codex integrator or Codex executor sessions anymore.
+Governance since 2026-09-14 (Product Owner decision): there are no permanent
+per-module executor sessions. Exactly one repository-root session is the active
+AIchatTG integrator **and** executor at a time. It may be Codex or Claude Code;
+the Product Owner selects it by assigning the repository task, and a handoff is
+required before another root session takes control.
 
-- The Claude Code session opened at the canonical repository root is the
-  permanent AIchatTG integrator **and** executor. It works autonomously:
-  decomposition, subagents, integration, tests and commits are its own
-  decisions and need no approval.
+- The active repository-root integrator works autonomously: decomposition,
+  subagents, integration, tests and commits are its own decisions and need no
+  approval.
 - The Product Owner gives goals, approvals and decisions on stops. The
   integrator raises the Product Owner only on a stop, not for routine work.
 - A production change — deploy, webhook change, env/config change, migration,
@@ -81,15 +83,21 @@ Codex integrator or Codex executor sessions anymore.
 The former Codex executor worktrees, charters and handoffs under `.handoffs/`
 are historical and kept for provenance; `.handoffs/active-module-registry.md`
 is no longer a live registry. Durable work is tracked in `CHANGELOG.md`,
-`README.md` and the docs under `docs/`, not by per-executor sessions.
+`README.md`, `.claude/SNAPSHOT.md`, `.claude/BACKLOG.md` and the docs under
+`docs/`, not by per-module executor sessions.
 
 `CHANGELOG.md` tracks what shipped, for a reader of the software.
 `docs/OWNER_FEEDBACK_LOG.md` tracks what the Product Owner personally
 reported — a live bug, a stale doc, a missing behaviour — with the
 diagnosis and the recommendation, including items recommended but not yet
-built (`status: proposed`). Append an entry there whenever the Product
-Owner reports something in chat, whether or not it becomes code in the
-same session.
+built (`status: proposed`). It also admits `partial`, `superseded` and
+`inconclusive` when those are the truthful outcomes. Append an entry there
+whenever the Product Owner reports something in chat, whether or not it becomes
+code in the same session.
+
+- Before finishing a root task, archive the available Claude Code and Codex
+  transcript with `scripts/save-dialogs.sh`. The archive is local and ignored
+  by Git; never commit raw transcripts.
 
 - Evidence statuses (`passed` / `failed` / `not_run` / `inconclusive`) and the
   lifecycle states above apply to every candidate regardless of who prepared

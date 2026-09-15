@@ -11,10 +11,71 @@ all (`status: proposed`) instead of dropping them because nothing shipped.
 
 Format per entry: what the owner saw → diagnosis → recommendation/fix →
 status. `status` is one of `fixed` (code merged), `deployed` (fixed and live
-in production), or `proposed` (recommended, not yet built — an open item,
-not a resolved one). Newest entries first.
+in production), `prepared` (local candidate exists but is not merged/live),
+`partial` (only a bounded part is solved), `proposed`
+(recommended, not yet built), `superseded` (a later Product Owner decision
+replaced it), or `inconclusive` (available evidence cannot prove the outcome).
+Newest entries first.
 
 ---
+
+## 2026-09-14 — Reconcile every instruction and fix every actionable error
+
+**Reported by:** owner: "приведем доки в соответствие"; "найди историю всех
+исправлений и моих указаний и сравни с тем, что сделано"; "Исправь все
+ошибки".
+
+**Diagnosis:** current docs mixed three different moments (`5e67451`,
+`6c582ec`, `f51753f`), described historical executor sessions as live, claimed
+Gatekeeper was in production, left three locally fixable runtime risks marked
+open, and documented unsafe Claude framework automation as normal behavior.
+The owner log itself omitted the August session/News handoff history and the
+Docker-log prevention directive.
+
+**Recommendation / fix:** recover source instructions from available Codex and
+Claude transcripts, handoffs and Git history; classify every item without
+converting historical evidence into production evidence; repair runtime,
+Compose, tests, framework rules and current-state docs. Full matrix:
+`docs/reports/2026-09-14-owner-instruction-reconciliation.md`.
+
+**Status:** prepared; production verification pending an exact-SHA release
+lease.
+
+## 2026-09-14 — Dialogs must not expire
+
+**Reported by:** owner: project conversations must not have a deletion term.
+
+**Diagnosis:** Claude's configured cleanup period was long but finite, the
+project archive directory contained no JSONL, and the preservation script only
+handled Claude Code. A service retention setting is not a durable project
+archive.
+
+**Recommendation / fix:** keep raw transcripts local and Git-ignored; archive
+all available Claude project sessions plus the current Codex thread with
+hashes. The script has no deletion path or retention period. Already deleted
+source sessions cannot be recovered, and local disk backup remains separate.
+
+**Status:** partial (local no-expiry archive fixed; backup and prior gaps remain).
+
+## 2026-09-14 — Docker log diagnostics must be safe for every project and agent
+
+**Reported by:** owner, after the hoster's incident analysis: the prevention
+must be global for every project deployed to a server and apply to Codex and
+Claude Code.
+
+**Diagnosis:** several stalled `docker logs --tail` clients drove `dockerd` to
+87–93% CPU on the one-vCPU VPS. Existing log rotation was already bounded, so
+the confirmed operational cause was the unbounded lifetime of diagnostic
+readers, not application load or health checks.
+
+**Recommendation / fix:** every finite log read uses a hard timeout plus
+bounded `--tail` and `--since`; every `--follow` has a finite lifetime and is
+never detached; exit 124 stops the diagnostic without looped retry; kill the
+stale client before considering container/daemon restart. Repository wrapper:
+`scripts/aichattg/docker-logs-safe.sh`; global and project agent rules carry
+the same boundary.
+
+**Status:** fixed.
 
 ## 2026-09-14 — Chat hygiene: service messages should self-delete
 
@@ -117,7 +178,7 @@ section of `AGENTS.md` to state the current governance plainly. Commit
 
 **Status:** fixed.
 
-## 2026-09-14 — Three unactioned architectural risks (proposed, not built)
+## 2026-09-14 — Three architectural risks (two fixed, one partially open)
 
 **Reported by:** owner, as part of the same risk list above. These three are
 recorded here because a recommendation exists but nothing has shipped yet —
@@ -128,7 +189,10 @@ losing that would silently turn "open and tracked" into "forgotten."
    webhook request; Telegram may retry the same update while the rest of the
    queue waits behind it. **Recommendation:** acknowledge the webhook
    immediately (200 first) and process the update from an internal per-chat
-   queue, so one slow request can't block the others. **Status: proposed.**
+   queue, so one slow request can't block the others. The current candidate
+   adds finite 15 s Telegram and 45 s provider deadlines without automatic
+   retry. Immediate ACK remains proposed until a durable inbox/worker contract
+   can survive a crash after HTTP 200. **Status: partial.**
 2. **Rewrite (query reformulation) is wired in code but its container won't
    start if enabled** — `infra/aichattg/docker-compose.yml` passes
    `TELEGRAM_RUNTIME_REWRITE_ENABLED` but not
@@ -136,8 +200,9 @@ losing that would silently turn "open and tracked" into "forgotten."
    flag on in production would crash the container at boot. **Recommendation:**
    add the two missing variables to the compose passthrough. Never exercised
    in production (rewrite has stayed off), so no live incident — a
-   configuration trap found by reading the code, not by an outage.
-   **Status: proposed.**
+   configuration trap found by reading the code, not by an outage. Current
+   candidate passes both values through Compose and tests the contract.
+   **Status: fixed.**
 3. **Dialogue memory depth has two layers, and only the outer one is
    configurable.** `store.recentDialogue()` is fetched with
    `config.assistantDialogueTurnLimit`
@@ -149,4 +214,5 @@ losing that would silently turn "open and tracked" into "forgotten."
    **Recommendation:** either read the same config value inside
    `assistantDialogue()` instead of the literal `3`, or document plainly
    that 3 is the real ceiling and the outer config only trims further down,
-   never up. **Status: proposed.**
+   never up. Current candidate removes the inner cap and tests a wider retained
+   window. **Status: fixed.**

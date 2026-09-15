@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admitKnowledgeSnapshot, knowledgeManifestDigest } from '@aichattg/telegram-core';
 import { loadRuntimeConfig } from '../src/config.mjs';
+import { ASSISTANT_PROVIDER_INPUT_MAX_CHARS } from '../src/assistant-dialogue.mjs';
 import {
   answerSystemPrompt,
   createProviderAdapter,
@@ -92,6 +93,7 @@ test('configuration fixes the moderator contract to Terra/OpenAI/medium and rout
   assert.equal(validateProviderRuntimeConfig(wrongTuple).code, 'provider_safety_tuple_invalid');
   wrongTuple.modelTuples.moderatorSafety = { model: 'different', reasoningEffort: 'medium', maxOutputTokens: 1024 };
   assert.equal(validateProviderRuntimeConfig(wrongTuple).code, 'provider_safety_tuple_invalid');
+  assert.equal(validateProviderRuntimeConfig(providerConfig({ requestTimeoutMs: 0 })).code, 'provider_timeout_invalid');
 });
 
 test('loadRuntimeConfig keeps disabled default and requires the exact safety tuple when enabled', () => {
@@ -111,8 +113,13 @@ test('loadRuntimeConfig keeps disabled default and requires the exact safety tup
     TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_REASONING_EFFORT: 'low',
     TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_MAX_OUTPUT_TOKENS: '500',
   };
-  assert.equal(loadRuntimeConfig(env, { cwd: '/tmp/aichattg-provider-test' }).provider.modelTuples.moderatorSafety.reasoningEffort, 'medium');
+  const loaded = loadRuntimeConfig(env, { cwd: '/tmp/aichattg-provider-test' });
+  assert.equal(loaded.provider.modelTuples.moderatorSafety.reasoningEffort, 'medium');
+  assert.equal(loaded.provider.requestTimeoutMs, 45_000);
+  assert.equal(loaded.moderator.requestTimeoutMs, 15_000);
+  assert.equal(loaded.assistant.requestTimeoutMs, 15_000);
   assert.throws(() => loadRuntimeConfig({ ...env, TELEGRAM_RUNTIME_PROVIDER_MODERATOR_SAFETY_MAX_OUTPUT_TOKENS: '200' }, { cwd: '/tmp/aichattg-provider-test' }), /provider_safety_tuple_invalid/);
+  assert.throws(() => loadRuntimeConfig({ ...env, TELEGRAM_RUNTIME_PROVIDER_REQUEST_TIMEOUT_MS: '999' }, { cwd: '/tmp/aichattg-provider-test' }), /between 1000 and 120000/);
 });
 
 test('synthetic bot ids stay inert unless synthetic testing is explicitly enabled', () => {
@@ -249,6 +256,45 @@ test('router and answer retain their own tuples without identity leakage', async
   assert.equal(JSON.stringify(answer.receipt).includes('Approved content.'), false);
 });
 
+test('router and answer trim only oldest dialogue until each complete input envelope fits', async () => {
+  const requests = [];
+  const replies = [
+    response(completion(JSON.stringify({ action: 'teach', sourceId: 'course-content-v1' }))),
+    response(completion('Bounded answer.')),
+  ];
+  const adapter = createProviderAdapter(providerConfig(), {
+    async fetchFn(_url, init) { requests.push(JSON.parse(init.body)); return replies.shift(); },
+  });
+  const dialogue = Array.from({ length: 4 }, (_, index) => ({
+    question: `${index}:${'q'.repeat(8_190)}`,
+    answer: `${index}:${'a'.repeat(8_190)}`,
+  }));
+  const question = 'x'.repeat(8_192);
+  await adapter.routeAssistant({
+    text: question,
+    dialogue,
+    working_state: { summary: 's'.repeat(5_000) },
+  });
+  await adapter.answer({
+    ...answerPayload(),
+    text: question,
+    dialogue,
+    knowledge: {
+      sourceId: 'course-content-v1',
+      entries: [{ id: 'lesson-1', content: 'k'.repeat(5_000) }],
+    },
+    working_state: { summary: 's'.repeat(5_000) },
+  });
+  for (const request of requests) {
+    const input = request.messages[1].content;
+    const parsed = JSON.parse(input);
+    assert.ok(input.length <= ASSISTANT_PROVIDER_INPUT_MAX_CHARS);
+    assert.ok(parsed.dialogue.length < 3, 'the full envelope must reduce the isolated three-pair projection');
+    assert.equal(parsed.dialogue.at(-1).question.startsWith('3:'), true, 'newest complete turn must survive');
+    assert.equal(parsed.question, question, 'current question must not be truncated');
+  }
+});
+
 // История — вспомогательный контекст, а не условие ответа. Боевой дефект: один
 // ход с пустым вопросом (служебный ответ на одинокую /ask) отвергал ВЕСЬ запрос,
 // и человек молча переставал получать ответы.
@@ -305,6 +351,33 @@ test('transport errors have no automatic retry', async () => {
   const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; throw new Error('network detail'); } });
   await assert.rejects(adapter.moderate({ text: 'fixture' }), (error) => error instanceof ProviderRequestError
     && error.code === 'provider_transport_failed' && error.retryable === false);
+  assert.equal(calls, 1);
+});
+
+test('every provider request has one bounded deadline and timeout stays ambiguous without retry', async () => {
+  let calls = 0;
+  const adapter = createProviderAdapter(providerConfig(), {
+    requestTimeoutMs: 1_000,
+    fetchFn: async (_url, init) => {
+      calls++;
+      assert.equal(init.signal instanceof AbortSignal, true);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    },
+  });
+  // AbortSignal.timeout() is intentionally unref'ed by Node. Keep the test
+  // event loop alive long enough to observe the real deadline firing.
+  const keepAlive = setTimeout(() => {}, 1_250);
+  try {
+    await assert.rejects(adapter.moderate({ text: 'fixture' }), (error) => (
+      error instanceof ProviderRequestError
+        && error.code === 'provider_transport_failed'
+        && error.retryable === false
+    ));
+  } finally {
+    clearTimeout(keepAlive);
+  }
   assert.equal(calls, 1);
 });
 

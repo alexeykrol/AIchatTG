@@ -1,13 +1,14 @@
 ---
 name: save-dialog
-description: Сохранить JSONL текущей сессии Claude Code в .claude/dialogs/. Триггеры: /save-dialog, "сохрани диалог", "архив диалога".
+description: Сохранить доступные JSONL Claude Code и текущей Codex-сессии в локальную .claude/dialogs/. Триггеры: /save-dialog, "сохрани диалог", "архив диалога".
 ---
 
 # Skill: Save Dialog
 
 ## Зачем
 
-Закрепить ценный момент сессии до того, как Claude Code сделает retention cleanup. Полезно когда прямо сейчас в диалоге найдено решение, антипаттерн, кусок методологии — а сессия ещё не закончена.
+Закрепить ценный момент сессии вне служебных каталогов retention. Полезно,
+когда прямо сейчас найдено решение, антипаттерн или кусок методологии.
 
 Полное правило поведения: `~/.claude/rules/dialog-preservation.md` (или `.claude/rules/dialog-preservation.md` в проекте).
 

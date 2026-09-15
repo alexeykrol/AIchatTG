@@ -1,5 +1,12 @@
 # AIchatTG — полный анализ проекта и статус ассистента в чатах
 
+> **Historical snapshot, superseded later on 2026-09-14.** Measurements below
+> are preserved as evidence of the read-only audit at that moment. They are not
+> current production status: the third assistant chat was subsequently enabled,
+> releases `0.5.0` and `0.5.1` were deployed, and the locally prepared candidate
+> fixes the rewrite passthrough, request deadlines and dialogue-limit defect.
+> Use `README.md`, `CHANGELOG.md` and `.claude/SNAPSHOT.md` for current state.
+
 **Дата:** 2026-09-14. **Метод:** только чтение: код и тесты локально; документы, `.handoffs`, дорожная
 карта `allcourses`; прод (`news-vps`) — одна SSH-сессия (`docker ps`/`inspect` и зонд через
 `docker exec`, база только на чтение, агрегаты без текстов). `docker logs`, Telegram API и провайдер

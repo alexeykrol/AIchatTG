@@ -1,7 +1,7 @@
 ---
 title: Architecture
 type: architecture
-status: draft
+status: active
 updated: 2026-09-14
 ---
 
@@ -83,7 +83,7 @@ Node.js ESM-монорепозиторий (npm workspaces), три Telegram-б�
   срезы `org`/`value`/`course-operations-v1`/`course-value-v1`/
   `course-content-v1`; отказ ретривала классифицируется явно (abstention
   vs routing-failure) — см. `assistant-policy.mjs`.
-- Три статуса релизной готовности (`AGENTS.md`): `passed` / `failed` /
+- Четыре статуса доказательств релизной готовности (`AGENTS.md`): `passed` / `failed` /
   `not_run` / `inconclusive` — используются при отчёте перед прод-деплоем.
 
 ## Точки входа и выходы
@@ -96,10 +96,12 @@ Node.js ESM-монорепозиторий (npm workspaces), три Telegram-б�
   `better-sqlite3` требует пересборки под точную версию).
 - `npm test` — полный прогон всех воркспейсов (gatekeeper, runtime,
   knowledge-snapshot, infra-контракт, ops, operator-console).
-- Продакшн: VPS `news-vps` (SSH-алиас), Docker Compose, релизы —
-  `git archive` точного SHA → `scp` → build → `docker compose up -d
-  --no-build --no-deps <service>`. Нет коммитнутого деплой-скрипта —
-  процедура описана в `docs/VPS_CUTOVER_RUNBOOK.md`.
+- Продакшн: VPS `news-vps` (SSH-алиас), Docker Compose. Механическая
+  процедура релиза описана в `docs/VPS_CUTOVER_RUNBOOK.md`, но применять её
+  можно только через `safe-remote-deploy` и точный Product Owner-approved
+  release lease: candidate SHA, AIchatTG service/scope, rollback, expiration,
+  verification и stop conditions. Точный Git source обязателен; commit/push
+  или локальный тест не являются deployment evidence.
 
 ## Зависимости
 
@@ -107,9 +109,10 @@ Node.js ESM-монорепозиторий (npm workspaces), три Telegram-б�
 - `better-sqlite3` — единственное хранилище состояния рантайма (local-first,
   без внешней БД на этом этапе).
 - LLM-провайдер (через `provider-adapter.mjs`) — модерация, роутинг,
-  переформулировка (выключена), финальный ответ. Абстрагирован, но
-  предполагает синхронный HTTP-вызов внутри одного webhook-запроса —
-  источник RISK-1 (нет таймаутов/асинхронности, см. BACKLOG.md).
+  переформулировка (выключена), финальный ответ. Каждый Telegram-запрос и
+  provider-запрос имеет один ограниченный deadline и не повторяется после
+  неоднозначного transport timeout. Webhook всё ещё ждёт весь конвейер; для
+  немедленного HTTP 200 нужен durable inbox/worker contract (см. BACKLOG.md).
 - Docker Compose + общий Traefik на VPS — инфраструктура shared, но
   контейнер/БД/секреты AIchatTG изолированы (`AGENTS.md` Runtime boundary).
 

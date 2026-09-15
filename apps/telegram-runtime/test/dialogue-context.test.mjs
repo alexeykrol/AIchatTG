@@ -6,6 +6,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { buildAnalyzerUserPayload } from '../src/analyzer-spec.mjs';
+import {
+  ASSISTANT_DIALOGUE_MAX_SERIALIZED_CHARS,
+  ASSISTANT_PROVIDER_INPUT_MAX_CHARS,
+  assistantDialogue,
+} from '../src/assistant-dialogue.mjs';
 import { dialogueRuntime } from './fixtures/dialogue-runtime.mjs';
 
 // A missed injection must fail before any network transport can be used.
@@ -101,17 +106,47 @@ test('one turn snapshot survives a TTL boundary between analysis and answer', in
   } finally { rig.close(); }
 }));
 
-test('prompt projection keeps three pairs without shrinking the configured retained window', inFolder(async (folder) => {
+test('configured turn limit is the single retained turn-count cap', inFolder(async (folder) => {
   const rig = dialogueRuntime(join(folder, 'runtime.db'), { turnLimit: 5 });
   try {
     for (let n = 0; n < 5; n += 1) { await rig.ask(60 + n, `Условие ${n}`); rig.clock.now += 1; }
-    const snapshot = ['Условие 1', 'Условие 2', 'Условие 3'].map(pair);
+    const snapshot = ['Условие 0', 'Условие 1', 'Условие 2', 'Условие 3'].map(pair);
     assert.deepEqual(at(rig.calls, 'analysis').dialogue, snapshot);
     assert.deepEqual(at(rig.calls, 'answer').dialogue, snapshot);
     assert.equal(rig.store.recentDialogue('-100', '7', { limit: 5 }).length, 5);
     assert.equal(rig.store.listAssistantAnswers().length, 5);
   } finally { rig.close(); }
 }));
+
+test('prompt projection keeps the newest complete tail inside the provider input budget', () => {
+  const maximal = Array.from({ length: 4 }, (_, index) => ({
+    question: `${index}:${'q'.repeat(8_190)}`,
+    answer: `${index}:${'a'.repeat(8_190)}`,
+  }));
+  const projected = assistantDialogue(maximal);
+  assert.equal(projected.length, 3);
+  assert.equal(projected[0].question.startsWith('1:'), true);
+  assert.ok(JSON.stringify(projected).length <= ASSISTANT_DIALOGUE_MAX_SERIALIZED_CHARS);
+});
+
+test('analyzer trims dialogue against the complete question and working-state envelope', () => {
+  const maximal = Array.from({ length: 4 }, (_, index) => ({
+    question: `${index}:${'q'.repeat(8_190)}`,
+    answer: `${index}:${'a'.repeat(8_190)}`,
+  }));
+  const currentTurn = 'x'.repeat(8_192);
+  const input = buildAnalyzerUserPayload(
+    currentTurn,
+    [],
+    maximal,
+    { summary: 's'.repeat(5_000) },
+  );
+  const payload = JSON.parse(input);
+  assert.ok(input.length <= ASSISTANT_PROVIDER_INPUT_MAX_CHARS);
+  assert.ok(payload.dialogue.length < 3, 'analyzer must budget more than the isolated dialogue array');
+  assert.equal(payload.dialogue.at(-1).question.startsWith('3:'), true);
+  assert.equal(payload.current_turn, currentTurn);
+});
 
 test('a large valid retained tail reaches the actual analyzer provider within its input budget', inFolder(async (folder) => {
   const rig = dialogueRuntime(join(folder, 'runtime.db'));

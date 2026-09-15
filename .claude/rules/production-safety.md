@@ -1,47 +1,60 @@
 ---
 paths:
-  - "**/deploy/**"
-  - "**/infra/**"
-  - "**/production/**"
-  - "**/.env.production"
-  - "**/Dockerfile"
-  - "**/docker-compose.prod*"
+  - "apps/**"
+  - "infra/**"
+  - "scripts/aichattg/**"
+  - "docs/**"
+  - "**/.env*"
+  - "**/Dockerfile*"
+  - "**/docker-compose*"
 ---
 
-# Правило: Production Safety
+# Правило: AIchatTG Production Safety
 
-## Принцип
+## Граница
 
-Всё, что касается production — требует подтверждения пользователя. Всё остальное — полная автономность.
+AIchatTG работает на общем VPS, но владеет только своими контейнерами, SQLite,
+webhook-маршрутами и секретами. Доступ к News Digest не становится разрешённым
+из-за общего хоста. Перед любым SSH/SCP/SFTP/rsync или remote deploy применять
+глобальную процедуру `safe-remote-deploy` и держать одного remote writer.
 
-## Требует подтверждения
+## Требует точного подтверждения Product Owner и release lease
 
-- Deploy на production-сервер
-- Изменение production базы данных (миграции, данные)
-- Изменение DNS, домена, SSL
-- Изменение production environment variables
-- Push в main/master (если это production branch)
-- Публикация пакета (npm publish, PyPI upload)
-- Изменение CI/CD pipeline для production
+- deploy/restart/rebuild или иная мутация production-сервиса;
+- создание, удаление или перенастройка Telegram webhook;
+- изменение production env/config или секретов;
+- production-миграция, импорт, запись или удаление данных;
+- внешнее Telegram-сообщение, изменение membership/permissions или другое
+  действие от имени бота (обычные ответы уже работающего одобренного runtime не
+  считаются новой агентской операцией);
+- изменение политики платных model/API-вызовов или разовый платный вызов вне
+  уже одобренного runtime-потока;
+- host-wide Docker, Traefik, logging-driver, DNS, TLS или firewall изменение.
 
-## Полная автономность (не спрашивать)
+Подтверждение действительно только для названного кандидата. Lease обязан
+фиксировать: точный SHA/переменную, сервис и окружение, scope, rollback,
+expiration, verification и stop conditions. Общее «можно деплоить» не
+расширяется на webhook, секрет, миграцию, внешнее сообщение или соседний
+проект.
 
-- Создание, изменение, удаление файлов в проекте
-- Запуск тестов (unit, integration, E2E)
-- Git операции: commit, branch, merge (кроме push в production)
-- Staging deploy
-- Локальная разработка
-- Установка зависимостей
-- Рефакторинг кода
-- Создание и обновление документации
+## До production-действия
 
-## Как спрашивать
+Доложить текущий production image/SHA (`not_run`, если не проверен), candidate
+SHA, runtime/config/data effects, rollback consequence и evidence как
+`passed` / `failed` / `not_run` / `inconclusive`. Затем проверить точность
+approval и lease. При несовпадении или истечении — остановиться.
 
-Коротко. Без лишних объяснений:
+## Автономно локально
 
-```
-Production deploy готов:
-- [что будет развёрнуто]
-- [какие изменения]
-Подтвердить? (y/n)
-```
+Разрешены локальные правки, тесты, ветки, осознанные commits и документация в
+границах задачи. Push, commit и зелёные тесты не являются подтверждением
+deployment. Staging на shared/remote инфраструктуре не считается локальным и
+подчиняется тем же remote- и ownership-проверкам; если создаёт ресурс или
+стоимость, нужен соответствующий attention gate.
+
+## Запрещено
+
+- Использовать секреты или production-данные для локальной проверки.
+- Читать контейнеры, логи, БД или env другого проекта на общем VPS.
+- Деплоить overlay/частичное дерево вместо точного Git source.
+- Продолжать после transport/auth failure или подменять его application result.

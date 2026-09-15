@@ -6,51 +6,42 @@ updated: 2026-09-14
 
 # Backlog
 
-<!--
-Что планируется, но ещё не делается.
-
-Граница с другими файлами:
-- SNAPSHOT.md — что **в работе прямо сейчас**.
-- BACKLOG.md (этот файл) — что **будет потом**: запланированные задачи,
-  известные доработки, отложенные идеи.
-- INVARIANTS.md — правила продукта, которые нельзя нарушать.
-- docs/OWNER_FEEDBACK_LOG.md — полная история: что владелец увидел, диагноз,
-  рекомендация, статус. Этот файл — только рабочий список, тот — архив с
-  контекстом «почему».
-
-Формат пункта:
-- [ ] <id>: <короткий заголовок> — <контекст> (опц. `→ path/to/file.md`)
--->
-
 ## Next
 
-- [ ] DEPLOY-1: выкатить `2c02c56` на прод (self-description fix + hint
-      cleanup) — код готов и протестирован, ждёт подтверждения владельца
-      на прод-деплой (→ `docs/OWNER_FEEDBACK_LOG.md`)
-- [ ] HYGIENE-1: выяснить, есть ли у ассистент-бота права администратора
-      (`can_delete_messages`) в покрываемых группах — блокирует вторую
-      половину chat hygiene (удаление собственной команды `/ask@bot`
-      пользователя, не только подсказки бота)
+- [ ] RELEASE-1: завершить lifecycle текущего кандидата: зелёный test matrix и
+      pushed candidate SHA зафиксировать до точной release lease, deploy и
+      production verification.
+- [ ] RISK-1: спроектировать durable webhook inbox + per-chat worker recovery.
+      Немедленный HTTP 200 разрешён только после надёжной записи валидированного
+      update; in-memory очередь может потерять update при crash после ACK.
+- [ ] HYGIENE-1: read-only проверить `can_delete_messages` ассистент-бота в
+      покрываемых группах. Без прав удаляется только собственная hint-подсказка,
+      а не пользовательская команда `/ask@bot`.
 
 ## Soon
 
-- [ ] RISK-1: таймауты на Telegram/model-запросы + асинхронный webhook
-      (200 сразу + обработка из очереди по чату) — сейчас модерация одна
-      может занять до ~30с внутри синхронного webhook-запроса
-- [ ] RISK-2: пробросить `TELEGRAM_RUNTIME_REWRITE_MODEL` /
-      `..._REASONING_EFFORT` в `infra/aichattg/docker-compose.yml` — сейчас
-      включение переформулировки вопросов роняет контейнер при старте
-- [ ] RISK-3: глубина памяти диалога — `assistantDialogue()` в
-      `apps/telegram-runtime/src/assistant-dialogue.mjs` жёстко режет
-      `.slice(-3)` поверх уже настраиваемого
-      `TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT` — поднять лимит
-      через env сейчас ничего не даёт
+- [ ] QUALITY-1: добавить отдельную content-grounding acceptance leg, которая
+      проверяет ответ на верность выданным фрагментам знания. Нынешний judge
+      проверяет поведение, но сознательно не оценивает фактическую опору.
+- [ ] GATEKEEPER-1: получить Product Owner copy, две HTTPS-ссылки и решение по
+      placement в Operator Console; только затем готовить отдельный activation
+      candidate/lease. Исторический import запрещён по умолчанию.
 
 ## Later
 
-- [ ] Простой веб-интерфейс для базовых настроек ассистента без правки
-      кода — обсуждалось с владельцем, не специфицировано
+- [ ] SETTINGS-UI-1: специфицировать простой веб-интерфейс базовых настроек
+      ассистента без правки кода.
+- [ ] ARCHIVE-BACKUP-1: определить резервное копирование локального
+      `.claude/dialogs/`; сам скрипт не удаляет архив, но локальный диск не
+      является резервной копией.
+
+## Resolved in current candidate
+
+- [x] RISK-2: Compose passthrough rewrite model/reasoning.
+- [x] RISK-3: скрытый hardcoded dialogue cap.
+- [x] REQUEST-TIMEOUTS: конечные deadline Telegram/provider без автоповтора.
 
 ## Won't do
 
-<!-- пока пусто -->
+- In-memory webhook ACK queue без durable inbox: риск невосстановимой потери
+  Telegram update после HTTP 200.

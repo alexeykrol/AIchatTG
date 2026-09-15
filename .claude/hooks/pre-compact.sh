@@ -1,55 +1,32 @@
 #!/bin/bash
 # Pre-Compaction Hook
-# Вызывается автоматически перед compaction контекста.
-# Коммитит tracked изменения и обновляет timestamp в SNAPSHOT.
-# НЕ обновляет содержательные секции SNAPSHOT — это ответственность агента.
+#
+# Read-only checkpoint. Compaction is a context-lifecycle event, not authority
+# to stage or commit the working tree. Content and timestamps in SNAPSHOT.md
+# are updated deliberately by /finish after successful verification.
 
-# НЕ используем set -e — скрипт должен выполняться до конца даже при ошибках
+set -euo pipefail
 
 PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-SNAPSHOT="$PROJECT_DIR/.claude/SNAPSHOT.md"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 STATE_HELPER="$PROJECT_DIR/scripts/framework-state-mode.sh"
+TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-# Guard: если не git-репо — просто выйти, нечего сохранять через git
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "pre-compact: not a git repo, skipping"
+if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "pre-compact: not a git repo; read-only checkpoint skipped"
     exit 0
 fi
 
-# Shared/public mode is only safe when framework files are already untracked.
-# If they are still tracked, stop and surface the blocker instead of creating
-# more framework-history commits on the main branch.
-if [ -x "$STATE_HELPER" ]; then
-    if ! "$STATE_HELPER" check-safe-mode; then
-        echo "pre-compact: framework-state mode is unsafe, skipping auto-commit"
-        exit 0
-    fi
+if [ -x "$STATE_HELPER" ] && ! "$STATE_HELPER" check-safe-mode; then
+    echo "pre-compact: framework-state mode is unsafe; no files were changed"
+    exit 2
 fi
 
-# 1. Коммит изменений в уже отслеживаемых файлах (git add -u).
-#    Untracked файлы НЕ добавляются автоматически — это осознанное решение:
-#    слепое git add . в хуке может захватить секреты, артефакты сборки и т.д.
-#    Агент должен добавлять новые файлы осознанно в рабочем процессе.
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    git add -u
-    # Inline git config на случай если у пользователя не настроен user.name/email
-    git -c user.name="Claude" -c user.email="claude@local" \
-        commit -m "auto: pre-compaction save ($TIMESTAMP)" 2>/dev/null || true
+DIRTY_COUNT="$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$DIRTY_COUNT" -gt 0 ]; then
+    echo "pre-compact: read-only checkpoint at $TIMESTAMP"
+    echo "pre-compact: $DIRTY_COUNT uncommitted path(s) remain exactly as found:"
+    git -C "$PROJECT_DIR" status --short
+    echo "pre-compact: no staging, commit, or SNAPSHOT mutation was performed"
+else
+    echo "pre-compact: clean read-only checkpoint at $TIMESTAMP"
 fi
-
-# 2. Обновить timestamp в SNAPSHOT (файл всегда обновляется локально)
-if [ -f "$SNAPSHOT" ]; then
-    sed -i.bak "s/\*\*Последнее обновление:\*\*.*/\*\*Последнее обновление:\*\* $TIMESTAMP (pre-compaction)/" "$SNAPSHOT" 2>/dev/null || true
-    rm -f "$SNAPSHOT.bak"
-
-    if [ -x "$STATE_HELPER" ] && [ "$("$STATE_HELPER" should-commit-framework-state)" = "false" ]; then
-        echo "pre-compact: SNAPSHOT kept local due repo_access=$("$STATE_HELPER" repo-access)"
-    else
-        git add "$SNAPSHOT" 2>/dev/null || true
-        git -c user.name="Claude" -c user.email="claude@local" \
-            commit -m "auto: update SNAPSHOT before compaction" 2>/dev/null || true
-    fi
-fi
-
-echo "pre-compact: state saved at $TIMESTAMP"

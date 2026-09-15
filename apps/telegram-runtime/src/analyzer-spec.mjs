@@ -12,7 +12,10 @@
  * тест, а не тихо разный диагноз на стенде и в бою.
  */
 
-import { assistantDialogue } from './assistant-dialogue.mjs';
+import {
+  ASSISTANT_PROVIDER_INPUT_MAX_CHARS,
+  boundedAssistantInput,
+} from './assistant-dialogue.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -299,14 +302,28 @@ export function buildAnalyzerUserPayload(turnText, contextTexts = [], dialogue =
     .map((text) => (typeof text === 'string' ? text : ''))
     .filter((text) => text.trim())
     .slice(-5);
-  return JSON.stringify({
-    // Do not duplicate the user side in both fields: three maximum-sized
-    // pairs plus duplicate questions would exceed the provider input budget.
-    ...(Array.isArray(dialogue)
-      ? { dialogue: assistantDialogue(dialogue) } : { previous_user_turns: previous }),
-    ...(workingState ? { working_state: workingState } : {}),
-    current_turn: turnText,
-  }, null, 2);
+  if (Array.isArray(dialogue)) {
+    return boundedAssistantInput(dialogue, (boundedDialogue) => ({
+      // Do not duplicate the user side in both fields. Dialogue is trimmed
+      // against this complete analyzer envelope, not against an isolated
+      // array budget.
+      dialogue: boundedDialogue,
+      ...(workingState ? { working_state: workingState } : {}),
+      current_turn: turnText,
+    }), { pretty: true });
+  }
+  // Legacy callers have user-only context. Apply the same newest-first rule so
+  // a valid current turn is not rejected because older context filled the
+  // complete analyzer request.
+  for (let start = 0; start <= previous.length; start += 1) {
+    const json = JSON.stringify({
+      previous_user_turns: previous.slice(start),
+      ...(workingState ? { working_state: workingState } : {}),
+      current_turn: turnText,
+    }, null, 2);
+    if (json.length <= ASSISTANT_PROVIDER_INPUT_MAX_CHARS) return json;
+  }
+  return null;
 }
 
 function stripFences(text) {

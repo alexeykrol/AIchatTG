@@ -3,6 +3,33 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Unreleased] — Runtime deadlines, truthful state and framework safety
+
+### Fixed
+
+- Telegram API requests now have one finite deadline (15 seconds by default),
+  and provider requests have one finite deadline (45 seconds by default).
+  Ambiguous timeouts are never retried automatically.
+- Compose now passes the rewrite model/reasoning settings and both request
+  timeout settings into `telegram-runtime`.
+- Removed the hidden three-turn prompt projection cap; the configured
+  `TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT` is the turn-count limit,
+  with an independent 50k serialized-size budget protecting provider input.
+- A Telegram refusal to delete the temporary empty-`/ask` hint is logged as a
+  soft cleanup failure and cannot turn an already delivered answer into a
+  failed request.
+- Assistant profile copy now lists all three invocation paths: reply, `/ask`
+  and mention.
+- Claude project hooks and finish/repository-mode helpers no longer auto-commit
+  at compaction, suppress failed tests or bulk-stage framework state.
+
+### Documentation
+
+- Reconciled README, knowledge enablement, snapshot, backlog and governance
+  with production image `f51753f` and the current one-root-integrator model.
+- Added a source-backed Product Owner instruction reconciliation report and
+  made unresolved, partial, superseded and inconclusive outcomes explicit.
+
 ## [0.5.1] — 2026-09-14 — Reply to the assistant's own message now counts as addressing it
 
 Deployed 2026-09-14 21:46 UTC (image `f51753f`, `telegram-runtime` container

@@ -7,11 +7,17 @@ import {
 
 function disabledResult() { return { ok: false, skipped: 'telegram_transport_disabled' }; }
 
+export const TELEGRAM_REQUEST_TIMEOUT_MS = 15_000;
+
 /**
  * Telegram I/O is demand-only. This module deliberately exposes neither polling
  * nor command/webhook registration methods, so constructing it cannot cut over a bot.
  */
-export function createTelegramAdapter({ botToken = '', fetchFn = globalThis.fetch } = {}) {
+export function createTelegramAdapter({
+  botToken = '',
+  fetchFn = globalThis.fetch,
+  requestTimeoutMs = TELEGRAM_REQUEST_TIMEOUT_MS,
+} = {}) {
   if (!botToken) {
     return {
       async sendMessage() { return disabledResult(); }, async banMember() { return disabledResult(); },
@@ -21,11 +27,22 @@ export function createTelegramAdapter({ botToken = '', fetchFn = globalThis.fetc
     };
   }
   if (typeof fetchFn !== 'function') throw new Error('Telegram adapter requires fetch');
+  const timeoutMs = Number(requestTimeoutMs);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
+    throw new Error('Telegram adapter requestTimeoutMs must be an integer between 100 and 120000');
+  }
   async function call(method, body) {
     const response = await fetchFn(`https://api.telegram.org/bot${botToken}/${method}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      // A timed-out Telegram mutation is deliberately ambiguous: the adapter
+      // never retries it, and the runtime keeps the delivery fence in place.
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    const data = await response.json().catch(() => ({}));
+    // Headers alone do not prove a Telegram mutation receipt. In particular,
+    // the deadline may fire while the response body is still being read. A
+    // missing/malformed body is therefore an ambiguous transport failure, not
+    // a synthetic success derived from HTTP 200.
+    const data = await response.json();
     return response.ok && data.ok !== false ? { ok: true, data: data.result } : { ok: false, error: data.description || `http_${response.status}` };
   }
   /**

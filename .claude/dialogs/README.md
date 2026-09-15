@@ -1,6 +1,7 @@
 # Dialog Archive
 
-Здесь хранятся сохранённые JSONL-логи сессий Claude Code, которые иначе будут удалены retention'ом.
+Здесь хранится локальный архив JSONL-сессий Claude Code и Codex вне их
+служебных каталогов retention.
 
 ## Как сохранить текущий диалог
 
@@ -8,6 +9,8 @@
 bash scripts/save-dialogs.sh
 # или с темой:
 bash scripts/save-dialogs.sh --note "тема диалога"
+bash scripts/save-dialogs.sh --source claude
+bash scripts/save-dialogs.sh --source codex
 ```
 
 Идемпотентно: можно запускать сколько угодно раз — копируются только новые/изменённые файлы.
@@ -16,7 +19,7 @@ bash scripts/save-dialogs.sh --note "тема диалога"
 
 ```
 .claude/dialogs/
-  YYYY-MM-DD_<session-id-short>.jsonl   # сырой JSONL сессии
+  YYYY-MM-DD_<source>_<session-id>.jsonl  # сырой JSONL сессии
   INDEX.md                              # реестр: что за диалог, почему сохранили
   README.md                             # этот файл
 ```
@@ -25,8 +28,11 @@ bash scripts/save-dialogs.sh --note "тема диалога"
 
 | `repo_access` | `.claude/dialogs/` |
 |---------------|--------------------|
-| `private-solo` | можно коммитить |
-| `private-shared` | локально; не коммитить без чистки секретов |
-| `public` | локально; не коммитить без чистки секретов |
+| `private-solo` | локально; не коммитить |
+| `private-shared` | локально; не коммитить |
+| `public` | локально; не коммитить |
 
-Полное правило: `.claude/rules/dialog-preservation.md` (и глобальное `~/.claude/rules/dialog-preservation.md`).
+Скрипт не удаляет архив и не задаёт срок хранения. Сырые диалоги могут
+содержать приватный контекст и всегда игнорируются Git.
+
+Полное правило: `.claude/rules/dialog-preservation.md`.

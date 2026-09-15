@@ -13,6 +13,6 @@ DIRTY=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 if [ "$DIRTY" -gt 0 ]; then
     echo ""
     echo "⚡ Subagent done. $DIRTY uncommitted files."
-    echo "→ Commit subagent result, update SNAPSHOT.md (see delegation.md)"
+    echo "→ Review ownership and tests before any commit; then update SNAPSHOT.md (see delegation.md)"
     echo ""
 fi

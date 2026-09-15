@@ -145,6 +145,7 @@ function roleConfig(env, role, { syntheticTestingEnabled = false } = {}) {
     webhookSecret: optionalSecret(env, `${prefix}_WEBHOOK_SECRET`),
     exemptBotIds: csv(env, `${prefix}_EXEMPT_BOT_IDS`),
     syntheticBotIds,
+    requestTimeoutMs: integer(env, 'TELEGRAM_RUNTIME_TELEGRAM_REQUEST_TIMEOUT_MS', 15_000, { min: 100, max: 120_000 }),
   };
 }
 
@@ -191,6 +192,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     vendor: String(env.TELEGRAM_RUNTIME_PROVIDER_VENDOR || ''),
     endpoint: String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || ''),
     apiKey: String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || ''),
+    requestTimeoutMs: integer(env, 'TELEGRAM_RUNTIME_PROVIDER_REQUEST_TIMEOUT_MS', 45_000, { min: 1_000, max: 120_000 }),
     modelTuples: {
       moderatorSafety: providerTuple(env, 'MODERATOR_SAFETY'),
       assistantRouter: providerTuple(env, 'ASSISTANT_ROUTER'),

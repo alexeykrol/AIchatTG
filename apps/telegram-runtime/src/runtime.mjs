@@ -1116,7 +1116,13 @@ export function createTelegramRuntime({
     // cost the user their answer.
     if (question.replyToMessageId && question.replyToText === ASSISTANT_EMPTY_ASK_TEXT) {
       try {
-        await assistantTelegram.deleteMessage({ chatId: question.chatId, messageId: question.replyToMessageId });
+        const cleanup = await assistantTelegram.deleteMessage({
+          chatId: question.chatId, messageId: question.replyToMessageId,
+        });
+        if (cleanup?.ok !== true) {
+          console.error(`[runtime] hint cleanup failed event=${eventId} `
+            + `error=${String(cleanup?.error || cleanup?.skipped || 'telegram_refused').slice(0, 120)}`);
+        }
       } catch (error) {
         console.error(`[runtime] hint cleanup failed event=${eventId} ${runtimeErrorSummary(error)}`);
       }

@@ -789,8 +789,46 @@ test('self-description answers instantly even with knowledge enabled, never reac
     const sent = actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
     assert.equal(sent.includes('не уполномочен'), false);
     assert.equal(sent.includes('ИИ-ассистент проекта'), true);
+    assert.equal(sent.includes('ответьте на моё сообщение'), true);
     assert.equal(providerCalls, 0);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('a soft failure deleting the empty-ask hint is logged but never costs the delivered answer', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-hint-cleanup-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const botId = 555444;
+  const base = adapters(actions);
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...parts) => logged.push(parts.join(' '));
+  const runtime = createTelegramRuntime({
+    config: config({
+      assistantKnowledgeEnabled: true,
+      assistant: { chatIds: ['-100'], botToken: `${botId}:assistant-token`, botUsername: 'assistant_bot', webhookSecret: 'assistant-secret', exemptBotIds: [] },
+    }),
+    store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(),
+    ...base,
+    assistantTelegram: {
+      async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: 91 } }; },
+      async deleteMessage(input) { actions.push(['assistant_delete', input]); return { ok: false, error: 'message_cannot_be_deleted' }; },
+    },
+  });
+  const extra = {
+    reply_to_message: { message_id: 90, from: { id: botId, is_bot: true }, text: ASSISTANT_EMPTY_ASK_TEXT },
+  };
+  try {
+    await runtime.handleUpdate('moderator', update(680, 680, 'сколько уроков?', undefined, extra));
+    const result = await runtime.handleUpdate('assistant', update(681, 680, 'сколько уроков?', undefined, extra));
+    assert.equal(result.kind, 'answered');
+    assert.equal(actions.some(([kind]) => kind === 'send'), true);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0], /hint cleanup failed.*message_cannot_be_deleted/);
+  } finally {
+    console.error = originalError;
+    db.close(); rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 test('Assistant limits are isolated by chat and user, then enforce cooldown and daily cap before a delivery', async () => {

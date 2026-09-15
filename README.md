@@ -44,8 +44,8 @@ rejected whole by Telegram. Deterministic and service replies stay code-owned
 plain text. See [CHANGELOG 0.3.1](CHANGELOG.md) and
 `packages/telegram-core/src/markup.mjs`.
 
-**Current production image: `5e67451`** (built 2026-08-16, deployed
-2026-08-17). It adds the request analyzer (`observe` / `dispatch` modes;
+**Release `0.4.0` image: `5e67451`** (built 2026-08-16, deployed
+2026-08-17 and later superseded). It added the request analyzer (`observe` / `dispatch` modes;
 `dispatch` is on in the test chat only, where the analyzer verdict chooses the
 route and the router model is not called), synthetic testing with one named
 synthetic bot and its own daily cap, durable question → answer records in
@@ -58,7 +58,8 @@ moderation. Models: answer `gpt-5.6-terra` (medium, 2000), router
 to image `5e67451` and carried forward): the third chat was added to
 `TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS`. The moderator covers the same 3 chats.
 
-**Current production image: `6c582ec`** (deployed 2026-09-14 21:06 UTC,
+**Release `0.5.0` image: `6c582ec`** (deployed 2026-09-14 21:06 UTC and
+later superseded,
 `telegram-runtime` container rebuilt and recreated; `operator-console`
 unchanged). The analyzer, router and answer stages now share one snapshot of
 the last three Q/A turns instead of each re-reading dialogue history on its
@@ -66,7 +67,13 @@ own, so a follow-up question in the same conversation is answered as a
 continuation. A working-state module (goals/conditions/decisions) ships
 disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
-the host.
+the host at that release point.
+
+**Current production image: `f51753f`** (deployed 2026-09-14 21:46 UTC,
+release `0.5.1`). A reply to the assistant's own message is an invocation, and
+an empty `/ask` opens a forced reply flow. The later local self-description and
+hint-cleanup fixes have not yet been production-verified; see `CHANGELOG.md`
+and `.claude/SNAPSHOT.md` for the candidate state.
 
 Two local assistant instances that can hold a recorded conversation with each
 other (wave 3) remain a lab tool in scripts, not on the live answer path.
@@ -79,14 +86,13 @@ other (wave 3) remain a lab tool in scripts, not on the live answer path.
   knowledge it was given. This is a measured hole, not a hypothesis: a
   factually loose answer passed 4/4 with `expectation_met: true` and was
   caught only by a human. Closing it is an architectural choice, not a bugfix.
-- **No timeouts on Telegram or model calls, and the webhook is handled
-  synchronously.** A hanging upstream call holds the webhook request open.
-- **Dialogue depth is hardcoded to 3 turns** in
-  `apps/telegram-runtime/src/assistant-dialogue.mjs`.
-- **`TELEGRAM_RUNTIME_REWRITE_MODEL` / `..._REWRITE_REASONING_EFFORT` are not
-  passed through Compose**, so enabling `..._RETRIEVAL_REWRITE_ENABLED` would
-  fail at start until the passthrough is added. Rewrite stays off in
-  production.
+- **Webhook processing is synchronous.** Telegram and provider calls now have
+  finite deadlines, but an immediate HTTP 200 is unsafe without a durable
+  inbox/worker recovery contract: a process crash after acknowledgement could
+  otherwise lose an update. That queue remains architecture work.
+- **Gatekeeper is not production-active.** Its code and scenario tests exist,
+  but public copy, two HTTPS links and shared-console placement still require
+  Product Owner decisions and a separate activation lease.
 
 ## Local checks
 

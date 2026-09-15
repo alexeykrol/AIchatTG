@@ -1,75 +1,51 @@
 ---
 name: db-migrate
-description: "Миграция схемы базы данных: SQLite → PostgreSQL/Supabase. Генерация SQL, проверка совместимости."
+description: "Безопасное изменение локальных SQLite-схем AIchatTG и подготовка production migration candidate."
 paths:
-  - "**/schema*"
-  - "**/migrations/**"
-  - "**/db/**"
+  - "apps/**/src/database.mjs"
+  - "apps/gatekeeper/src/store.mjs"
+  - "scripts/aichattg/*migration*"
+  - "scripts/aichattg/*runtime-state*"
   - "**/*.sql"
 allowed-tools: Read Edit Write Glob Grep Bash
 disable-model-invocation: true
 ---
 
-# Skill: Database Migration
+# Skill: AIchatTG SQLite Migration
 
-## Workflow: SQLite → PostgreSQL/Supabase
+## Контекст проекта
 
-### 1. Анализ текущей схемы
+AIchatTG использует `better-sqlite3` и отдельные SQLite-файлы на VPS. В проекте
+нет PostgreSQL/Supabase target, staging database или разрешения на облачную
+миграцию. Не генерировать RLS, Supabase CLI-команды, PostgreSQL-типы или
+`psql`-deploy без отдельного архитектурного решения Product Owner.
 
-```bash
-# Извлечь схему из SQLite
-sqlite3 database.db ".schema" > schema-sqlite.sql
-```
+## Workflow
 
-### 2. Конвертация типов
+1. Прочитать фактическую схему и миграции в
+   `apps/telegram-runtime/src/database.mjs` либо
+   `apps/gatekeeper/src/store.mjs`; не угадывать схему по шаблону.
+2. Сохранить ownership markers, `PRAGMA user_version`, idempotency и
+   совместимость с существующим файлом БД.
+3. Делать миграцию additive. Соблюдать `.claude/INVARIANTS.md`: никакого
+   `DROP TABLE`, `TRUNCATE` или безусловного удаления production-данных.
+4. Добавить тест перехода с точной предыдущей схемы и проверки сохранности
+   строк, индексов, foreign keys и повторного открытия.
+5. Запустить целевые тесты и полный `npm test` под Node 20.20.x.
+6. Подготовить candidate с точным SHA, data/runtime effect, backup/restore
+   планом, rollback consequence и evidence status.
 
-| SQLite | PostgreSQL |
-|--------|-----------|
-| INTEGER | INTEGER / BIGINT |
-| TEXT | TEXT / VARCHAR |
-| REAL | DOUBLE PRECISION |
-| BLOB | BYTEA |
-| DATETIME (text) | TIMESTAMPTZ |
-| BOOLEAN (0/1) | BOOLEAN |
-| AUTOINCREMENT | SERIAL / GENERATED ALWAYS AS IDENTITY |
+Для импортов runtime-state использовать существующие
+`scripts/aichattg/verify-migration-bundle.mjs` и
+`scripts/aichattg/import-runtime-state.mjs`; их approval/lease receipts нельзя
+подменять общим подтверждением.
 
-### 3. Генерация PostgreSQL схемы
+## Production gate
 
-- Преобразовать типы
-- Добавить TIMESTAMPTZ вместо TEXT для дат
-- Заменить AUTOINCREMENT на SERIAL
-- Добавить Row Level Security (RLS) для Supabase
-- Сгенерировать миграционный файл
+Не подключаться к production SQLite, не копировать её и не применять миграцию
+без точного Product Owner approval и release lease. Remote-действия выполняются
+только по `safe-remote-deploy`; перед изменением нужен backup с проверяемым
+restore-планом, после — schema/version, integrity и service verification.
 
-### 4. Проверка
-
-- Валидировать SQL синтаксис
-- Проверить foreign keys
-- Проверить индексы
-- Проверить constraints
-
-### 5. Деплой
-
-**Staging (автономно):**
-```bash
-# Применить на staging
-psql $STAGING_DATABASE_URL -f migration.sql
-```
-
-**Production (с подтверждением):**
-- Показать пользователю план миграции
-- Дождаться подтверждения
-- Применить
-- Проверить результат
-
-## Supabase-специфика
-
-- Автоматически добавлять RLS policies
-- Использовать Supabase CLI если доступен:
-  ```bash
-  supabase db push
-  ```
-- Генерировать TypeScript типы:
-  ```bash
-  supabase gen types typescript --local > src/types/database.ts
-  ```
+Локально пройденная миграция — только `prepared`, не `deployed` и не
+`production-verified`.
