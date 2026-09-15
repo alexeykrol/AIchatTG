@@ -19,6 +19,37 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Deploy the prepared cost-analytics Console
+
+**Requested:** «Деплой.» in «Админка», actual message
+`01a0a750-3ec3-7552-992f-f25982d366f1`, after the exact f650fe8 Console-only
+approval question; the root received the same request. One scoped release.
+
+**Action / result:** committed reviewed history pushed; exact Console3.2.0
+source f650fe8 deployed at23:12:03UTC under a fresh single-writer lease.
+31source hashes,7headers/API/HTTPS/auth, stage arithmetic, preservation checks
+and independent ordinary Chrome passed. Latest5:4 full estimates,1unknown,
+mean$0.0065898 over4. Assistant2.4.37/runtime335a35a unchanged.
+
+**Status: deployed.** One recreation,0rollback; lease/master closed23:13:28UTC.
+No unfinished Moderator source, provider/Telegram call, data or draft write.
+[Receipt](reports/2026-09-15-console-v32-deployment.md).
+
+## 2026-09-15 — Queue the Moderator task for the next mechanical deployment
+
+**Requested:** actual message `01a0a750-c465-7292-ae0f-253ee0ab7a54` in
+«Модератор»: «Другая сессия сейчас деплоит, когда завершит - будешь деплоить
+ты. Пока можешь встать в очередь.»
+
+**Action / boundary:** Moderator is position1 after Console3.2.0. Root retains
+shared integration, acceptance and lock; no second SSH owner was started.
+Exact candidate/tests, PO scope and a new explicit single-writer handoff/lease
+must precede mechanical deployment. Collection/delivery is not activated by
+queue placement.
+
+**Status: proposed; queued, not deployed.** The current candidate still has
+pending local fixes/acceptance. [Release queue](RELEASE_QUEUE.md).
+
 ## 2026-09-15 — Retain private review materials until manual removal
 
 **Requested:** actual owner message `01a0a734-795a-7be0-b11d-c1e4ca568c14`
@@ -81,12 +112,13 @@ does not prove a zero bill. Missing historical usage must not be invented.
 Use a separate isolated Analytics worker; root integrates any shared runtime,
 storage or API hooks. Existing3.1.1 Russian labels are already in the base.
 
-**Status: prepared.** Integrated Console3.2.0 source `f650fe8` implements the
+**Status: deployed.** Integrated Console3.2.0 source `f650fe8` implements the
 accepted five-question read model/UI and inherits3.1.1 labels. Help and persistent
 regressions are included; root787passed/5fixture-skips/0failed, Console41/41,
-independent review/source guard/Chrome synthetic QA passed. Local only, not
-pushed/deployed. Standalone3.1.1 is superseded by this combined release candidate.
-No new release/paid authority is granted by the implementation start.
+independent review/source guard/Chrome synthetic QA passed. Subsequently pushed
+and deployed after exact approval; live Chrome and real cost arithmetic passed.
+Standalone3.1.1 is superseded by this combined release. No new paid calls.
+[Production receipt](reports/2026-09-15-console-v32-deployment.md).
 [Exact release decision](reports/2026-09-15-console-v32-candidate.md).
 [Charter](proposals/2026-09-15-console-cost-charter-v1.md).
 

@@ -1,8 +1,11 @@
 # Console 3.2.0 — question-cost integration candidate
 
-Lifecycle: `prepared`. Exact integrated source:
+Lifecycle: `production-verified`. Exact integrated source:
 `f650fe87cabf5cf498a64d48907f7a924861cfd2`.
-Local commit only; this report does not grant push or production authority.
+Deployed after exact PO approval on2026-09-15 at23:12:03UTC; see the
+[deployment receipt](2026-09-15-console-v32-deployment.md).
+The preparation evidence and proposed decision below are retained as the
+historical pre-approval checkpoint; they do not grant further release authority.
 
 ## Source and scope
 

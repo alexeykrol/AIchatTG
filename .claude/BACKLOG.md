@@ -8,37 +8,41 @@ updated: 2026-09-15
 
 ## Next
 
-- [ ] CONSOLE-V32: integrated source `f650fe8`, lifecycle `prepared`, local
-      only. Last-five question cost estimates/known stages/mean denominator,
-     3.1.1 labels and Help integrated. Root787passed/5skips/0failed, Console41/41,
-      source guard/independent review/Chrome synthetic QA passed. Needs exact
-      approval, push and Console-only lease; production remains3.1.0.
-      `docs/reports/2026-09-15-console-v32-candidate.md`.
+- [x] CONSOLE-V32: exact source `f650fe8`, lifecycle `production-verified`,
+      release23:12:03UTC. Last-five costs, known stages, mean denominator,
+      3.1.1 labels and Help live. Root787passed/5skips/0failed, Console41/41;
+      31source hashes,7headers/API/HTTPS/auth, actual stage arithmetic and
+      independent ordinary Chrome passed. Last5=4 full estimates+1unknown;
+      mean$0.0065898 over4. Runtime335a35a/config/drafts preserved.
+      Lease/master closed23:13:28UTC; one recreation,0rollback.
+      `docs/reports/2026-09-15-console-v32-deployment.md`.
 - [ ] MODERATOR-REVIEW-1: PO-start verified; local synthetic private review/
       Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts
       throughv4 accepted; recipient/principal unknown,
-      production collection/delivery disabled. Charter:
+      production collection/delivery disabled. Queue position1; requested
+      mechanical owner Moderator, no active lease/SSH handoff. Root P2 fixes
+      and final test acceptance pending; see `docs/RELEASE_QUEUE.md`. Charter:
       `docs/proposals/2026-09-15-moderator-review-charter-v1.md`.
 - [x] CONSOLE-COST-V1 local implementation: integrated into3.2.0/f650fe8;
-      production acceptance remains CONSOLE-V32 above. No guessed usage/zero
+      production acceptance passed in CONSOLE-V32 above. No guessed usage/zero
       costs; worker backend preserved. Incorporates pushed3.1.1 copy fixes.
       Metadata-only diagnostic passed: latest5 all have answer/analyzer tokens,
-      4 have exact no-router proof; rate/eligibility/stage checks still needed.
+      4 have exact no-router proof; live rate/eligibility/stage checks now passed.
       SSH closed, apps unchanged. Report:
       `docs/reports/2026-09-15-console-cost-metadata-diagnostic.md`.
       `docs/proposals/2026-09-15-console-cost-charter-v1.md`.
-- [ ] CONSOLE-V311: candidate `5e55101` lifecycle `pushed`, исправлены
+- [x] CONSOLE-V311: candidate `5e55101` lifecycle `pushed`, исправлены
       склонение и pricing-подпись;33Console tests passed. Для production
       standalone release superseded by CONSOLE-V32; separate deploy не нужен.
-      На сервере3.1.0.
+      Исправления включены в production3.2.0/f650fe8.
       `docs/reports/2026-09-15-console-v311-candidate.md`.
 - [x] CONSOLE-V31: Console3.1.0 `eb0f7fe` production-verified, семь общих
       version/date/time headers + русская Помощь, лишние плашки убраны.
       Timestamp сравнен с реальным start (delta0.562637s); runtime/drafts сохранены.
       Lease/master закрыты; Chrome7/7 passed. Два copy-дефекта Analytics
-      (склонение/English pricing ID) требуют отдельного hotfix. Receipt:
+      (склонение/English pricing ID) закрыты выпуском3.2.0. Receipt:
       `docs/reports/2026-09-15-console-v31-deployment.md`.
 - [x] MODERATOR-MENU-1: stale chat-scoped `/ask` removed from Moderator's
       test-chat command menu at21:42:34UTC. Exact one-call cleanup,18-cell

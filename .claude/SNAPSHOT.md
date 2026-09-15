@@ -4,14 +4,22 @@
 
 ## Текущее состояние
 
-- **Console3.2.0, lifecycle `prepared`:** integrated source `f650fe8`, local
-  only, not pushed/deployed. Последние5 вопросов, оценки по этапам, честный
-  unknown и среднее по полностью оценённым; наследует3.1.1 copy fixes.
-  Root787passed/5fixture-skips/0failed; Console41/41; independent review,
-  source guard и обычный Chrome на synthetic data passed. Help обновлён.
-  Боты/rates/server/config/schema не менялись. Для выпуска нужны точное
-  PO-разрешение, push и fresh Console-only lease. Production3.1.0/eb0f7fe.
-  `docs/reports/2026-09-15-console-v32-candidate.md`.
+- **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
+  релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
+  Проверенная история pushed; exact Git archive без локальных Moderator-файлов.
+  Последние5 вопросов:4 полностью оценены,1 partial/unknown; среднее$0.0065898
+  по4, полный итог5 остаётся unknown. Root787passed/5fixture-skips/0failed;
+  Console41/41,31sourcehashes,7headers/API/HTTPS/auth, реальная арифметика и
+  независимый обычный Chrome passed. Final query13.58ms, healthy/restart0.
+  Изменён только Console release timestamp; runtime335a35a/Assistant2.4.37,
+  остальные config/routes/schema/drafts сохранены. RollbackConsole3.1.0/eb0f7fe.
+  Lease consumed, SSH closed23:13:28UTC; одна recreation,0rollback.
+  `docs/reports/2026-09-15-console-v32-deployment.md`.
+- **Очередь выпуска:** Moderator position1, PO назначил его механическим
+  исполнителем следующего деплоя; root сохраняет integration/lock/acceptance.
+  Точного принятого SHA/lease пока нет. Два P2 исправляются локально, последний
+  targeted run28/29 требует диагностики одного теста; shared hook не применён.
+  `docs/RELEASE_QUEUE.md`; никаких SSH/production полномочий не передано.
 - **Новые feature workstreams, local-only:** PO-start Moderation review и
   Analytics last-five costs проверены. База9d326f4; страницы/new modules
   разделены, общие Console/runtime entrypoints/schema/env/Compose/root docs
@@ -23,7 +31,7 @@
   Recipient/principal/production
   limits ещё не утверждены; реальные сбор/уведомления выключены.
   Standalone3.1.1 held для объединённого analytics candidate.
-  Production остаётся3.1.0/eb0f7fe + runtime335a35a; активной lease/SSH нет.
+  Текущее production3.2.0/f650fe8 + runtime335a35a; активной lease/SSH нет.
 - **Cost diagnosis, read-only passed22:33:50UTC:** из последних5 записей все
   имеют answer/analyzer tokens,4 имеют exact event-level no-router proof,1 нет.
   Это ещё не4 подтверждённых цены: rate/eligibility/stage checks впереди.

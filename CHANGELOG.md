@@ -3,18 +3,23 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
-## [Unreleased — Console 3.2.0]
+## [Console 3.2.0] — 2026-09-15 — Last-five question costs
 
-Local candidate only; production remains3.1.0 until a separately approved release.
+Lifecycle `production-verified`; exact image `f650fe8`, release23:12:03UTC.
+Assistant2.4.37/runtime335a35a unchanged. See the
+[release receipt](docs/reports/2026-09-15-console-v32-deployment.md).
 
 - Show the five newest saved questions, bounded excerpts, UTC times, evidenced
   answer/analyzer/router estimates and a priced-only average with its denominator.
 - Recognize event-matched completed analyzer-dispatch receipts as router no-call
   proof. Missing or conflicting evidence stays unknown, never a fabricated zero.
 - Keep known-stage subtotals distinct from full estimates and unavailable totals.
-- Include the pending3.1.1 Russian-label fixes, tiny-positive-price formatting
+- Include the 3.1.1 Russian-label fixes, tiny-positive-price formatting
   and Help explaining incomplete costs and the difference from provider invoices.
-- No runtime, pricing catalog, schema, configuration, routes or data change.
+- Only Console release-time metadata changed; no runtime, pricing catalog,
+  schema, other configuration, routes or data change.
+- Root787passed/5explicit skips;31deployed-file hashes,7headers/API/HTTPS,
+  real cost completeness/arithmetic and independent desktop Chrome passed.
 
 ## [Console 3.1.0] — 2026-09-15 — Release header and Russian Help
 
