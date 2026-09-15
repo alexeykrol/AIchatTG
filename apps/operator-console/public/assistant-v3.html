@@ -10,11 +10,9 @@
 <main class="shell">
   <div class="masthead">
     <div>
-      <p class="eyebrow">Панель управления AIchatTG</p>
+      <p class="eyebrow">{{CONSOLE_RELEASE_STAMP}}</p>
       <h1>Ассистент</h1>
-      <p class="subhead">Параметры ответа и недавние сохранённые ходы разговора. Данные доступны для просмотра; эта страница не меняет работающего бота.</p>
     </div>
-    <span class="badge">Только просмотр</span>
   </div>
   <nav class="nav" aria-label="Разделы панели управления">
     <a href="/moderation-v3.html">Модерация</a>
@@ -23,30 +21,28 @@
     <a href="/domains-v3.html">Базы ответов</a>
     <a href="/analytics-v3.html">Аналитика</a>
     <a href="/tests-v3.html">Тесты</a>
+    <a href="/help-v3.html">Помощь</a>
   </nav>
 
-  <div id="notice" class="status" role="status" aria-live="polite">Загружаю данные ассистента…</div>
+  <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card wide" aria-labelledby="config-title">
       <h2 id="config-title">Текущие параметры</h2>
-      <p>Значения показывает консоль на момент запроса. Общий флаг входящих сообщений и флаг знания не подтверждают состояние каждого чата или допуск отдельного источника.</p>
       <div id="config-empty" class="status" hidden></div>
       <div id="config-metrics" class="metric-grid" style="display:none" hidden></div>
     </section>
 
     <section class="card wide" aria-labelledby="events-title">
       <h2 id="events-title">Недавние сохранённые вопросы</h2>
-      <p>До 30 последних ходов из ограниченной памяти диалогов. Предел на один диалог и срок хранения этот ответ сервера не сообщает. Это не полный журнал и не число всех обращений; стоимость и маршрут текущая запись также не передаёт.</p>
       <div id="events-empty" class="status" hidden></div>
       <div id="events-table" hidden></div>
     </section>
 
     <section class="card wide" aria-labelledby="freshness-title">
       <h2 id="freshness-title">Актуальность снимка</h2>
-      <p id="freshness">Данные ещё не получены.</p>
+      <p id="freshness" hidden></p>
       <div class="actions">
         <button id="reload" class="secondary" type="button">Обновить данные</button>
-        <span class="micro">Через 60 секунд после загрузки страница помечает снимок устаревшим. Срок актуальности данных на сервере здесь не указан.</span>
       </div>
     </section>
   </div>
@@ -62,6 +58,7 @@
   function showNotice(message, tone = '') {
     notice.textContent = message;
     notice.className = `status ${tone}`.trim();
+    notice.hidden = !message;
   }
 
   function text(value, fallback = 'Не указано') {
@@ -185,7 +182,8 @@
 
   function updateFreshness() {
     if (!loadedAt) {
-      freshness.textContent = 'Данные ещё не получены.';
+      freshness.textContent = '';
+      freshness.hidden = true;
       return;
     }
     const time = new Intl.DateTimeFormat('ru-RU', {
@@ -193,9 +191,8 @@
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     }).format(loadedAt);
     const stale = Date.now() - loadedAt.getTime() >= freshnessMs;
-    freshness.textContent = stale
-      ? `Последний запрос: ${time}. Снимок страницы устарел; обновите данные.`
-      : `Последний запрос: ${time}. Снимок страницы свежий.`;
+    freshness.textContent = stale ? `Снимок от ${time} устарел. Обновите данные.` : '';
+    freshness.hidden = !stale;
   }
 
   async function getJson(path) {
@@ -208,7 +205,7 @@
   async function load() {
     const sequence = ++loadSequence;
     reloadButton.disabled = true;
-    showNotice('Обновляю параметры и последние вопросы…');
+    showNotice('');
     const [configResult, eventsResult] = await Promise.allSettled([
       getJson('/api/moderation/assistant/config'),
       getJson('/api/moderation/assistant/events?limit=30'),
@@ -223,7 +220,7 @@
     renderEvents(events);
     loadedAt = config || events ? new Date() : null;
     updateFreshness();
-    if (config && events) showNotice('Параметры и сохранённые ходы загружены.', 'good');
+    if (config && events) showNotice('');
     else if (config || events) showNotice('Часть данных недоступна. Доступная часть показана ниже.', 'warn');
     else showNotice('Не удалось получить данные ассистента. Повторите запрос или проверьте доступ к консоли.', 'error');
   }

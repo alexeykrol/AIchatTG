@@ -37,3 +37,14 @@ test('knowledge admission uses a separate read-only mount', async () => {
   assert.match(compose, /TELEGRAM_RUNTIME_KNOWLEDGE_ROOT: \/var\/lib\/aichattg\/knowledge/);
   assert.doesNotMatch(compose, /\/srv\/news_agent_001|news-digest\.db/);
 });
+
+test('the UTC release timestamp reaches only the production Console', async () => {
+  const compose = await readFile(composeUrl, 'utf8');
+  const runtime = compose.split('  aichattg-telegram-runtime:')[1]?.split('  aichattg-operator-console:')[0];
+  const consoleService = compose.split('  aichattg-operator-console:')[1]?.split('\nnetworks:')[0];
+  assert.ok(runtime && consoleService);
+  assert.match(consoleService, /OPERATOR_CONSOLE_RELEASED_AT: "\$\{OPERATOR_CONSOLE_RELEASED_AT:-\}"/u);
+  assert.doesNotMatch(runtime, /OPERATOR_CONSOLE_RELEASED_AT/u);
+  const dockerfile = await readFile(new URL('../../../infra/aichattg/Dockerfile.operator-console', import.meta.url), 'utf8');
+  assert.match(dockerfile, /ENV NODE_ENV=production/u);
+});

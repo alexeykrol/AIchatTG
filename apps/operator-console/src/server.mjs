@@ -18,6 +18,13 @@ import {
 } from './legacy-read-model.mjs';
 
 const publicPage = (name) => readFileSync(fileURLToPath(new URL(`../public/${name}`, import.meta.url)), 'utf8');
+const release = JSON.parse(readFileSync(fileURLToPath(new URL('./console-release.json', import.meta.url)), 'utf8'));
+if (!/^\d+\.\d+\.\d+$/u.test(release.version)) throw new Error('invalid Console release version');
+const RELEASE_STAMP = '{{CONSOLE_RELEASE_STAMP}}';
+const V3_PAGES = new Set([
+  '/moderation-v3.html', '/assistant-v3.html', '/settings-v3.html', '/domains-v3.html',
+  '/analytics-v3.html', '/tests-v3.html', '/help-v3.html',
+]);
 const PUBLIC = new Map([
   ['/moderation-v3.html', publicPage('moderation-v3.html')],
   ['/assistant-v3.html', publicPage('assistant-v3.html')],
@@ -25,6 +32,7 @@ const PUBLIC = new Map([
   ['/domains-v3.html', publicPage('domains-v3.html')],
   ['/analytics-v3.html', publicPage('analytics-v3.html')],
   ['/tests-v3.html', publicPage('tests-v3.html')],
+  ['/help-v3.html', publicPage('help-v3.html')],
   ['/legacy/v1/moderation.html', publicPage('moderation.html')],
   ['/legacy/v1/assistant.html', publicPage('assistant.html')],
   ['/legacy/v1/eval.html', publicPage('eval.html')],
@@ -44,6 +52,22 @@ const V2_CSS = readFileSync(fileURLToPath(new URL('../public/console-v2.css', im
 const V3_CSS = readFileSync(fileURLToPath(new URL('../public/console-v3.css', import.meta.url)), 'utf8');
 
 const MAX_CANDIDATE_BODY = 70_000;
+
+function releaseLabel(config) {
+  if (!config.releasedAt) return `Версия ${release.version} · дата и время релиза ожидаются`;
+  const date = new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: 'UTC',
+  }).format(new Date(config.releasedAt));
+  return `Версия ${release.version} · релиз ${date} UTC`;
+}
+
+function renderedPage(path, config) {
+  const page = PUBLIC.get(path);
+  if (!V3_PAGES.has(path)) return page;
+  if (!page.includes(RELEASE_STAMP)) throw new Error(`release stamp missing in ${path}`);
+  return page.replace(RELEASE_STAMP, releaseLabel(config));
+}
 
 async function candidateBody(request) {
   if (!/^application\/json(?:;\s*charset=utf-8)?$/iu.test(request.headers['content-type'] || '')
@@ -188,7 +212,7 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
         return;
       }
       if (request.method === 'GET' && PUBLIC.has(url.pathname)) {
-        content(response, 200, 'text/html; charset=utf-8', PUBLIC.get(url.pathname));
+        content(response, 200, 'text/html; charset=utf-8', renderedPage(url.pathname, config));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/console-v2.css') {
@@ -209,6 +233,10 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
       }
       if (request.method === 'GET' && url.pathname === '/api/operator/settings') {
         json(response, 200, settings.read());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/operator/release') {
+        json(response, 200, { version: release.version, releasedAt: config.releasedAt });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/operator/analytics') {
