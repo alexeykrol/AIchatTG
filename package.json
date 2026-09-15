@@ -9,6 +9,7 @@
     "test:gatekeeper": "npm --prefix apps/gatekeeper test",
     "check:gatekeeper": "npm --prefix apps/gatekeeper run scenario:check",
     "test:runtime": "npm --prefix apps/telegram-runtime test && npm --prefix packages/telegram-core test",
+    "test:routing-history": "node apps/telegram-runtime/scripts/verify-frozen-routing-v1.mjs",
     "status:moderator-recovery": "node scripts/aichattg/moderator-recovery-status.mjs",
     "telegram:ops": "node scripts/aichattg/telegram-ops.mjs",
     "test:knowledge-snapshot": "node --test scripts/aichattg/test/course-knowledge-snapshot.test.mjs",
