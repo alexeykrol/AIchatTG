@@ -3,6 +3,25 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [5600afd] — 2026-09-15 UTC — Registered Assistant domain routing
+
+Lifecycle `deployed`; runtime started16:07:36UTC. Only telegram-runtime was
+recreated; environment, schema, routes, knowledge admission and Console preserved.
+Exact rollback image852a8d2 retained. See the
+[release receipt](docs/reports/2026-09-15-runtime-5600afd-deployment.md).
+
+- Markdown registry now supplies router/analyzer vocabulary, source bindings,
+  public capabilities and domain policies, including self and abuse domains.
+- Compound questions retain multiple domain attributions; existing receipts
+  expose bounded raw-versus-final routing diagnostics without schema changes.
+- Identity questions with knowledge enabled now use the existing model path,
+  not a guaranteed zero-call static bypass. Configured models/caps are unchanged.
+- Routing-only measured comparison: router28/28, analyzer26/27; one compound
+  miss, two risk-label discrepancies and one uncertain missing result retained.
+- Fresh canonical tests698 passed; six local-evidence-only checks separately
+  passed in their original worktree. Nine migration safety tests and offline
+  in-container compatibility passed. New live answer/menu acceptance not run.
+
 ## [852a8d2] — 2026-09-15 UTC — Course profile and linked menu cleanup
 
 Lifecycle `deployed`; runtime started at 06:49:50 UTC. Environment, schema,

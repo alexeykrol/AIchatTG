@@ -19,6 +19,25 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Deploy the measured domain-routing candidate
+
+**Reported by:** after the comparison report, the owner wrote «деплой».
+The root integrator independently re-read the original user message and
+accepted the exact5600afd candidate for a one-time runtime-only release.
+
+**Action / evidence:** fast-forward integration and push; exact Git archive;
+runtime started16:07:36UTC, healthy/restart0. All55 source files matched,
+environment/schema/routes/Console preserved, rollback852a8d2 retained. Fresh
+tests and offline in-container compatibility passed. Self questions now use
+the model path included in the candidate; existing quotas/tuples unchanged.
+
+**Status: deployed.** This supersedes the prepared state of the two entries
+below, not their historical evidence. Routing-only paid comparison was104
+attempts/103 results (new router28/28, analyzer26/27). Compound-domain loss,
+two risk-label discrepancies and one uncertain result remain explicit.
+New live answer/menu acceptance not_run; no new paid test or Telegram send.
+See [release receipt](reports/2026-09-15-runtime-5600afd-deployment.md).
+
 ## 2026-09-15 — Focus only on understanding and domain selection
 
 **Reported by:** the owner explicitly separated understanding/classifying a

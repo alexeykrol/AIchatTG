@@ -1,6 +1,10 @@
 # Assistant domain registry v1
 
-Status: local candidate, `prepared`. This document is not a deployment receipt.
+Status update2026-09-15: `deployed` as5600afd. This design document is not the
+[deployment receipt](reports/2026-09-15-runtime-5600afd-deployment.md).
+Routing-only measurement is recorded separately in the
+[result-v2 report](reports/2026-09-15-routing-measurement-result-v2.md);
+new live generated-answer quality remains unverified.
 
 ## Two independent jobs
 
@@ -115,8 +119,10 @@ and runtime must agree on the digest. Existing SQL journals keep their primary
 route/source projection; no migration or new journal schema is introduced.
 Full multi-domain coverage and flags reach the answer provider. Offline checks
 use real parsing/runtime/SQLite/provider validation with fake transports only.
-Live classification, factual answer quality, latency and cost remain `not_run`
-for this candidate.
+At initial preparation live classification, factual answer quality, latency
+and cost were `not_run`. The later routing-only experiment measured selection
+and test token cost; it did not establish generated-answer quality, live
+dialogue cost or comprehensive production acceptance.
 
 Design reference: read-only review of descriptor ideas in the local AGI project.
 No other project's code, index, database, configuration, secrets or runtime

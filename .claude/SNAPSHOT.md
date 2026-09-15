@@ -4,10 +4,19 @@
 
 ## Текущее состояние
 
-- **Production, lifecycle `deployed`:** `telegram-runtime` image `852a8d2`
-  (запуск 2026-09-15 06:49:50 UTC), healthy / restart 0; конфигурация, schema,
+- **Production, lifecycle `deployed`:** `telegram-runtime` image `5600afd`
+  (запуск 2026-09-15 16:07:36 UTC), healthy / restart 0; конфигурация, schema,
   mounts/routes сохранены. Moderator и Assistant покрывают 3 чата, знание и
   retrieval включены, rewrite выключен. Operator Console не менялась.
+- **Новый реестр доменов:** six-domain Markdown registry, multi-domain
+  attribution и routingDiagnosis выложены. 55 source-файлов совпали с архивом;
+  повторная проверка16:10:06UTC passed. Rollback852a8d2 сохранён. Self-вопросы
+  теперь могут вызывать модели; tuples/лимиты не менялись. Receipt:
+  `docs/reports/2026-09-15-runtime-5600afd-deployment.md`.
+- **Замер только маршрутизации:**104 попытки/103 результата; новый router28/28,
+  analyzer26/27; один content/value miss, два расхождения risk flags и один
+  неопределённый запрос без повтора. Отчёт и USD-учёт:
+  `docs/reports/2026-09-15-routing-measurement-result-v2.md`.
 - **Не production:** Gatekeeper. Код, тесты и draft-сценарий существуют, но
   контейнер/маршрут не активированы; Product Owner copy, две HTTPS-ссылки и
   placement в общей консоли остаются решениями владельца.
@@ -67,18 +76,21 @@
   существующий Guard. Отказ синтетического прогона не доказывает отсутствие
   прав или ошибку обычного человеческого сценария. Нужна его прямая проверка;
   права, BotFather и удаление другим токеном не менялись.
-- PROFILE-2: добавить узкое распознавание составного identity-вопроса,
-  регрессии на смешанные учебные вопросы и отсутствие provider/retrieval calls.
-  CAP-03 также требует сверки ответа с account-boundary ожиданием frozen plan.
+- PROFILE-2: прежняя regex-only рекомендация заменена реестром доменов.
+  Составной identity распознаётся в замере; live answer/account-boundary
+  приёмка остаётся открытой. Нельзя обещать отсутствие provider calls.
+- ROUTING-1: offline-уточнение content/value составного вопроса и определения
+  risk flags; эталонный набор не подгонять под результаты модели.
 - Простой веб-интерфейс основных настроек не специфицирован.
 
 ## Следующий безопасный шаг
 
-Деплой `852a8d2` завершён и запушен, 622 теста прошли без skips; 50 source-файлов
-совпали с архивом. Инфраструктура исправна, функциональная приёмка неполна.
-Одноразовый release lease использован, rollback `049cc22` сохранён.
+Деплой `5600afd` завершён и запушен;698 canonical tests passed,6 artifact-only
+checks отдельно passed,9 migration checks passed. 55 source-файлов совпали с
+архивом. Инфраструктура исправна, новая live функциональная приёмка not_run.
+Одноразовый release lease использован, rollback `852a8d2` сохранён.
 Не повторять удаление uncertain команды 524 и не обходить stop harness.
-Следующее: локальный PROFILE-2 и проверка меню обычным пользователем в закрытом
+Следующее: offline ROUTING-1, live PROFILE-2 и проверка меню обычным пользователем в закрытом
 чате. Новые image/права/BotFather/тестовый identity требуют своего точного
 approval; оставшиеся 16 вопросов не разрешают такие изменения сами по себе.
 QUALITY-2 остаётся открытым, источники знания этим релизом не менялись.

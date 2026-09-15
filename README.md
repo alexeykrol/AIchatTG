@@ -13,9 +13,10 @@ publication to a Telegram channel — remain in the separate News Digest project
 
 ## Architecture principle
 
-Prepared Assistant candidate: [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md).
-It separates domain recognition from knowledge organization; it is not yet a
-production release.
+The Assistant uses a [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md),
+deployed in `5600afd`. It separates domain recognition from knowledge organization;
+the [release receipt](docs/reports/2026-09-15-runtime-5600afd-deployment.md) distinguishes
+verified infrastructure from the still-open live answer-quality acceptance.
 
 The VPS and Traefik are shared infrastructure. AIchatTG is nevertheless a
 separate application: it owns its repository, release archive, containers,
@@ -73,7 +74,17 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current production image: `852a8d2`** (started 2026-09-15 06:49:50 UTC;
+**Current production image: `5600afd`** (started 2026-09-15 16:07:36 UTC;
+lifecycle `deployed`). Bundled six-domain routing, multi-domain attribution and
+decision diagnostics are live. Exact55-file source match, healthy/restart0,
+unchanged environment/schema/routes/Console and offline container checks passed.
+Rollback `852a8d2` retained. Routing-only comparison:28/28 router,26/27 analyzer;
+one compound-domain miss and two risk-label discrepancies remain. New live
+answer/menu acceptance was not run. Knowledge-enabled self questions now use
+the existing model path and can cost tokens; configured limits are unchanged.
+See the [current receipt](docs/reports/2026-09-15-runtime-5600afd-deployment.md).
+
+**Previous production image: `852a8d2`** (started 2026-09-15 06:49:50 UTC;
 lifecycle `deployed`). Restores the course navigator profile and adds durable
 command/hint cleanup. Infrastructure checks passed: exact source, preserved
 configuration/schema/routes, healthy and zero restarts. Rollback `049cc22`
@@ -88,8 +99,9 @@ other (wave 3) remain a lab tool in scripts, not on the live answer path.
 
 ## Known open defects
 
-- **Profile and menu acceptance are incomplete.** “Кто ты и как тебя зовут?”
-  misses the single-clause identity matcher. Synthetic menu-pair deletion was
+- **Profile and menu acceptance are incomplete.** Registry routing now recognizes
+  “Кто ты и как тебя зовут?” in the measured candidate; live answer acceptance
+  remains open. Synthetic menu-pair deletion was
   not confirmed; no Moderator inbound receipt exists for that synthetic
   command. Do not infer ordinary-user success/failure or change permissions
   from this alone. See `PROFILE-2` / `HYGIENE-1` in `.claude/BACKLOG.md`.

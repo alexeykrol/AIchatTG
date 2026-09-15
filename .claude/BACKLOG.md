@@ -8,6 +8,14 @@ updated: 2026-09-15
 
 ## Next
 
+- [x] RELEASE-3: `5600afd` deployed2026-09-15 16:07:36UTC;55-file source
+      match, preserved config/schema/routes, healthy/restart0, rollback852a8d2.
+      New live Telegram answer/menu acceptance not_run. Receipt:
+      `docs/reports/2026-09-15-runtime-5600afd-deployment.md`.
+- [ ] ROUTING-1: отдельное offline-уточнение content/value compound boundary
+      (blind-11 analyzer miss) и определения risk flags (blind-06/07).
+      Не переписывать gold под модель. Новые платные проверки требуют новой
+      точной авторизации; оба прежних experiment lease исчерпаны/закрыты.
 - [x] RELEASE-1: `049cc22` production-verified 2026-09-15 UTC; полный test
       matrix, commit/push, точный lease и deploy завершены. Receipt:
       `docs/reports/2026-09-15-runtime-049cc22-deployment.md`.
@@ -25,11 +33,11 @@ updated: 2026-09-15
       используют «ИИ Навигатор», а не технический fallback; CAP-01/USE-01/
       USE-02 прошли живую проверку содержания на `852a8d2`. CAP-03 partial:
       цели курса перечислены, account-boundary подожидание не выполнено.
-- [ ] PROFILE-2: «Кто ты и как тебя зовут?» пропущено identity matcher и
-      получает out_of_coverage. Расширить только anchored identity pattern;
-      добавить compound-positive / mixed-course-negative / provider-bypass
-      регрессии. Новая выкладка потребует точного candidate approval.
-      Отдельно закрыть пропущенную в CAP-03 границу общих правил/операций аккаунта.
+- [ ] PROFILE-2: identity routing теперь исправлен реестром в5600afd и
+      измерен; прежняя anchored-regex рекомендация superseded. Проверить live
+      ответ и пропущенную в CAP-03 границу общих правил/операций аккаунта.
+      Self теперь использует модели при knowledge-enabled; zero-call bypass
+      не является текущим требованием этого принятого кандидата.
 - [ ] RELEASE-2-ACCEPTANCE: `852a8d2` deployed, инфраструктура passed,
       приёмка не завершена. 622 offline tests passed; 6 live вопросов,
       content 4 passed / 1 partial / 1 failed; MENU-02/MIXED-RAG not_run после stop.
