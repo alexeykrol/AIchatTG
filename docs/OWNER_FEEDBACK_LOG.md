@@ -59,6 +59,11 @@ acceptance bank and inspect actual answers, not merely HTTP/delivery success.
 
 **Status:** prepared. Paid closed-chat testing is owner-authorized; no new
 production candidate is claimed deployed by this entry.
+Baseline completed against `049cc22`: 28/28 answers delivered, 19 content
+passes, 6 partial, 2 failed, 1 inconclusive. The profile failures and `/ai`
+explanation are repaired in local candidate `62e1ebf`; remaining source and
+navigation findings are preserved in
+`docs/reports/2026-09-15-assistant-live-baseline.md`.
 
 ## 2026-09-14 — Reconcile every instruction and fix every actionable error
 

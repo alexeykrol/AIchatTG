@@ -25,6 +25,12 @@ updated: 2026-09-14
 
 ## Soon
 
+- [ ] QUALITY-2: закрыть конкретные результаты живого прогона `049cc22`:
+      NAV-01 (границы курсов/актуальность), NAV-07 (открытая лекция),
+      CONCEPT-02 (Parent–Child coverage), ORG-03 (source URL не destination),
+      ORG-04 (community navigation), ORG-02 (противоречие инструкций входа).
+      Не менять источники/допуск production молча. Квитанции и диагнозы:
+      `docs/reports/2026-09-15-assistant-live-baseline.md`.
 - [ ] QUALITY-1: добавить отдельную content-grounding acceptance leg, которая
       проверяет ответ на верность выданным фрагментам знания. Нынешний judge
       проверяет поведение, но сознательно не оценивает фактическую опору.
