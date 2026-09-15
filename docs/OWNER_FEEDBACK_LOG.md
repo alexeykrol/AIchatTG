@@ -19,6 +19,82 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Make Help explicit and menu-first
+
+**Reported by:** the owner asked to spell out every step for an inattentive,
+hurried reader, with the menu as the primary path. They also supplied the
+«Что я могу» capabilities text and asked to update its usage instructions.
+Source messages: `01a0a689-3fd8-7102-adca-78d15b40c4f6` and
+`01a0a68b-c95c-7f92-ada9-a12b5513c723` in the Assistant task.
+
+**Implementation:** menu `/ask` → send command → reply to the bot's prompt →
+send the question; no repeated `/ask`. Text `/ask` and @mention remain secondary.
+Capabilities wording is preserved in both static Help and public Markdown.
+Independent integration review restored the accidentally removed public
+identity grounding and matched the quoted prompt prefix to the actual prompt.
+This is not a change to the existing cleanup or admission behavior.
+
+**Test isolation:** the candidate exposed historical routing-v1 checks coupled
+to old source hashes; their guard was correct, but running them against moving
+runtime sources was not a maintainable default suite. They now run automatically
+on exact `5600afd` source, while current routing/provider checks stay current.
+No historical hashes, gold, paid captures, budgets or leases are rewritten.
+
+**Status: fixed.** Merged in local `main`; candidate lifecycle `prepared`, not
+pushed or deployed. Final root tests 687/687; explicit frozen-source tests with
+original receipts 29/29; migration checks 9/9. Live Telegram/client/answer
+acceptance and paid calls remain `not_run`.
+See [integration evidence](reports/2026-09-15-help-menu-candidate.md).
+
+## 2026-09-15 — Owner disabled inline mode; verify the change
+
+**Reported by:** owner wrote «я выключил — проверь» after changing BotFather.
+
+**Verification / passed:** exactly one read-only `getMe` response at
+18:47:46.491 UTC confirmed `alexkrol_moderation_bot` has
+`supports_inline_queries=false`. This supersedes the enabled-setting snapshot
+and pending-disable recommendation below; the owner made the setting change.
+The integrator did not send messages, read logs, change the webhook/config,
+deploy, or call a model. The single key-only SSH master was closed.
+
+**Status: partial.** The setting correction is verified. A fresh client-side
+composer/ordinary-mention/answer check remains `not_run`; no claim of end-to-end
+acceptance is made from `getMe` alone.
+
+## 2026-09-15 — Telegram waits while composing an @bot question
+
+**Reported by:** the owner said Telegram appears to hang when entering
+`@alexkrol_moderation_bot что ты можешь?`; the screenshot shows the question
+still in the composer with a loading indicator. Source: Assistant task,
+owner message `01a0a646-defa-7892-92f3-37985b19d987`.
+
+**Diagnosis / passed:** read-only `getMe` at 18:19:42 UTC confirmed the expected
+bot has `supports_inline_queries=true` and `supports_guest_queries=false`.
+`getWebhookInfo` confirmed the expected Assistant URL, but its actual
+`allowed_updates` is only `message, edited_message`; pending count was zero
+and no last-error fields were present. The runtime has no `inline_query` or
+`answerInlineQuery` handler. This is a confirmed bot-setting/runtime mismatch:
+[Telegram inline mode](https://core.telegram.org/bots/inline) requests results
+from the composer before a chat message is sent. The currently selected update
+types exclude those requests. Exact runtime image/revision remains `5600afd`,
+healthy with zero restarts and unchanged 16:07:36 UTC start. All 23 core contract
+tests passed locally, including ordinary sent mentions and replies.
+
+**Limits / inconclusive:** no correlation ID or client trace identifies the
+pictured request, so its exact delivery and the client-side duration are not
+proven. Docker logs were not read: the HTTP layer does not log each unsupported
+update, and absence of such lines would not prove no arrival. Live reproduction,
+Telegram sends, provider calls and configuration changes were `not_run`.
+
+**Recommendation / status: proposed.** Obtain a separate exact approval to
+disable inline mode for this bot in BotFather, then verify `getMe` and the
+composer behavior; ordinary sent mentions, `/ask` and replies stay supported.
+This needs no application deployment or webhook-filter change. Capture the
+existing inline settings before any change for rollback. Implementing a real
+inline adapter instead is a separate product/privacy/quota decision, not an
+automatic webhook expansion. No production settings, code or data were changed
+by this diagnosis; its single key-only SSH master was closed.
+
 ## 2026-09-15 — Deploy the measured domain-routing candidate
 
 **Reported by:** after the comparison report, the owner wrote «деплой».

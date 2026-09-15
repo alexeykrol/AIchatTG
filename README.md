@@ -133,6 +133,22 @@ npm test
 npm run check:gatekeeper
 ```
 
+The default suite also runs the frozen September 15 routing experiment's
+offline checks against exact Git source `5600afd`, in a temporary isolated
+worktree. Current routing/provider regressions still run against current code.
+The historical source, gold and paid receipts are not rewritten when Help or
+other runtime files change. The pinned Git object must already exist locally;
+the checker never fetches, installs dependencies, reads a live credential or
+makes network calls. Six receipt-bound checks are explicitly skipped unless
+the original hash-validated local artifacts are supplied:
+
+```bash
+npm run test:routing-history -- --parent-dir /absolute/path/to/original-parent-artifacts
+```
+
+This optional command replays offline checks only; it never resumes the paid
+experiment. See [Help candidate and test isolation](docs/reports/2026-09-15-help-menu-candidate.md).
+
 ## Layout
 
 ```text

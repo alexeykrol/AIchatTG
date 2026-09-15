@@ -4,6 +4,14 @@
 
 ## Текущее состояние
 
+- **Локальный кандидат, lifecycle `prepared`:** menu-first Help из `f69cd84`
+  принят с восстановлением identity-grounding и синхронизацией текста подсказки.
+  Исторический routing suite проверяется на точном `5600afd`, текущие маршруты
+  и provider-boundary — на текущем коде. Кандидат ещё не запушен/не задеплоен.
+  `docs/reports/2026-09-15-help-menu-candidate.md`.
+- **Inline-setting:** владелец отключил inline в BotFather; `getMe`
+  подтвердил `supports_inline_queries=false` в 18:47:46 UTC. Проверка была
+  read-only; свежая проверка поля ввода/доставки ответа остаётся `not_run`.
 - **Production, lifecycle `deployed`:** `telegram-runtime` image `5600afd`
   (запуск 2026-09-15 16:07:36 UTC), healthy / restart 0; конфигурация, schema,
   mounts/routes сохранены. Moderator и Assistant покрывают 3 чата, знание и
@@ -84,6 +92,12 @@
 - Простой веб-интерфейс основных настроек не специфицирован.
 
 ## Следующий безопасный шаг
+
+Menu-first Help локально подготовлен и закоммичен: исходный перенос `74918c6`,
+review fixes `ab0352e`, test isolation `fb40fce`. Итог: 687 текущих проверок,
+29 исторических с квитанциями и 9 migration tests прошли. Публикация/деплой
+не выполнены; следующий release требует нового exact approval и live preflight.
+Не выдавать успех frozen test lane за новую платную или клиентскую приёмку.
 
 Деплой `5600afd` завершён и запушен;698 canonical tests passed,6 artifact-only
 checks отдельно passed,9 migration checks passed. 55 source-файлов совпали с

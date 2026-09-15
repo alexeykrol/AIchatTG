@@ -8,6 +8,13 @@ updated: 2026-09-15
 
 ## Next
 
+- [ ] HELP-1: локальный menu-first Help кандидат интегрирован, lifecycle
+      `prepared`; перед релизом нужны точный approval и release lease.
+      Список возможностей сохранён, identity-grounding восстановлен, prompt
+      и Help синхронизированы. Отчёт: `docs/reports/2026-09-15-help-menu-candidate.md`.
+- [ ] INLINE-1: отключение inline владельцем подтверждено через `getMe`
+      2026-09-15 18:47:46 UTC; проверить обычный @mention в клиенте отдельно.
+      Не включать inline или новые webhook update types без нового решения.
 - [x] RELEASE-3: `5600afd` deployed2026-09-15 16:07:36UTC;55-file source
       match, preserved config/schema/routes, healthy/restart0, rollback852a8d2.
       New live Telegram answer/menu acceptance not_run. Receipt:
