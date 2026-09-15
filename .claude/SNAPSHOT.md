@@ -4,6 +4,12 @@
 
 ## Текущее состояние
 
+- **Moderator menu, lifecycle `production-verified`:** в21:42:34UTC удалена
+  одна stale chat-scoped команда `/ask` у `@ai_akrolmoder_bot` в тестовом чате.
+  Один API delete,38reads,18-cell before/after passed; runtime335a35a и
+  Console82cb8c6 без изменений, healthy/restart0. Lease/master закрыты21:46:03UTC.
+  Клиентский refresh not_run; меню Assistant и HYGIENE-1 не затронуты. Receipt:
+  `docs/reports/2026-09-15-moderator-menu-cleanup.md`.
 - **Новая админка, lifecycle `production-verified`:** Console v3, image `82cb8c6`, запуск21:23:28UTC;
   шесть русских страниц, единое меню, versioned drafts настроек/Markdown,
   аналитика75 записанных вопросов (стоимость75 unknown, не ноль).

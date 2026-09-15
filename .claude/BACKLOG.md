@@ -8,6 +8,11 @@ updated: 2026-09-15
 
 ## Next
 
+- [x] MODERATOR-MENU-1: stale chat-scoped `/ask` removed from Moderator's
+      test-chat command menu at21:42:34UTC. Exact one-call cleanup,18-cell
+      before/after checks, unchanged app snapshots passed; lease/master closed.
+      Client refresh not_run; HYGIENE-1 remains separate. Receipt:
+      `docs/reports/2026-09-15-moderator-menu-cleanup.md`.
 - [x] CONSOLE-V3: русская панель `82cb8c6` выложена отдельно от Assistant;
       Settings/Markdown сохраняют только versioned drafts, не применяют их.
       Исправлена гонка выбора домена; 30Console tests,29source-file match,

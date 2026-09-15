@@ -19,6 +19,27 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Remove the Moderator's stale Assistant command in the test chat
+
+**Reported / requested:** the owner flagged the parasite Moderator menu and
+then instructed in task «Модератор»: «Если нет, то все сделай, задеплой,
+контроль, чтобы я тебя не подгонял.» The actual approval message
+`01a0a700-6469-7ab3-aad7-064d22650452` authorizes this narrow cleanup, not
+the separate broader menu work.
+
+**Diagnosis / fix:** `@ai_akrolmoder_bot` had a stale chat-scoped command
+`ask` / `вопрос ассистенту` in the test chat. This is Telegram menu metadata,
+not an application image defect. One exact `deleteMyCommands` removed that
+cell; before/after identity and 18-cell checks confirmed only this cell changed.
+
+**Status: deployed.** Lifecycle `production-verified`, 21:42:34 UTC; 38 reads,
+one successful deletion, no retry/rollback, eight offline safety tests passed.
+Runtime `335a35a` and Console `82cb8c6` remained healthy/restart0 with identical
+container/config snapshots. Lease/master closed at 21:46:03 UTC. Client refresh
+and unknown language/member scopes are `not_run`. No messages or other bot
+menus were changed. This does not close the separate command-plus-hint live
+acceptance gap. [Receipt](reports/2026-09-15-moderator-menu-cleanup.md).
+
 ## 2026-09-15 — Release the Russian Console v3 separately from Assistant
 
 **Reported / requested:** after the Assistant footer release the owner asked
