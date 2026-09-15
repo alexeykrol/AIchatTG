@@ -1,0 +1,22 @@
+{
+  "version": "assistant-standard-text-prices-v1",
+  "effectiveFrom": "2026-07-30T00:00:00Z",
+  "verifiedAt": "2026-09-15",
+  "unit": "USD per 1,000,000 text tokens",
+  "estimateBasis": "Internal version applies from 2026-07-30; official pages were checked on 2026-09-15 and do not establish historical vendor rates. Standard uncached input and output rates are used. Runtime receipts do not retain cached input, cache writes, or billing tier; these estimates are not invoices.",
+  "maxStandardInputTokens": 272000,
+  "models": [
+    {
+      "id": "gpt-5.6-terra",
+      "inputUsdPerMillion": 2,
+      "outputUsdPerMillion": 12,
+      "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "inputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 1.2,
+      "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+    }
+  ]
+}

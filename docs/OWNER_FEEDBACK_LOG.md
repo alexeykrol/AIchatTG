@@ -19,6 +19,33 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Edit domain Markdown and show Assistant question costs
+
+**Reported by:** the owner agreed with editable Assistant parameters and added:
+«у нас для нескольких доменов - база для ответа в MD файле - проверь и эти
+файлы тоже надо сделать редактируемыми. Для них отдельную вкладку. Плюс
+отдельная вкладка по аналитике, включая затраты на вопросы - средние, за
+день, за неделю и т.п.»
+
+**Diagnosis:** the current domain catalog binds two answer sources to local
+Markdown (`assistant-self.md`, `assistant-abuse.md`); the other four use signed
+lesson retrieval or snapshots. Existing durable Assistant answer receipts
+in normal runtime cover analyzer-enabled chats, so all-chat cost and invoice
+totals cannot be inferred from the available data. The old Console has no
+candidate editor or separate cost page.
+
+**Recommendation / implementation:** a local v2 candidate adds Settings,
+Domain knowledge and Analytics tabs. Markdown and setting saves create
+versioned, validated candidates without changing the Telegram runtime.
+Analytics reports known estimated spend and average only for fully priced
+recorded questions, separately exposing unknown cost and current coverage.
+See [candidate report](candidates/2026-09-15-operator-console-v2.md).
+
+**Status: partial.** The local Console candidate is `prepared`; it is not
+merged or live. All-chat usage, failed paid attempts and cached-token invoice
+cost remain `proposed` pending a metadata-only usage ledger. Production,
+Telegram messages and paid calls were `not_run`.
+
 ## 2026-09-15 — Add a clarification suggestion without rewriting the boundary reply
 
 **Reported by:** the owner asked to add a rephrasing suggestion, then explicitly

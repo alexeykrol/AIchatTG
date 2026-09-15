@@ -3,6 +3,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadOperatorConsoleConfig } from './config.mjs';
+import { createDomainCandidateStore, DomainCandidateError } from './domain-candidates.mjs';
+import { createSettingsCandidateStore, SettingsCandidateError } from './settings-candidates.mjs';
+import { assistantCostAnalytics } from './assistant-cost-analytics.mjs';
 import {
   legacyAssistantAnalytics,
   legacyAssistantConfig,
@@ -18,7 +21,37 @@ const PUBLIC = new Map([
   ['/moderation.html', readFileSync(fileURLToPath(new URL('../public/moderation.html', import.meta.url)), 'utf8')],
   ['/assistant.html', readFileSync(fileURLToPath(new URL('../public/assistant.html', import.meta.url)), 'utf8')],
   ['/eval.html', readFileSync(fileURLToPath(new URL('../public/eval.html', import.meta.url)), 'utf8')],
+  ['/settings-v2.html', readFileSync(fileURLToPath(new URL('../public/settings-v2.html', import.meta.url)), 'utf8')],
+  ['/domains.html', readFileSync(fileURLToPath(new URL('../public/domains.html', import.meta.url)), 'utf8')],
+  ['/analytics.html', readFileSync(fileURLToPath(new URL('../public/analytics.html', import.meta.url)), 'utf8')],
 ]);
+const V2_CSS = readFileSync(fileURLToPath(new URL('../public/console-v2.css', import.meta.url)), 'utf8');
+
+const MAX_CANDIDATE_BODY = 70_000;
+
+async function candidateBody(request) {
+  if (!/^application\/json(?:;\s*charset=utf-8)?$/iu.test(request.headers['content-type'] || '')
+    || request.headers['x-operator-intent'] !== 'candidate-draft'
+    || request.headers['sec-fetch-site'] === 'cross-site') {
+    throw new DomainCandidateError('candidate_request_invalid', 403);
+  }
+  if (request.headers.origin) {
+    let origin;
+    try { origin = new URL(request.headers.origin); } catch {
+      throw new DomainCandidateError('candidate_origin_invalid', 403);
+    }
+    if (origin.host !== request.headers.host) throw new DomainCandidateError('candidate_origin_invalid', 403);
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_CANDIDATE_BODY) throw new DomainCandidateError('candidate_body_too_large', 413);
+    chunks.push(chunk);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new DomainCandidateError('candidate_json_invalid', 400); }
+}
 
 function json(response, statusCode, value) {
   const body = JSON.stringify(value);
@@ -102,6 +135,11 @@ function apiResponse(config, path, searchParams) {
 
 export function createOperatorConsoleServer({ config, logger = console } = {}) {
   if (!config) throw new Error('operator console config is required');
+  const domains = createDomainCandidateStore({
+    domainIndexPath: config.domainIndexPath,
+    candidateRoot: config.candidateRoot ? `${config.candidateRoot}/domain-bundles` : null,
+  });
+  const settings = createSettingsCandidateStore(config);
   const authorize = (request, response) => {
     if (!config.token) {
       json(response, 404, { error: 'not_found' });
@@ -116,7 +154,7 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
     return true;
   };
 
-  return createServer((request, response) => {
+  return createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
       if (request.method === 'GET' && url.pathname === '/health') {
@@ -133,12 +171,42 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
         content(response, 200, 'text/html; charset=utf-8', PUBLIC.get(url.pathname));
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/console-v2.css') {
+        content(response, 200, 'text/css; charset=utf-8', V2_CSS);
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/auth/login') {
         redirect(response, url.searchParams.get('next') || '/moderation.html');
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/auth/logout') {
         redirect(response, url.searchParams.get('next') || '/moderation.html');
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/operator/settings') {
+        json(response, 200, settings.read());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/operator/analytics') {
+        json(response, 200, assistantCostAnalytics(config));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/operator/domains') {
+        json(response, 200, domains.list());
+        return;
+      }
+      const domainRead = /^\/api\/operator\/domains\/([a-z][a-z0-9-]*)$/u.exec(url.pathname);
+      if (request.method === 'GET' && domainRead) {
+        json(response, 200, domains.read(domainRead[1]));
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/api/operator/settings/candidates') {
+        json(response, 201, settings.save(await candidateBody(request)));
+        return;
+      }
+      const domainWrite = /^\/api\/operator\/domains\/([a-z][a-z0-9-]*)\/candidates$/u.exec(url.pathname);
+      if (request.method === 'POST' && domainWrite) {
+        json(response, 201, domains.save(domainWrite[1], await candidateBody(request)));
         return;
       }
       if (request.method === 'GET') {
@@ -155,6 +223,10 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
       }
       json(response, 404, { error: 'not_found' });
     } catch (error) {
+      if (error instanceof DomainCandidateError || error instanceof SettingsCandidateError) {
+        json(response, error.statusCode, { error: error.code });
+        return;
+      }
       logger.error?.('[operator-console] request failed', error?.message || 'unknown_error');
       json(response, 503, { error: 'operator_console_unavailable' });
     }

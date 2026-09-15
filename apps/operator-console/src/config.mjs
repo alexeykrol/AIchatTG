@@ -32,6 +32,10 @@ function nonNegativeInteger(env, name, fallback) {
   return value;
 }
 
+function csv(env, name) {
+  return String(env[name] || '').split(',').map((value) => value.trim()).filter(Boolean);
+}
+
 export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd() } = {}) {
   return Object.freeze({
     port: port(env),
@@ -40,6 +44,11 @@ export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd
     runtimeDatabasePath: resolve(cwd, String(
       env.OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.sqlite',
     )),
+    domainIndexPath: resolve(cwd, String(
+      env.OPERATOR_CONSOLE_DOMAIN_INDEX_PATH || 'apps/telegram-runtime/src/domains/INDEX.md',
+    )),
+    candidateRoot: String(env.OPERATOR_CONSOLE_CANDIDATE_ROOT || '').trim()
+      ? resolve(cwd, String(env.OPERATOR_CONSOLE_CANDIDATE_ROOT).trim()) : null,
     safetyPromptPath: resolve(cwd, String(
       env.OPERATOR_CONSOLE_SAFETY_PROMPT_PATH
         || 'apps/telegram-runtime/src/safety-artifacts/moderation-tg-v3.md',
@@ -63,6 +72,9 @@ export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd
     assistantPolicy: Object.freeze({
       cooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20),
       dailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20),
+      syntheticDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER', 200),
+      dialogueTurnLimit: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT', 3),
+      chatIds: csv(env, 'TELEGRAM_RUNTIME_ASSISTANT_CHAT_IDS'),
       knowledgeEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED', false),
     }),
   });

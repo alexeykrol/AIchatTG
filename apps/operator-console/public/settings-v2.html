@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistant settings · AIchatTG</title>
+  <link rel="stylesheet" href="/console-v2.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">AIchatTG Operator Console</p><h1>Assistant settings</h1>
+      <p class="subhead">Prepare a versioned settings change and review its effect before a separate release applies it.</p></div>
+    <span class="badge">Candidate editor</span>
+  </div>
+  <nav class="nav" aria-label="Operator pages">
+    <a href="/moderation.html">Moderation</a><a class="active" href="/settings-v2.html">Settings</a>
+    <a href="/domains.html">Domain knowledge</a><a href="/analytics.html">Analytics</a>
+    <a href="/eval.html">Tests</a><a href="/assistant.html">Legacy assistant view</a>
+  </nav>
+  <div id="notice" class="status">Loading settings…</div>
+  <div class="grid">
+    <section class="card wide">
+      <h2>Usage and answer limits</h2>
+      <p>These values are a candidate for the Assistant. The running bot keeps its released settings until an approved release.</p>
+      <div class="fieldrow">
+        <div class="field"><label for="cooldownSec">Pause between answers (seconds)</label><input id="cooldownSec" type="number" min="0" max="86400" step="1"><small>Per user. The current runtime default is 20 seconds.</small></div>
+        <div class="field"><label for="dailyPerUser">Daily answers per user</label><input id="dailyPerUser" type="number" min="0" max="10000" step="1"><small>Human-use limit. A higher value can increase model spending.</small></div>
+        <div class="field"><label for="syntheticDailyPerUser">Daily synthetic-test answers</label><input id="syntheticDailyPerUser" type="number" min="0" max="10000" step="1"><small>Separate from the human limit when synthetic testing is enabled.</small></div>
+        <div class="field"><label for="answerMaxTokens">Maximum completion tokens</label><input id="answerMaxTokens" type="number" min="1" max="4096" step="1"><small>Includes reasoning tokens; this is not a visible-text length.</small></div>
+        <div class="field"><label for="dialogueTurnLimit">Previous dialogue turns</label><input id="dialogueTurnLimit" type="number" min="1" max="100" step="1"><small>More turns can help follow-up answers and raise input token use.</small></div>
+      </div>
+    </section>
+    <section class="card wide">
+      <h2>Pause in approved chats</h2>
+      <p>Only chats already assigned to the Assistant can be selected. A per-chat pause requires a separate runtime change before this candidate can be applied.</p>
+      <div id="chats"></div>
+    </section>
+    <section class="card wide">
+      <h2>Change review</h2>
+      <p>Compare this draft with the released snapshot before saving. This table does not apply changes to the bot.</p>
+      <div id="diff"></div>
+    </section>
+    <section class="card wide">
+      <div class="actions"><button id="save" class="primary" disabled>Save new candidate</button><button id="reload" class="secondary">Reload released values</button><span id="revision" class="micro mono"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+  const fields = ['cooldownSec', 'dailyPerUser', 'syntheticDailyPerUser', 'answerMaxTokens', 'dialogueTurnLimit'];
+  const labels = {
+    cooldownSec: 'Pause between answers', dailyPerUser: 'Daily answers per user',
+    syntheticDailyPerUser: 'Daily synthetic-test answers',
+    answerMaxTokens: 'Maximum completion tokens', dialogueTurnLimit: 'Previous dialogue turns',
+    pausedChatIds: 'Paused Assistant chats',
+  };
+  let state;
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  async function api(path, options) {
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+    return data;
+  }
+  function fill(values) {
+    for (const key of fields) document.getElementById(key).value = values[key] ?? '';
+    const chats = document.getElementById('chats');
+    chats.replaceChildren();
+    for (const id of state.allowedChatIds) {
+      const row = document.createElement('label'); row.className = 'check';
+      const box = document.createElement('input'); box.type = 'checkbox'; box.value = id;
+      box.checked = (values.pausedChatIds || []).includes(id);
+      const text = document.createElement('span'); text.textContent = 'Pause Assistant in chat ' + id;
+      row.append(box, text); chats.append(row);
+    }
+    if (!state.allowedChatIds.length) chats.textContent = 'No approved chat IDs are available to this Console.';
+    const locked = !state.editingEnabled || state.stale;
+    for (const key of fields) document.getElementById(key).disabled = locked;
+    chats.querySelectorAll('input').forEach((box) => { box.disabled = locked; });
+    document.getElementById('save').disabled = locked;
+    review();
+  }
+  function draftValues() {
+    const values = { pausedChatIds: [...document.querySelectorAll('#chats input:checked')]
+      .map((box) => box.value).sort() };
+    for (const key of fields) values[key] = Number(document.getElementById(key).value);
+    return values;
+  }
+  function display(value) {
+    return Array.isArray(value) ? (value.length ? value.join(', ') : 'None') : String(value);
+  }
+  function review() {
+    if (!state) return;
+    const changes = Object.keys(labels).filter((key) =>
+      display(state.released[key]) !== display(draftValues()[key]));
+    const node = document.getElementById('diff'); node.replaceChildren();
+    if (!changes.length) { node.textContent = 'No changes from released values.'; return; }
+    const table = document.createElement('table'); table.className = 'review-table';
+    const head = document.createElement('thead'); const header = document.createElement('tr');
+    for (const text of ['Setting', 'Released', 'Draft']) {
+      const cell = document.createElement('th'); cell.textContent = text; header.append(cell);
+    }
+    head.append(header); table.append(head);
+    const body = document.createElement('tbody');
+    for (const key of changes) {
+      const row = document.createElement('tr');
+      for (const text of [labels[key], display(state.released[key]), display(draftValues()[key])]) {
+        const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(body); node.append(table);
+  }
+  async function load() {
+    try {
+      state = await api('/api/operator/settings');
+      fill(state.candidate || state.released);
+      document.getElementById('revision').textContent = state.candidateDigest
+        ? 'Candidate ' + state.candidateDigest.slice(0, 12) + ' · ' + state.candidateCreatedAt
+        : 'Released snapshot ' + state.sourceDigest.slice(0, 12);
+      say(state.stale ? 'The released settings changed after this candidate. Start a new review before saving.'
+        : state.editingEnabled ? 'Candidate editing is available. Saving creates a new revision and does not apply it to the bot.'
+        : 'Candidate storage is not configured. Settings are available for review only.', state.stale ? 'warn' : '');
+    } catch (error) { say('Settings unavailable: ' + error.message, 'error'); }
+  }
+  document.getElementById('reload').addEventListener('click', () => { if (state) fill(state.released); });
+  document.querySelector('.grid').addEventListener('input', review);
+  document.querySelector('.grid').addEventListener('change', review);
+  document.getElementById('save').addEventListener('click', async () => {
+    if (!state) return;
+    const values = draftValues();
+    try {
+      await api('/api/operator/settings/candidates', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-operator-intent': 'candidate-draft' },
+        body: JSON.stringify({ values, baseDigest: state.baseDigest }),
+      });
+      await load(); say('A new settings candidate was saved. The running bot was not changed.', 'good');
+    } catch (error) { say('Candidate not saved: ' + error.message, 'error'); }
+  });
+  load();
+</script>
+</body>
+</html>
