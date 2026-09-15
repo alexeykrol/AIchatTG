@@ -8,6 +8,10 @@ updated: 2026-09-15
 
 ## Next
 
+- [ ] CONSOLE-V311: candidate `5e55101` lifecycle `pushed`, исправлены
+      склонение и pricing-подпись;33Console tests passed. Для production
+      нужны точное PO-разрешение/новая lease/fresh preflight. На сервере3.1.0.
+      `docs/reports/2026-09-15-console-v311-candidate.md`.
 - [x] CONSOLE-V31: Console3.1.0 `eb0f7fe` production-verified, семь общих
       version/date/time headers + русская Помощь, лишние плашки убраны.
       Timestamp сравнен с реальным start (delta0.562637s); runtime/drafts сохранены.

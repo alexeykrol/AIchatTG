@@ -32,10 +32,13 @@ without the technical identifier. Pricing JSON, computations and API data are
 unchanged. Missing dates and costs remain unknown. Two tests execute the actual
 inline browser script and check formatting, data preservation and read-only use.
 
-**Status: prepared.** Current production remains Console3.1.0 (`eb0f7fe`).
+**Status: prepared.** Candidate lifecycle `pushed`, exact `5e55101`; root779passed/
+5fixture-skips/0failed, Console33/33, independent review and source guard passed.
+Current production remains Console3.1.0 (`eb0f7fe`).
 Its lease and SSH master are closed; no new production action is authorized
 by that consumed lease. The separate3.1.1 candidate needs exact release authority,
 fresh preflight and its own lease before changing the live Console.
+[Exact decision and evidence](reports/2026-09-15-console-v311-candidate.md).
 
 ## 2026-09-15 — Remove the Moderator's stale Assistant command in the test chat
 

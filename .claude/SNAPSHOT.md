@@ -4,6 +4,12 @@
 
 ## Текущее состояние
 
+- **Ожидает точного production-разрешения, lifecycle `pushed`:** Console3.1.1
+  candidate `5e55101` исправляет только склонение «чат» и человекочитаемые
+  тарифные подписи/дату в Analytics. Root779passed/5fixture-skips/0failed;
+  Console33/33/source guard/review passed. На сервере остаётся3.1.0 `eb0f7fe`.
+  Активной lease/SSH нет; main не равен deployed source. Decision:
+  `docs/reports/2026-09-15-console-v311-candidate.md`.
 - **Админка 3.1.0, lifecycle `production-verified`:** image `eb0f7fe`, релиз
   2026-09-15T22:04:32Z, реальный старт22:04:32.562637294Z (delta0.562637s).
   Семь вкладок с общей версией/датой/временем и русской Помощью, лишние
