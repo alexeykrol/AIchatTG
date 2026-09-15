@@ -6,6 +6,13 @@ This report reconstructs the recoverable Product Owner instruction/fix history
 and compares it with the repository at the candidate prepared on 2026-09-14.
 It separates historical proof, local candidate state and production evidence.
 
+**Closure — 2026-09-15 UTC:** candidate `049cc22` was committed, pushed and
+production-verified for Telegram runtime under the confirmed single-service
+lease. Local-only labels below describe the original audit checkpoint;
+self-description, hint cleanup, deadlines, dialogue budgeting and Compose
+passthrough are now deployed. Open product/architecture items remain open.
+See the [deployment receipt](2026-09-15-runtime-049cc22-deployment.md).
+
 Statuses: `passed`, `failed`, `not_run`, `inconclusive`; implementation state:
 `done`, `partial`, `superseded`, `proposed`.
 

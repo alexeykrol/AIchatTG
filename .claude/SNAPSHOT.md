@@ -1,27 +1,28 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-14
+**Last Updated:** 2026-09-15 UTC (2026-09-14 local)
 
 ## Текущее состояние
 
-- **Production-verified:** `telegram-runtime` image `f51753f` (`0.5.1`,
-  2026-09-14 21:46 UTC); Moderator и Assistant покрывают 3 чата, знание и
+- **Production-verified:** `telegram-runtime` image `049cc22` (запуск
+  2026-09-15 00:20:48 UTC); Moderator и Assistant покрывают 3 чата, знание и
   retrieval включены, rewrite выключен. Operator Console не менялась.
 - **Не production:** Gatekeeper. Код, тесты и draft-сценарий существуют, но
   контейнер/маршрут не активированы; Product Owner copy, две HTTPS-ссылки и
   placement в общей консоли остаются решениями владельца.
-- **Подготовленный кандидат (не production-verified):** self-description
+- **Вошло в проверенный production `049cc22`:** self-description
   и chat-hygiene из `2c02c56`, конечные deadline Telegram/provider, полный
   Compose passthrough rewrite, единый configurable dialogue limit, мягкая
   обработка отказа удаления hint, согласованные документы и безопасные
-  Claude/Codex framework-процедуры. До деплоя это не production evidence.
+  Claude/Codex framework-процедуры в репозитории. Receipt:
+  `docs/reports/2026-09-15-runtime-049cc22-deployment.md`.
 
-## Исправлено локально
+## Исправлено и проверено
 
 - Assistant profile/help согласованы: reply, `/ask`, `@mention`.
 - `TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT` теперь единственный cap по
-  числу ходов; скрытый `.slice(-3)` удалён. Независимый 50k serialized-size
-  budget не даёт расширенному окну нарушить provider input contract.
+  числу ходов; скрытый `.slice(-3)` удалён. После 50k-проекции диалога весь
+  input router/analyzer/answer ограничен 60k с сохранением самых новых ходов.
 - Telegram API: deadline 15 s по умолчанию. Provider: 45 s. Timeout остаётся
   неоднозначным результатом и не ретраится автоматически.
 - Compose передаёт rewrite model/reasoning и оба timeout-параметра.
@@ -46,6 +47,6 @@
 
 ## Следующий безопасный шаг
 
-Полный локальный test matrix и фиксация candidate SHA. Затем read-only
-production preflight и точный release lease для одного сервиса `aichattg-telegram-runtime`:
-candidate SHA, current SHA, rollback, scope, expiry, verification и stop rules.
+Деплой `049cc22` завершён; health 200, healthy, restart 0, 50 source-файлов
+совпали с Git-архивом. Rollback `f51753f` сохранён. Дальнейшую продуктовую
+работу выбирать из BACKLOG; текущий одноразовый release lease использован.

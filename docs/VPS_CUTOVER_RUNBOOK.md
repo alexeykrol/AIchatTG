@@ -173,9 +173,11 @@ exact variable change.
 6. Rollback: restore `runtime.env.pre-YYYYMMDD` over `runtime.env` and repeat
    steps 3–5.
 
-Known gap: the `org.opencontainers.image.revision` label is empty in
-production builds, so the deployed source SHA is known from the image tag and
-release directory only, not from the image metadata.
+Historical gap: earlier builds had an empty `org.opencontainers.image.revision`
+label. The `049cc22` deployment supplied `AICHATTG_SOURCE_SHA` to Compose build
+and verified the populated revision label against the exact candidate. Keep
+that explicit variable in future build/up commands; the preserved private env
+file may still contain the previous image's source SHA.
 
 ## Gatekeeper configuration gate before route activation
 

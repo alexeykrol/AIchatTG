@@ -3,7 +3,12 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
-## [Unreleased] — Runtime deadlines, truthful state and framework safety
+## [049cc22] — 2026-09-15 UTC — Runtime deadlines and assistant fixes
+
+Production-verified at image `049cc22`; runtime started at 00:20:48 UTC.
+Previous image `f51753f` is retained for rollback. Runtime environment values,
+routes and mounts were preserved; Operator Console was not recreated. See the
+[deployment receipt](docs/reports/2026-09-15-runtime-049cc22-deployment.md).
 
 ### Fixed
 
@@ -14,7 +19,11 @@ semantic versioning for repository-level architecture releases.
   timeout settings into `telegram-runtime`.
 - Removed the hidden three-turn prompt projection cap; the configured
   `TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT` is the turn-count limit,
-  with an independent 50k serialized-size budget protecting provider input.
+  with a 50k dialogue projection and a final 60k limit on the complete
+  router/analyzer/answer input, retaining the newest complete Q/A turns.
+- Self-description now runs before knowledge retrieval even when knowledge is
+  enabled. The bot's temporary empty-`/ask` hint is removed after its reply is
+  answered; real prior answers are never cleanup targets (`2c02c56`).
 - A Telegram refusal to delete the temporary empty-`/ask` hint is logged as a
   soft cleanup failure and cannot turn an already delivered answer into a
   failed request.
@@ -26,7 +35,8 @@ semantic versioning for repository-level architecture releases.
 ### Documentation
 
 - Reconciled README, knowledge enablement, snapshot, backlog and governance
-  with production image `f51753f` and the current one-root-integrator model.
+  with the current one-root-integrator model; recorded the verified transition
+  from production image `f51753f` to `049cc22`.
 - Added a source-backed Product Owner instruction reconciliation report and
   made unresolved, partial, superseded and inconclusive outcomes explicit.
 

@@ -8,9 +8,9 @@ updated: 2026-09-14
 
 ## Next
 
-- [ ] RELEASE-1: завершить lifecycle текущего кандидата: зелёный test matrix и
-      pushed candidate SHA зафиксировать до точной release lease, deploy и
-      production verification.
+- [x] RELEASE-1: `049cc22` production-verified 2026-09-15 UTC; полный test
+      matrix, commit/push, точный lease и deploy завершены. Receipt:
+      `docs/reports/2026-09-15-runtime-049cc22-deployment.md`.
 - [ ] RISK-1: спроектировать durable webhook inbox + per-chat worker recovery.
       Немедленный HTTP 200 разрешён только после надёжной записи валидированного
       update; in-memory очередь может потерять update при crash после ACK.

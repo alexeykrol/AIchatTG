@@ -69,11 +69,12 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current production image: `f51753f`** (deployed 2026-09-14 21:46 UTC,
-release `0.5.1`). A reply to the assistant's own message is an invocation, and
-an empty `/ask` opens a forced reply flow. The later local self-description and
-hint-cleanup fixes have not yet been production-verified; see `CHANGELOG.md`
-and `.claude/SNAPSHOT.md` for the candidate state.
+**Current production image: `049cc22`** (started 2026-09-15 00:20:48 UTC;
+production-verified). Includes deterministic self-description, hint cleanup,
+15s Telegram / 45s provider deadlines and complete-input dialogue budgeting.
+Both public webhook paths retain their authentication guard; the container is
+healthy with zero restarts. Rollback image `f51753f` is retained. See the
+[deployment receipt](docs/reports/2026-09-15-runtime-049cc22-deployment.md).
 
 Two local assistant instances that can hold a recorded conversation with each
 other (wave 3) remain a lab tool in scripts, not on the live answer path.

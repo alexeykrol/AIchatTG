@@ -38,8 +38,10 @@ converting historical evidence into production evidence; repair runtime,
 Compose, tests, framework rules and current-state docs. Full matrix:
 `docs/reports/2026-09-14-owner-instruction-reconciliation.md`.
 
-**Status:** prepared; production verification pending an exact-SHA release
-lease.
+**Status:** deployed for the bounded runtime fixes in `049cc22` at
+2026-09-15 00:20:48 UTC; local framework/docs fixes committed and pushed.
+Product/architecture proposals remain open in the reconciliation matrix.
+Evidence: `docs/reports/2026-09-15-runtime-049cc22-deployment.md`.
 
 ## 2026-09-14 — Dialogs must not expire
 
@@ -97,7 +99,8 @@ the group, which was not verified as of this entry. **Open question for the
 owner:** does the assistant bot have admin/delete rights in the covered
 groups?
 
-**Status:** fixed (hint half only) · not yet deployed.
+**Status:** partial; hint cleanup deployed in `049cc22` on 2026-09-15 UTC.
+User-command cleanup still awaits verified bot permissions and implementation.
 
 ## 2026-09-14 — "Что ты можешь?" answered with the wrong boundary text
 
@@ -118,7 +121,8 @@ before the knowledge-enabled branch, so it answers regardless of the flag.
 Implemented with a regression test asserting the model is never called for
 this class of question. Commit `2c02c56`.
 
-**Status:** fixed · not yet deployed.
+**Status:** deployed in `049cc22` on 2026-09-15 UTC; deterministic
+self-description also passed an offline check inside the deployed container.
 
 ## 2026-09-14 — No answer to a follow-up message after an empty `/ask`
 
