@@ -93,14 +93,13 @@ export const ASSISTANT_NOT_IN_MATERIALS_TEXT = [
 
 /**
  * The second abstention, for a question outside the covered domain. It is
- * deliberately different from the not-in-materials text: "переформулируйте"
- * is honest advice for a hole inside the domain, but for an uncovered topic it
- * sends the user into the same wall again (a live run proved it: three
- * rephrasings, three identical refusals). This reply names the boundary warmly
- * and points somewhere that can actually help.
+ * deliberately different from the not-in-materials text: it names the boundary
+ * warmly, points somewhere that can actually help, and offers one bounded
+ * retry only when the person can add a course topic, lesson or task.
  */
 export const ASSISTANT_OUT_OF_COVERAGE_TEXT = [
   'Хороший вопрос, но эта тема за пределами курса, и отвечать на неё я не уполномочен.',
+  'Возможно, вам стоит сформулировать вопрос иначе: назовите тему, урок или задачу — тогда я смогу попробовать найти ответ.',
   'Такой вопрос лучше задать универсальному чату — ChatGPT или Claude — или профильному консультанту.',
   'А со всем, что касается курса, помогу с радостью: материал уроков, организация обучения,',
   'выбор курса и подойдёт ли он именно вам.',
