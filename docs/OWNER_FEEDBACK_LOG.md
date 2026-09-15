@@ -19,6 +19,69 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Implement and release the restored version footer
+
+**Requested:** «Исправь, закомить, запуш и задеплой это» after the version/footer
+audit below. The integrator announced continuation of the distinct Assistant
+component line as `2.4.37`, after historical candidate `2.4.36`; project and npm
+scaffold numbers are not reused as public component versions.
+
+**Implementation:** canonical release JSON (`2.4.37`, `2026-09-15`) supplies
+«Версия 2.4.37 от 15.09.2026». Every existing Assistant send path supplies the
+code-owned footer; Telegram appends it after rendering, once on the final part,
+reserving space and preserving emoji, plain fallback, forceReply and delivery
+fences. No new replies are added to previously silent exits. Approved body
+copy remains unchanged; bounded model memory stays bare while durable answer
+receipts and local visible transcripts retain the logical footer.
+
+**Regression prevention:** Codex/Claude instructions and the runbook share the
+metadata source and release gate. The static Git checker validates version/date
+and rejects Assistant-affecting changes without a higher component version
+against production. A missing historical baseline is explicitly bootstrap.
+Current dual-dialogue tests now account for their existing whitespace
+normalization with multiline replies; raw ledger/receipt checks remain intact.
+Historical frozen sources/gold/paid artifacts were not modified.
+
+**Status: fixed.** Local candidate, lifecycle `prepared`. Root tests passed
+758/758 (including 61 release-guard checks), explicit historical receipt lane
+29/29, migration safety 9/9, scenario/isolation and independent review passed.
+Commit/push/deploy are requested; exact release preflight and production
+verification are pending. New paid and Telegram acceptance are `not_run`.
+
+## 2026-09-15 — Restore the Assistant version number and release footer
+
+**Reported by:** after receiving a Git SHA instead of a version number, the
+owner reminded the integrator: «в конце каждого ответа внизу писать № версии
+и дату релиза». This is a previously implemented behavior, not a new feature.
+
+**Diagnosis / passed:** historical News source `0a818c5d` contains Assistant
+component version `2.4.35` and the code-owned line «Версия 2.4.35 от 01.08.2026»
+in `news-digest-pipeline/src/pro/moderation/assistant.js:349`; its
+`appendAssistantUsageHint` appends the footer once and reserves Telegram space.
+Accepted continuation source `ef1c6ea` has `2.4.36`, timestamp
+`02.08.2026 12:46 PDT` and explicit footer regressions. That historical
+candidate is not proof of a current or former production deployment.
+Archived News task evidence also records a footer discrepancy audit and final
+response-path tests. The original direct wording discussion was not located
+in the bounded transcript search; the prior implementation is verified in Git.
+
+Current deployed source `0b54148` has no Assistant release metadata or footer:
+`sendAssistantTurn` passes `answer.text.trim()` directly to Telegram. The last
+numbered project changelog entry is `0.5.1` (2026-09-14); subsequent deployments
+were recorded only by SHA. The runtime package still says `0.1.0`, unchanged
+since its initial scaffolding, and is not the Assistant's public release number.
+The integrator's prior answer incorrectly substituted a Git identity for the
+requested version number. A new number must not be invented retroactively.
+
+**Recommendation / status: proposed.** Restore a distinct, canonical Assistant
+version/date source and a deterministic bottom-of-answer footer across reply
+paths, preserving approved answer bodies, Telegram length limits and clean
+dialogue memory. Add release checks for version/date advancement and exact
+footer delivery; settle the component numbering continuity explicitly rather
+than conflating historical `2.4.x`, project `0.5.x` and npm scaffold versions.
+This turn changes only the feedback log and backlog: code/fix/deployment,
+remote access and paid/Telegram calls are `not_run`.
+
 ## 2026-09-15 — Deploy the owner's exact three-paragraph boundary response
 
 **Reported by:** the owner supplied a replacement «точно, без редакции»

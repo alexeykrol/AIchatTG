@@ -116,7 +116,8 @@ export function createRecordingTelegram() {
     sent,
     async sendMessage(input) {
       nextMessageId += 1;
-      sent.push({ ...input, messageId: String(nextMessageId) });
+      sent.push({ ...input, text: input.footer ? `${input.text}\n\n${input.footer}` : input.text,
+        messageId: String(nextMessageId) });
       return { ok: true, data: { message_id: nextMessageId } };
     },
   };

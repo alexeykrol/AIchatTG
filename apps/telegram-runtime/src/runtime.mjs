@@ -24,6 +24,7 @@ import {
   providerCallUsage,
 } from './provider-adapter.mjs';
 import { assistantDialogue } from './assistant-dialogue.mjs';
+import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from './assistant-release.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
 import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainDecision, selectDomainRoutes } from './assistant-domain-routing.mjs';
@@ -1120,7 +1121,7 @@ export function createTelegramRuntime({
     // рендер не нужен и добавил бы класс ошибок на ровном месте.
     const transport = await assistantTelegram.sendMessage({
       chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
-      markup, forceReply,
+      markup, forceReply, footer: ASSISTANT_RELEASE_LINE,
     });
     // Деградация доставки не отменяет квитанцию: ответ дошёл, просто не целиком
     // или без оформления, а повтор целого ответа задвоил бы уже доставленное.
@@ -1145,7 +1146,7 @@ export function createTelegramRuntime({
       // (`persist: false`) в стенограмму не попадает, потому что вопроса за ним
       // нет и судить там нечего.
       recordAssistantAnswerRecord({
-        eventId, question, text: answer.text.trim(), route, knowledge,
+        eventId, question, text: assistantReleaseText(answer.text.trim()), route, knowledge,
         modelId: answer.modelId || null, transport,
         // Цена ответа берётся из квитанции провайдера. У детерминированного
         // текста (граница, воздержание, служебный ответ) квитанции нет —

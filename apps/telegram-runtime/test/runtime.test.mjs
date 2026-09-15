@@ -15,6 +15,8 @@ import { createKnowledgeAdapter } from '../src/knowledge-adapter.mjs';
 import { createProviderAdapter, ProviderRequestError, ProviderUnavailableError } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramRuntimeHttpServer } from '../src/http-server.mjs';
+import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
+import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from '../src/assistant-release.mjs';
 
 function config(overrides = {}) {
   return {
@@ -127,6 +129,66 @@ function enabledProviderConfig(overrides = {}) {
     ...overrides,
   };
 }
+
+test('every delivered Assistant path carries the release footer but dialogue memory stays bare', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-release-footer-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db);
+  const actions = [];
+  const wire = [];
+  const provider = fakeLlm();
+  const runtimeConfig = config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0,
+    assistantDailyPerUser: 100, assistantDialogueTurnLimit: 20, assistantDialogueTtlSec: 604800 });
+  const runtime = createTelegramRuntime({ config: runtimeConfig, store, provider,
+    knowledge: availableKnowledge(), durableAnswerReceipts: true, ...adapters(actions),
+    assistantTelegram: createTelegramAdapter({ botToken: 'T', fetchFn: async (_url, init) => {
+      wire.push(JSON.parse(init.body));
+      return { ok: true, async json() { return { ok: true, result: { message_id: 900 + wire.length } }; } };
+    } }),
+  });
+  const ask = async (id, text) => {
+    await runtime.handleUpdate('moderator', update(id, id, text));
+    return runtime.handleUpdate('assistant', update(id + 1, id, text));
+  };
+  try {
+    assert.equal((await ask(10, '/help')).command, 'help');
+    assert.equal((await ask(20, '/ai старый вопрос')).command, 'retired');
+    assert.equal((await ask(30, '/ask')).command, 'ask_empty');
+    assert.deepEqual(wire.at(-1).reply_markup, { force_reply: true, selective: true });
+    assert.equal(wire.at(-1).text, assistantReleaseText(ASSISTANT_EMPTY_ASK_TEXT));
+    assert.equal(store.recentDialogue('-100', '7', { limit: 20 }).length, 0);
+
+    runtimeConfig.assistantKnowledgeEnabled = false;
+    assert.equal((await ask(40, '/ask что ты можешь')).kind, 'answered');
+    runtimeConfig.assistantKnowledgeEnabled = true;
+    assert.equal((await ask(50, '/ask что такое агент')).kind, 'answered');
+    assert.equal(wire.at(-1).parse_mode, 'HTML');
+    const count = wire.length;
+    await runtime.handleUpdate('assistant', update(51, 50, '/ask что такое агент'));
+    assert.equal(wire.length, count, 'replayed update never sends another footer');
+
+    const route = provider.routeAssistant;
+    provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
+    assert.equal((await ask(60, '/ask рецепт борща')).abstained, true);
+    assert.equal(wire.at(-1).text, assistantReleaseText(ASSISTANT_OUT_OF_COVERAGE_TEXT));
+    provider.routeAssistant = route;
+    provider.answer = async () => { throw new ProviderRequestError('provider_request_invalid'); };
+    assert.equal((await ask(70, '/ask что такое агент')).degraded, true);
+    assert.match(wire.at(-1).text, /материалы/iu);
+    for (const call of wire) {
+      assert.ok(call.text.endsWith(`\n\n${ASSISTANT_RELEASE_LINE}`));
+      assert.equal(call.text.split(ASSISTANT_RELEASE_LINE).length, 2);
+    }
+    assert.equal(wire.length, 7);
+    const history = store.recentDialogue('-100', '7', { limit: 20 });
+    assert.equal(history.length, 3);
+    assert.ok(history.every(turn => !turn.answer.includes(ASSISTANT_RELEASE_LINE)));
+    const records = store.listAssistantAnswers();
+    assert.equal(records.length, 3);
+    assert.ok(records.every(row => row.answer.endsWith(ASSISTANT_RELEASE_LINE)));
+    assert.ok(actions.every(([kind]) => kind !== 'warn'), 'no new Moderator message');
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
 
 test('default configuration does not plan Telegram side effects or polling', () => {
   const loaded = loadRuntimeConfig({}, { cwd: '/tmp/aichattg-test' });

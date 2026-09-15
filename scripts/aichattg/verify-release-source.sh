@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 || ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "usage: $0 <exact-40-character-git-sha>" >&2
+if [[ $# -lt 1 || $# -gt 2 || ! "$1" =~ ^[0-9a-f]{40}$ || ( $# -eq 2 && ! "$2" =~ ^[0-9a-f]{40}$ ) ]]; then
+  echo "usage: $0 <exact-40-character-git-sha> [<previous-production-git-sha>]" >&2
   exit 64
 fi
 
@@ -22,4 +22,9 @@ fi
 
 git -C "$repo_root" diff --check
 "$repo_root/scripts/aichattg/assert-isolation.sh"
+release_args=(--source "$expected_sha")
+if [[ $# -eq 2 ]]; then
+  release_args+=(--previous "$2")
+fi
+node "$repo_root/scripts/aichattg/verify-assistant-release.mjs" "${release_args[@]}"
 echo "release source: passed ($actual_sha)"

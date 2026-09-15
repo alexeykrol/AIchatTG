@@ -2,6 +2,7 @@ import {
   isMarkupParseError,
   plainTextFromMarkdown,
   splitForTelegram,
+  TELEGRAM_MESSAGE_LIMIT,
   telegramHtmlFromMarkdown,
 } from '@aichattg/telegram-core';
 
@@ -61,24 +62,39 @@ export function createTelegramAdapter({
    *    сообщениями: цепочка реплаев на собственные сообщения читается как спам.
    * Квитанция берётся у ПЕРВОЙ части: именно её id — ответ на вопрос.
    */
-  async function sendRendered({ chatId, text, replyToMessageId }) {
-    const parts = splitForTelegram(text);
+  async function sendRendered({ chatId, text, replyToMessageId, markup = true, forceReply = false, footer = '' }) {
+    if (typeof footer !== 'string' || footer.length > 256 || /[\r\n]/u.test(footer)) {
+      throw new Error('Telegram footer must be one line of at most 256 characters');
+    }
+    const suffix = footer ? `\n\n${footer}` : '';
+    // Reserve the complete footer before splitting, then append it AFTER
+    // Markdown rendering. Neither version/date nor Markdown fences can split it.
+    const parts = splitForTelegram(text, { limit: TELEGRAM_MESSAGE_LIMIT - suffix.length - (footer ? 2 : 0) });
+    // A hard UTF-16 split must not divide an emoji. Two reserved code units
+    // above leave room when moving the high surrogate into the next part.
+    if (footer) for (let i = 0; i < parts.length - 1; i++) {
+      if (/[\uD800-\uDBFF]$/u.test(parts[i]) && /^[\uDC00-\uDFFF]/u.test(parts[i + 1])) {
+        parts[i + 1] = parts[i].slice(-1) + parts[i + 1];
+        parts[i] = parts[i].slice(0, -1);
+      }
+    }
     if (!parts.length) return { ok: false, error: 'empty_message' };
     let first = null;
     for (const [index, part] of parts.entries()) {
       const replyTo = index === 0 ? replyToMessageId : undefined;
-      const html = telegramHtmlFromMarkdown(part);
+      const tail = index === parts.length - 1 ? suffix : '';
+      const htmlTail = tail.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
       let result = await call('sendMessage', {
         chat_id: chatId,
-        text: html,
-        parse_mode: 'HTML',
+        text: markup ? telegramHtmlFromMarkdown(part) + htmlTail : part + tail,
+        ...(markup ? { parse_mode: 'HTML', link_preview_options: { is_disabled: true } } : {}),
         reply_to_message_id: replyTo,
-        link_preview_options: { is_disabled: true },
+        ...(!markup && forceReply && index === 0 ? { reply_markup: { force_reply: true, selective: true } } : {}),
       });
-      if (!result.ok && isMarkupParseError(result.error)) {
+      if (markup && !result.ok && isMarkupParseError(result.error)) {
         result = await call('sendMessage', {
           chat_id: chatId,
-          text: plainTextFromMarkdown(part),
+          text: plainTextFromMarkdown(part) + tail,
           reply_to_message_id: replyTo,
           link_preview_options: { is_disabled: true },
         });
@@ -88,6 +104,7 @@ export function createTelegramAdapter({
       // неудача уже говорит вызывающему всё, что ему нужно знать.
       if (!result.ok) return index === 0 ? result : { ...first, partial: true, error: result.error };
       if (index === 0) first = result;
+      if (result.degraded) first = { ...first, degraded: result.degraded };
     }
     return first;
   }
@@ -99,9 +116,9 @@ export function createTelegramAdapter({
     // recognises. `selective: true` shows the prompt only to the user being
     // replied to, not the whole chat. Used only on the plain (non-markup)
     // path: a rendered model answer never needs it.
-    sendMessage: ({ chatId, text, replyToMessageId, markup = false, forceReply = false }) => (
-      markup === true
-        ? sendRendered({ chatId, text, replyToMessageId })
+    sendMessage: ({ chatId, text, replyToMessageId, markup = false, forceReply = false, footer = '' }) => (
+      markup === true || footer !== ''
+        ? sendRendered({ chatId, text, replyToMessageId, markup, forceReply, footer })
         : call('sendMessage', {
           chat_id: chatId, text, reply_to_message_id: replyToMessageId,
           ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : {}),

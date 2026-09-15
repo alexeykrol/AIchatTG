@@ -11,6 +11,7 @@ import { answerSystemPrompt } from '../src/provider-adapter.mjs';
 import { STATE_CONTEXT_INSTRUCTION } from '../src/assistant-working-state.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
 import { domainBoundaryReply } from '../src/assistant-domain-routing.mjs';
+import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from '../src/assistant-release.mjs';
 import {
   buildRolePackage, collapseWhitespace, renderRoleText, renderTranscript, runDualDialogue, withRoleInSystemMessage,
 } from '../scripts/lib/dual-dialogue.mjs';
@@ -106,11 +107,16 @@ for (const mode of ['off', 'dispatch']) test(`full run (${mode}): strict order, 
     }
     assert.deepEqual(ledgerLines(fixture), messages);
     // §11.1: each generated message is derived from the actual previous text, not from a plan.
-    for (const m of messages.slice(1)) assert.ok(m.text.includes(`на ${questionDigest(messages[m.seq - 2].text)}`), `seq ${m.seq} not derived from seq ${m.seq - 1}`);
+    // The visible footer makes messages multiline; the existing Telegram
+    // question parser collapses whitespace before handing text to the model.
+    for (const m of messages.slice(1)) {
+      assert.ok(m.text.includes(`на ${questionDigest(collapseWhitespace(messages[m.seq - 2].text))}`), `seq ${m.seq} not derived from seq ${m.seq - 1}`);
+      assert.ok(m.text.endsWith(ASSISTANT_RELEASE_LINE));
+    }
     const expertAnswers = answersOf(result, EXPERT); const syntheticAnswers = answersOf(result, SYNTHETIC);
     assert.equal(expertAnswers.length, 2); assert.equal(syntheticAnswers.length, 3);
-    assert.deepEqual(expertAnswers.map((o) => o.input.question), [messages[1].text, messages[3].text]);
-    assert.deepEqual(syntheticAnswers.map((o) => o.input.question), [messages[0].text, messages[2].text, messages[4].text]);
+    assert.deepEqual(expertAnswers.map((o) => o.input.question), [messages[1].text, messages[3].text].map(collapseWhitespace));
+    assert.deepEqual(syntheticAnswers.map((o) => o.input.question), [messages[0].text, messages[2].text, messages[4].text].map(collapseWhitespace));
     // The expert never sees the stimulus; the synthetic remembers its own opening as its turn.
     assert.ok(!inputsOf(result, EXPERT).includes(messages[0].text));
     assert.equal(syntheticAnswers[1].input.dialogue[0].question, messages[0].text);
@@ -193,7 +199,7 @@ test('fresh process between commit and hand-over: resume hands over the committe
     assert.equal(next.status, 'paused'); assert.equal(next.messages.length, 3); assert.equal(next.messages[2].from, EXPERT);
     assert.deepEqual(fixture.calls().slice(1).map((c) => `${c.participant}:${c.stage}`), ['assistant:router', 'assistant:answer', 'assistant:state']);
     assert.equal(answersOf(next, EXPERT)[0].input.question, collapseWhitespace(committed[1].text));
-    assert.ok(next.messages[2].text.includes(`на ${questionDigest(committed[1].text)}`));
+    assert.ok(next.messages[2].text.includes(`на ${questionDigest(collapseWhitespace(committed[1].text))}`));
     const done = fresh(fixture, { resume: true, stepLimit: 10 });
     assert.equal(done.status, 'completed'); assert.equal(done.messages.length, 6);
     const before = fixture.calls().length;
@@ -292,7 +298,7 @@ test('boundary answer is legal visible text: abstention is committed and the run
     assert.equal(result.status, 'completed'); assert.equal(result.messages.length, 6);
     const boundary = domainBoundaryReply({ reason: 'domain_knowledge_missing',
       domainRoutes: [DEFAULT_DOMAIN_CATALOG.routeFor('content')] }, DEFAULT_DOMAIN_CATALOG).text;
-    assert.equal(result.messages[2].from, EXPERT); assert.equal(result.messages[2].text, boundary);
+    assert.equal(result.messages[2].from, EXPERT); assert.equal(result.messages[2].text, assistantReleaseText(boundary));
     assert.match(boundary, /Вопрос относится к моей области/);
     assert.match(boundary, /нет достаточных сведений/);
     assert.equal(result.messages[2].receipt.status, 'completed');

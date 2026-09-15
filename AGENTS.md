@@ -78,6 +78,22 @@ required before another root session takes control.
 - Report exactly one lifecycle state per candidate: `prepared`, `pushed`,
   `PO-approved`, `deployed`, or `production-verified`.
 
+## Assistant public release identity
+
+- The Assistant's public version/date come only from
+  `apps/telegram-runtime/src/assistant-release.json`. This component follows
+  the historical `2.4.x` line; Git image SHAs, project changelog numbering and
+  npm scaffold versions are not substitutes for the public version number.
+- Every actually delivered Assistant reply has the code-owned version/date
+  footer at the bottom; a multipart answer carries it once on its final part.
+  Preserve approved body copy, forceReply, delivery fences and body-only
+  dialogue memory. Do not ask the model to invent or append release metadata.
+- Any Assistant-affecting source release must advance the component version
+  and set its planned release date. Before deployment, run
+  `scripts/aichattg/verify-release-source.sh <candidate-SHA> <current-production-SHA>`
+  and verify the rendered footer inside the exact deployed image. A missing
+  historical metadata baseline is reported as bootstrap, never fabricated.
+
 ## Session classification
 
 The former Codex executor worktrees, charters and handoffs under `.handoffs/`

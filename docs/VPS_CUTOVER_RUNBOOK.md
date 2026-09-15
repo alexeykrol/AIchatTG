@@ -51,11 +51,25 @@ git diff --check
 Before a later build, additionally run:
 
 ```bash
-bash scripts/aichattg/verify-release-source.sh "$AICHATTG_SOURCE_SHA"
+bash scripts/aichattg/verify-release-source.sh "$AICHATTG_SOURCE_SHA" "$AICHATTG_PREVIOUS_PRODUCTION_SHA"
 ```
 
 It rejects a source SHA mismatch, any tracked or untracked overlay, whitespace
 errors, and a Compose reference to a News service, data root, or hostname.
+It also reads the committed Assistant version/date JSON as data, rejects
+invalid metadata and requires a greater component version for changed Assistant
+runtime sources versus current production. Release dates cannot move backwards.
+The optional one-SHA form is structural-only and is not the production
+comparison gate. The first restored release reports bootstrap explicitly
+because the previous production source had no component metadata.
+
+Assistant component metadata is
+`apps/telegram-runtime/src/assistant-release.json`, not npm's scaffold version.
+Keep its public release number distinct from the exact image SHA. Confirm that
+the deployed transport appends the complete version/date line once, at the end
+of the final answer part, while preserving the approved body text. This can be
+verified offline in the container with a fake Telegram transport; actual
+Telegram sends or paid acceptance need their own authorization.
 
 ## Docker-log diagnostic safety
 

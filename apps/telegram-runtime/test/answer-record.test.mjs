@@ -24,6 +24,7 @@ import { ANALYZER_MODES, createAnalyzerAdapter } from '../src/analyzer-adapter.m
 import { loadAnalyzerSpec } from '../src/analyzer-spec.mjs';
 import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { assistantReleaseText } from '../src/assistant-release.mjs';
 
 const SPEC = loadAnalyzerSpec(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'analyzer-spec.json'));
 
@@ -145,7 +146,7 @@ withRuntime('an answered turn is stored with its question, route and served know
 
   const [row] = store.listAssistantAnswers();
   assert.equal(row.question, 'В курсе что такое агент?');
-  assert.equal(row.answer, actions.at(-1)[1].text, 'в записи стоит ровно доставленный текст');
+  assert.equal(row.answer, assistantReleaseText(actions.at(-1)[1].text), 'в записи стоит доставленный текст с footer');
   assert.equal(row.chatId, '-100');
   assert.equal(row.userId, '7');
   assert.deepEqual(row.route, { action: 'teach', sourceId: 'course-content-v1' });
@@ -175,7 +176,7 @@ withRuntime('an abstention is recorded too, with its string route and no units',
   assert.equal(result.abstained, true);
 
   const [row] = store.listAssistantAnswers();
-  assert.equal(row.answer, actions.at(-1)[1].text);
+  assert.equal(row.answer, assistantReleaseText(actions.at(-1)[1].text));
   assert.match(row.route.action, /^boundary:/);
   assert.equal(row.route.sourceId, null);
   assert.equal(row.knowledgeSourceId, null);
