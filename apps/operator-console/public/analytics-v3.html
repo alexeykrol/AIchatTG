@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Аналитика ассистента · AIchatTG</title><link rel="stylesheet" href="/console-v3.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">Панель управления AIchatTG</p><h1>Аналитика ассистента</h1>
+      <p class="subhead">Количество вопросов и оценка затрат по сохранённым ответам ассистента. Неполные данные показаны отдельно.</p></div>
+    <span class="badge">Только просмотр</span>
+  </div>
+  <nav class="nav" aria-label="Разделы панели управления">
+    <a href="/moderation-v3.html">Модерация</a>
+    <a href="/assistant-v3.html">Ассистент</a>
+    <a href="/settings-v3.html">Настройки</a>
+    <a href="/domains-v3.html">Базы ответов</a>
+    <a class="active" aria-current="page" href="/analytics-v3.html">Аналитика</a>
+    <a href="/tests-v3.html">Тесты</a>
+  </nav>
+  <div id="notice" class="status">Загружаем записи об ответах…</div>
+  <div class="grid">
+    <section class="card wide"><h2>Охват данных</h2><p id="coverage"></p><div id="pricing" class="micro"></div></section>
+    <section class="card"><h2>Последние 24 часа</h2><p>Скользящий период до текущего момента.</p><div id="today" class="metric-grid"></div></section>
+    <section class="card"><h2>Последние 7 дней</h2><p>Скользящий период до текущего момента.</p><div id="week" class="metric-grid"></div></section>
+    <section class="card wide"><h2>Вся записанная история</h2><p>Все сохранённые записи об ответах ассистента в этой базе AIchatTG в пределах учитываемых данных.</p><div id="total" class="metric-grid"></div></section>
+  </div>
+</main>
+<script>
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(6) : '—'; }
+  function metric(label, value, detail) {
+    const cell = document.createElement('div'); cell.className = 'metric';
+    const l = document.createElement('div'); l.className = 'label'; l.textContent = label;
+    const v = document.createElement('div'); v.className = 'value'; v.textContent = String(value);
+    const d = document.createElement('div'); d.className = 'detail'; d.textContent = detail;
+    cell.append(l, v, d); return cell;
+  }
+  function bucket(target, data) {
+    const node = document.getElementById(target); node.replaceChildren(
+      metric('Вопросов и ответов', data.count, 'Сохранённые записи'),
+      metric('С известной стоимостью', data.pricedCount, data.unknownCount + ' без оценки'),
+      metric('Известные затраты', money(data.knownEstimatedUsd), 'Только вопросы с оценкой'),
+      metric('Средняя стоимость вопроса', money(data.averageCostUsd), 'По вопросам с оценкой'),
+      metric('Общие затраты', money(data.cost), data.count === 0 ? 'Нет вопросов для оценки'
+        : data.unknownCount ? 'Недоступно: часть затрат неизвестна' : 'Все записанные вопросы оценены'),
+    );
+  }
+  async function load() {
+    try {
+      const response = await fetch('/api/operator/analytics'); const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+      if (data.status !== 'available') { say('Аналитика недоступна: данные об ответах пока не получены.', 'error'); return; }
+      bucket('today', data.today); bucket('week', data.week); bucket('total', data.total);
+      document.getElementById('coverage').textContent =
+        'История охватывает журнал ответов чата анализатора, а не все чаты ассистента. ' +
+        data.coverage.observedChatCount + ' чат(ов) имеют записанные ответы. Неудачные платные попытки и некоторые дополнительные обращения к модели учтены не полностью.';
+      document.getElementById('pricing').textContent = 'Версия тарифов ' + data.pricing.version +
+        ' · проверена ' + data.pricing.verifiedAt + ' · оценка по стандартной цене текстовых токенов без кеша; не счёт к оплате.';
+      say(data.total.count === 0 ? 'В учитываемом журнале пока нет ответов. Средняя стоимость и сумма не рассчитываются.'
+        : data.total.unknownCount ? 'Стоимость части вопросов неизвестна. Среднее рассчитано только по оценённым вопросам; общая сумма недоступна.'
+        : 'Записанные ответы оценены полностью. Для затрат по всем чатам нужен более полный журнал использования.',
+        data.total.unknownCount ? 'warn' : '');
+    } catch (error) { say('Аналитика недоступна: ' + error.message, 'error'); }
+  }
+  load();
+</script>
+</body>
+</html>

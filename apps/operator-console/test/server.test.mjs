@@ -47,7 +47,7 @@ test('new pages require operator auth and domain edits save only a versioned can
     },
   };
   await withServer(async (url) => {
-    for (const page of ['/settings-v2.html', '/domains.html', '/analytics.html']) {
+    for (const page of ['/settings-v3.html', '/domains-v3.html', '/analytics-v3.html']) {
       assert.equal((await fetch(url + page)).status, 401);
       assert.equal((await fetch(url + page, { headers: { authorization: auth() } })).status, 200);
     }
@@ -125,8 +125,40 @@ test('operator routes require app-owned authentication while health stays public
     assert.match(html, /Тесты/);
     assert.equal(html.includes('Дайджесты'), false);
     assert.equal(html.includes('Публикация'), false);
-    assert.equal(html.includes('Настройки'), false);
-    for (const path of ['/moderation.html', '/assistant.html', '/eval.html']) {
+    assert.match(html, /Настройки/u);
+    assert.match(html, /Базы ответов/u);
+    assert.match(html, /Аналитика/u);
+    const pages = ['/moderation-v3.html', '/assistant-v3.html', '/settings-v3.html',
+      '/domains-v3.html', '/analytics-v3.html', '/tests-v3.html'];
+    const menus = [];
+    for (const path of pages) {
+      const response = await fetch(`${url}${path}`, { headers: { authorization: auth() } });
+      assert.equal(response.status, 200);
+      const page = await response.text();
+      assert.match(page, /<html lang="ru">/u);
+      assert.match(page, /\/console-v3\.css/u);
+      assert.doesNotMatch(page, /Legacy assistant view|Domain knowledge|Assistant settings|Operator pages/u);
+      menus.push([...page.matchAll(/<a [^>]*href="(\/[^"]+)"[^>]*>([^<]+)<\/a>/gu)]
+        .map((match) => [match[1], match[2]]));
+    }
+    const expectedMenu = pages.map((path, index) => [path,
+      ['Модерация', 'Ассистент', 'Настройки', 'Базы ответов', 'Аналитика', 'Тесты'][index]]);
+    for (const menu of menus) assert.deepEqual(menu, expectedMenu);
+    const aliases = new Map([
+      ['/moderation.html', '/moderation-v3.html'], ['/assistant.html', '/assistant-v3.html'],
+      ['/eval.html', '/tests-v3.html'], ['/settings-v2.html', '/settings-v3.html'],
+      ['/domains.html', '/domains-v3.html'], ['/analytics.html', '/analytics-v3.html'],
+    ]);
+    for (const [oldPath, newPath] of aliases) {
+      const response = await fetch(`${url}${oldPath}`, {
+        headers: { authorization: auth() }, redirect: 'manual',
+      });
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get('location'), newPath);
+    }
+    for (const path of ['/legacy/v1/moderation.html', '/legacy/v1/assistant.html',
+      '/legacy/v1/eval.html', '/legacy/v2/settings-v2.html', '/legacy/v2/domains.html',
+      '/legacy/v2/analytics.html']) {
       assert.equal((await fetch(`${url}${path}`, { headers: { authorization: auth() } })).status, 200);
     }
     const authStatus = await fetch(`${url}/api/auth/status`, { headers: { authorization: auth() } });

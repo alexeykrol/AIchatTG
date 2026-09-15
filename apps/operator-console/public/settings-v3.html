@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Настройки ассистента · AIchatTG</title>
+  <link rel="stylesheet" href="/console-v3.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div><p class="eyebrow">Панель управления AIchatTG</p><h1>Настройки ассистента</h1>
+      <p class="subhead">Подготовьте новую версию настроек и проверьте изменения перед выпуском.</p></div>
+    <span class="badge">Редактор черновика</span>
+  </div>
+  <nav class="nav" aria-label="Разделы панели управления">
+    <a href="/moderation-v3.html">Модерация</a>
+    <a href="/assistant-v3.html">Ассистент</a>
+    <a class="active" aria-current="page" href="/settings-v3.html">Настройки</a>
+    <a href="/domains-v3.html">Базы ответов</a>
+    <a href="/analytics-v3.html">Аналитика</a>
+    <a href="/tests-v3.html">Тесты</a>
+  </nav>
+  <div id="notice" class="status">Загружаем настройки…</div>
+  <div class="grid">
+    <section class="card wide">
+      <h2>Лимиты использования и ответов</h2>
+      <p>Здесь можно подготовить черновик настроек. Работающий бот использует текущую версию до отдельного выпуска.</p>
+      <div class="fieldrow">
+        <div class="field"><label for="cooldownSec">Пауза между ответами (секунды)</label><input id="cooldownSec" type="number" min="0" max="86400" step="1"><small>Для каждого пользователя. Текущее значение по умолчанию — 20 секунд.</small></div>
+        <div class="field"><label for="dailyPerUser">Ответов в день на пользователя</label><input id="dailyPerUser" type="number" min="0" max="10000" step="1"><small>Лимит для людей. Увеличение может повысить затраты на модель.</small></div>
+        <div class="field"><label for="syntheticDailyPerUser">Ответов в день для автоматических тестов</label><input id="syntheticDailyPerUser" type="number" min="0" max="10000" step="1"><small>Отдельный лимит при включённом автоматическом тестировании.</small></div>
+        <div class="field"><label for="answerMaxTokens">Максимум токенов ответа</label><input id="answerMaxTokens" type="number" min="1" max="4096" step="1"><small>Включает токены рассуждения; это не длина видимого текста.</small></div>
+        <div class="field"><label for="dialogueTurnLimit">Предыдущих реплик диалога</label><input id="dialogueTurnLimit" type="number" min="1" max="100" step="1"><small>Больший контекст помогает уточнениям, но увеличивает число входных токенов.</small></div>
+      </div>
+    </section>
+    <section class="card wide">
+      <h2>Приостановка в разрешённых чатах</h2>
+      <p>Можно выбрать только чаты, назначенные ассистенту. Для применения паузы в отдельном чате потребуется отдельное изменение работающей системы.</p>
+      <div id="chats"></div>
+    </section>
+    <section class="card wide">
+      <h2>Проверка изменений</h2>
+      <p>Сравните черновик с текущей версией перед сохранением. Таблица не меняет работающего бота.</p>
+      <div id="diff"></div>
+    </section>
+    <section class="card wide">
+      <div class="actions"><button id="save" class="primary" disabled>Сохранить новую версию</button><button id="reload" class="secondary">Вернуть текущие значения</button><span id="revision" class="micro mono"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+  const fields = ['cooldownSec', 'dailyPerUser', 'syntheticDailyPerUser', 'answerMaxTokens', 'dialogueTurnLimit'];
+  const labels = {
+    cooldownSec: 'Пауза между ответами', dailyPerUser: 'Ответов в день на пользователя',
+    syntheticDailyPerUser: 'Ответов в день для автоматических тестов',
+    answerMaxTokens: 'Максимум токенов ответа', dialogueTurnLimit: 'Предыдущих реплик диалога',
+    pausedChatIds: 'Чаты с приостановленным ассистентом',
+  };
+  let state;
+  const notice = document.getElementById('notice');
+  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  async function api(path, options) {
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+    return data;
+  }
+  function fill(values) {
+    for (const key of fields) document.getElementById(key).value = values[key] ?? '';
+    const chats = document.getElementById('chats');
+    chats.replaceChildren();
+    for (const id of state.allowedChatIds) {
+      const row = document.createElement('label'); row.className = 'check';
+      const box = document.createElement('input'); box.type = 'checkbox'; box.value = id;
+      box.checked = (values.pausedChatIds || []).includes(id);
+      const text = document.createElement('span'); text.textContent = 'Приостановить ассистента в чате ' + id;
+      row.append(box, text); chats.append(row);
+    }
+    if (!state.allowedChatIds.length) chats.textContent = 'Для панели нет разрешённых чатов.';
+    const locked = !state.editingEnabled || state.stale;
+    for (const key of fields) document.getElementById(key).disabled = locked;
+    chats.querySelectorAll('input').forEach((box) => { box.disabled = locked; });
+    document.getElementById('save').disabled = locked;
+    review();
+  }
+  function draftValues() {
+    const values = { pausedChatIds: [...document.querySelectorAll('#chats input:checked')]
+      .map((box) => box.value).sort() };
+    for (const key of fields) values[key] = Number(document.getElementById(key).value);
+    return values;
+  }
+  function display(value) {
+    return Array.isArray(value) ? (value.length ? value.join(', ') : 'Нет') : String(value);
+  }
+  function review() {
+    if (!state) return;
+    const changes = Object.keys(labels).filter((key) =>
+      display(state.released[key]) !== display(draftValues()[key]));
+    const node = document.getElementById('diff'); node.replaceChildren();
+    if (!changes.length) { node.textContent = 'Изменений относительно текущей версии нет.'; return; }
+    const table = document.createElement('table'); table.className = 'review-table';
+    const head = document.createElement('thead'); const header = document.createElement('tr');
+    for (const text of ['Параметр', 'Текущая версия', 'Черновик']) {
+      const cell = document.createElement('th'); cell.textContent = text; header.append(cell);
+    }
+    head.append(header); table.append(head);
+    const body = document.createElement('tbody');
+    for (const key of changes) {
+      const row = document.createElement('tr');
+      for (const text of [labels[key], display(state.released[key]), display(draftValues()[key])]) {
+        const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(body); node.append(table);
+  }
+  async function load() {
+    try {
+      state = await api('/api/operator/settings');
+      fill(state.candidate || state.released);
+      document.getElementById('revision').textContent = state.candidateDigest
+        ? 'Черновик ' + state.candidateDigest.slice(0, 12) + ' · ' + state.candidateCreatedAt
+        : 'Текущая версия ' + state.sourceDigest.slice(0, 12);
+      say(state.stale ? 'Текущие настройки изменились после создания черновика. Перед сохранением проверьте их заново.'
+        : state.editingEnabled ? 'Редактирование доступно. Сохранение создаёт новую версию и не применяет её к боту.'
+        : 'Хранилище черновиков не настроено. Настройки доступны только для просмотра.', state.stale ? 'warn' : '');
+    } catch (error) { say('Настройки недоступны: ' + error.message, 'error'); }
+  }
+  document.getElementById('reload').addEventListener('click', () => { if (state) fill(state.released); });
+  document.querySelector('.grid').addEventListener('input', review);
+  document.querySelector('.grid').addEventListener('change', review);
+  document.getElementById('save').addEventListener('click', async () => {
+    if (!state) return;
+    const values = draftValues();
+    try {
+      await api('/api/operator/settings/candidates', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-operator-intent': 'candidate-draft' },
+        body: JSON.stringify({ values, baseDigest: state.baseDigest }),
+      });
+      await load(); say('Новая версия настроек сохранена. Работающий бот не изменился.', 'good');
+    } catch (error) { say('Версию не удалось сохранить: ' + error.message, 'error'); }
+  });
+  load();
+</script>
+</body>
+</html>

@@ -17,15 +17,31 @@ import {
   legacyPrompts,
 } from './legacy-read-model.mjs';
 
+const publicPage = (name) => readFileSync(fileURLToPath(new URL(`../public/${name}`, import.meta.url)), 'utf8');
 const PUBLIC = new Map([
-  ['/moderation.html', readFileSync(fileURLToPath(new URL('../public/moderation.html', import.meta.url)), 'utf8')],
-  ['/assistant.html', readFileSync(fileURLToPath(new URL('../public/assistant.html', import.meta.url)), 'utf8')],
-  ['/eval.html', readFileSync(fileURLToPath(new URL('../public/eval.html', import.meta.url)), 'utf8')],
-  ['/settings-v2.html', readFileSync(fileURLToPath(new URL('../public/settings-v2.html', import.meta.url)), 'utf8')],
-  ['/domains.html', readFileSync(fileURLToPath(new URL('../public/domains.html', import.meta.url)), 'utf8')],
-  ['/analytics.html', readFileSync(fileURLToPath(new URL('../public/analytics.html', import.meta.url)), 'utf8')],
+  ['/moderation-v3.html', publicPage('moderation-v3.html')],
+  ['/assistant-v3.html', publicPage('assistant-v3.html')],
+  ['/settings-v3.html', publicPage('settings-v3.html')],
+  ['/domains-v3.html', publicPage('domains-v3.html')],
+  ['/analytics-v3.html', publicPage('analytics-v3.html')],
+  ['/tests-v3.html', publicPage('tests-v3.html')],
+  ['/legacy/v1/moderation.html', publicPage('moderation.html')],
+  ['/legacy/v1/assistant.html', publicPage('assistant.html')],
+  ['/legacy/v1/eval.html', publicPage('eval.html')],
+  ['/legacy/v2/settings-v2.html', publicPage('settings-v2.html')],
+  ['/legacy/v2/domains.html', publicPage('domains.html')],
+  ['/legacy/v2/analytics.html', publicPage('analytics.html')],
+]);
+const PAGE_REDIRECTS = new Map([
+  ['/moderation.html', '/moderation-v3.html'],
+  ['/assistant.html', '/assistant-v3.html'],
+  ['/eval.html', '/tests-v3.html'],
+  ['/settings-v2.html', '/settings-v3.html'],
+  ['/domains.html', '/domains-v3.html'],
+  ['/analytics.html', '/analytics-v3.html'],
 ]);
 const V2_CSS = readFileSync(fileURLToPath(new URL('../public/console-v2.css', import.meta.url)), 'utf8');
+const V3_CSS = readFileSync(fileURLToPath(new URL('../public/console-v3.css', import.meta.url)), 'utf8');
 
 const MAX_CANDIDATE_BODY = 70_000;
 
@@ -164,7 +180,11 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
       if (!authorize(request, response)) return;
 
       if (request.method === 'GET' && ['/', '/index.html', '/operator', '/operator/'].includes(url.pathname)) {
-        redirect(response, '/moderation.html');
+        redirect(response, '/moderation-v3.html');
+        return;
+      }
+      if (request.method === 'GET' && PAGE_REDIRECTS.has(url.pathname)) {
+        redirect(response, PAGE_REDIRECTS.get(url.pathname));
         return;
       }
       if (request.method === 'GET' && PUBLIC.has(url.pathname)) {
@@ -175,12 +195,16 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
         content(response, 200, 'text/css; charset=utf-8', V2_CSS);
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/console-v3.css') {
+        content(response, 200, 'text/css; charset=utf-8', V3_CSS);
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/auth/login') {
-        redirect(response, url.searchParams.get('next') || '/moderation.html');
+        redirect(response, url.searchParams.get('next') || '/moderation-v3.html');
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/auth/logout') {
-        redirect(response, url.searchParams.get('next') || '/moderation.html');
+        redirect(response, url.searchParams.get('next') || '/moderation-v3.html');
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/operator/settings') {

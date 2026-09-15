@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ассистент · AIchatTG</title>
+  <link rel="stylesheet" href="/console-v3.css">
+</head>
+<body>
+<main class="shell">
+  <div class="masthead">
+    <div>
+      <p class="eyebrow">Панель управления AIchatTG</p>
+      <h1>Ассистент</h1>
+      <p class="subhead">Параметры ответа и недавние сохранённые ходы разговора. Данные доступны для просмотра; эта страница не меняет работающего бота.</p>
+    </div>
+    <span class="badge">Только просмотр</span>
+  </div>
+  <nav class="nav" aria-label="Разделы панели управления">
+    <a href="/moderation-v3.html">Модерация</a>
+    <a class="active" aria-current="page" href="/assistant-v3.html">Ассистент</a>
+    <a href="/settings-v3.html">Настройки</a>
+    <a href="/domains-v3.html">Базы ответов</a>
+    <a href="/analytics-v3.html">Аналитика</a>
+    <a href="/tests-v3.html">Тесты</a>
+  </nav>
+
+  <div id="notice" class="status" role="status" aria-live="polite">Загружаю данные ассистента…</div>
+  <div class="grid">
+    <section class="card wide" aria-labelledby="config-title">
+      <h2 id="config-title">Текущие параметры</h2>
+      <p>Значения показывает консоль на момент запроса. Общий флаг входящих сообщений и флаг знания не подтверждают состояние каждого чата или допуск отдельного источника.</p>
+      <div id="config-empty" class="status" hidden></div>
+      <div id="config-metrics" class="metric-grid" style="display:none" hidden></div>
+    </section>
+
+    <section class="card wide" aria-labelledby="events-title">
+      <h2 id="events-title">Недавние сохранённые вопросы</h2>
+      <p>До 30 последних ходов из ограниченной памяти диалогов. Предел на один диалог и срок хранения этот ответ сервера не сообщает. Это не полный журнал и не число всех обращений; стоимость и маршрут текущая запись также не передаёт.</p>
+      <div id="events-empty" class="status" hidden></div>
+      <div id="events-table" hidden></div>
+    </section>
+
+    <section class="card wide" aria-labelledby="freshness-title">
+      <h2 id="freshness-title">Актуальность снимка</h2>
+      <p id="freshness">Данные ещё не получены.</p>
+      <div class="actions">
+        <button id="reload" class="secondary" type="button">Обновить данные</button>
+        <span class="micro">Через 60 секунд после загрузки страница помечает снимок устаревшим. Срок актуальности данных на сервере здесь не указан.</span>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+  const notice = document.getElementById('notice');
+  const freshness = document.getElementById('freshness');
+  const reloadButton = document.getElementById('reload');
+  const freshnessMs = 60_000;
+  let loadedAt = null;
+  let loadSequence = 0;
+
+  function showNotice(message, tone = '') {
+    notice.textContent = message;
+    notice.className = `status ${tone}`.trim();
+  }
+
+  function text(value, fallback = 'Не указано') {
+    return value === null || value === undefined || String(value).trim() === ''
+      ? fallback : String(value);
+  }
+
+  function number(value, suffix = '') {
+    return Number.isFinite(value) ? `${new Intl.NumberFormat('ru-RU').format(value)}${suffix}` : 'Не указано';
+  }
+
+  function metric(label, value, detail) {
+    const box = document.createElement('div');
+    box.className = 'metric';
+    const name = document.createElement('div');
+    name.className = 'label';
+    name.textContent = label;
+    const amount = document.createElement('div');
+    amount.className = 'value';
+    amount.textContent = value;
+    const note = document.createElement('div');
+    note.className = 'detail';
+    note.textContent = detail;
+    box.append(name, amount, note);
+    return box;
+  }
+
+  function renderConfig(config) {
+    const target = document.getElementById('config-metrics');
+    const empty = document.getElementById('config-empty');
+    target.replaceChildren();
+    target.hidden = !config;
+    target.style.display = config ? '' : 'none';
+    empty.hidden = Boolean(config);
+    if (!config) {
+      empty.textContent = 'Параметры не получены. Последние вопросы, если они доступны, показаны ниже.';
+      return;
+    }
+    const knowledge = config.knowledgeContent === 'Подключена' ? 'Включена'
+      : String(config.knowledgeContent || '').startsWith('Отключена') ? 'Выключена' : 'Не указано';
+    target.append(
+      metric('Приём входящих', typeof config.enabled === 'boolean' ? (config.enabled ? 'Разрешён' : 'Закрыт') : 'Не указано', 'Общий флаг рантайма; список чатов здесь не проверяется.'),
+      metric('Модель ответа', text(config.model), `Провайдер: ${text(config.vendor)}.`),
+      metric('Модель маршрутизации', text(config.routerModel), `Провайдер: ${text(config.routerVendor)}.`),
+      metric('Пауза между ответами', number(config.cooldownSec, ' с'), 'На одного пользователя.'),
+      metric('Ответов в сутки', number(config.dailyPerUser), 'Лимит на одного пользователя.'),
+      metric('Потолок ответа', number(config.maxTokens), 'Токены завершения, включая внутреннее рассуждение.'),
+      metric('База знаний', knowledge, 'Проекция флага включения; допуск и свежесть источников здесь не проверяются.')
+    );
+  }
+
+  function eventTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds <= 0) return 'Время не записано';
+    const date = new Date(seconds * 1000);
+    if (Number.isNaN(date.getTime())) return 'Время не записано';
+    return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+  }
+
+  function tokenCount(value) {
+    return Number.isFinite(value) ? new Intl.NumberFormat('ru-RU').format(value) : 'Не измерено';
+  }
+
+  function renderEvents(events) {
+    const target = document.getElementById('events-table');
+    const empty = document.getElementById('events-empty');
+    target.replaceChildren();
+    const valid = Array.isArray(events);
+    target.hidden = !valid || events.length === 0;
+    empty.hidden = valid && events.length > 0;
+    if (!valid) {
+      empty.textContent = 'Журнал вопросов не получен. Параметры, если они доступны, показаны выше.';
+      return;
+    }
+    if (!events.length) {
+      empty.textContent = 'В выборке нет сохранённых ходов. Консоль не сообщает, отсутствуют ли они, истекли, были сокращены или недоступны для чтения; это не оценка активности ассистента.';
+      return;
+    }
+    const caption = document.createElement('p');
+    caption.className = 'micro';
+    caption.textContent = `Получено сохранённых ходов: ${events.length}. Показаны только записи, оставшиеся в памяти диалогов на момент запроса.`;
+    const scroll = document.createElement('div');
+    scroll.style.overflowX = 'auto';
+    const table = document.createElement('table');
+    table.className = 'review-table';
+    const header = document.createElement('thead');
+    const heading = document.createElement('tr');
+    for (const label of ['Время', 'Вопрос и ответ', 'Модель', 'Токены']) {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = label;
+      heading.append(cell);
+    }
+    header.append(heading);
+    const body = document.createElement('tbody');
+    for (const event of events) {
+      const row = document.createElement('tr');
+      const time = document.createElement('td');
+      time.textContent = eventTime(event?.created_at);
+      const question = document.createElement('td');
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = text(event?.question, 'Вопрос не записан');
+      const answer = document.createElement('div');
+      answer.className = 'mono';
+      answer.style.whiteSpace = 'pre-wrap';
+      answer.style.marginTop = '9px';
+      answer.textContent = `Ответ: ${text(event?.answer, 'Не записан')}`;
+      details.append(summary, answer);
+      question.append(details);
+      const model = document.createElement('td');
+      model.textContent = text(event?.model, 'Не записана');
+      const tokens = document.createElement('td');
+      tokens.textContent = `Вход: ${tokenCount(event?.input_tokens)} · выход: ${tokenCount(event?.output_tokens)}`;
+      row.append(time, question, model, tokens);
+      body.append(row);
+    }
+    table.append(header, body);
+    scroll.append(table);
+    target.append(caption, scroll);
+  }
+
+  function updateFreshness() {
+    if (!loadedAt) {
+      freshness.textContent = 'Данные ещё не получены.';
+      return;
+    }
+    const time = new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).format(loadedAt);
+    const stale = Date.now() - loadedAt.getTime() >= freshnessMs;
+    freshness.textContent = stale
+      ? `Последний запрос: ${time}. Снимок страницы устарел; обновите данные.`
+      : `Последний запрос: ${time}. Снимок страницы свежий.`;
+  }
+
+  async function getJson(path) {
+    const response = await fetch(path, { cache: 'no-store' });
+    if (!response.ok) throw new Error(response.status === 401 ? 'Требуется вход в консоль.' : `Ошибка запроса: код ${response.status}.`);
+    try { return await response.json(); }
+    catch { throw new Error('Сервер вернул ответ в неверном формате.'); }
+  }
+
+  async function load() {
+    const sequence = ++loadSequence;
+    reloadButton.disabled = true;
+    showNotice('Обновляю параметры и последние вопросы…');
+    const [configResult, eventsResult] = await Promise.allSettled([
+      getJson('/api/moderation/assistant/config'),
+      getJson('/api/moderation/assistant/events?limit=30'),
+    ]);
+    if (sequence !== loadSequence) return;
+    reloadButton.disabled = false;
+    const config = configResult.status === 'fulfilled' && configResult.value && typeof configResult.value === 'object' && !Array.isArray(configResult.value)
+      ? configResult.value : null;
+    const events = eventsResult.status === 'fulfilled' && Array.isArray(eventsResult.value?.events)
+      ? eventsResult.value.events : null;
+    renderConfig(config);
+    renderEvents(events);
+    loadedAt = config || events ? new Date() : null;
+    updateFreshness();
+    if (config && events) showNotice('Параметры и сохранённые ходы загружены.', 'good');
+    else if (config || events) showNotice('Часть данных недоступна. Доступная часть показана ниже.', 'warn');
+    else showNotice('Не удалось получить данные ассистента. Повторите запрос или проверьте доступ к консоли.', 'error');
+  }
+
+  reloadButton.addEventListener('click', load);
+  setInterval(updateFreshness, 10_000);
+  load();
+</script>
+</body>
+</html>
