@@ -20,11 +20,14 @@ updated: 2026-09-15
       Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts
-      throughv4 accepted; recipient/principal unknown,
+      throughv5 accepted; recipient/principal unknown,
       production collection/delivery disabled. Queue position1; requested
-      mechanical owner Moderator, no active lease/SSH handoff. Root P2 fixes
-      and final test acceptance pending; see `docs/RELEASE_QUEUE.md`. Charter:
-      `docs/proposals/2026-09-15-moderator-review-charter-v1.md`.
+      mechanical owner Moderator, no active lease/SSH handoff. Root local source
+      1829573/Console3.3.0 accepted:905passed/5fixture-skips, Console159/159,
+      P2 fixes and disabled no-store mount independently checked. Not pushed
+      or deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
+      Next LOCAL contract-only work:
+      `docs/proposals/2026-09-15-moderation-bridge-charter-v1.md`.
 - [x] CONSOLE-COST-V1 local implementation: integrated into3.2.0/f650fe8;
       production acceptance passed in CONSOLE-V32 above. No guessed usage/zero
       costs; worker backend preserved. Incorporates pushed3.1.1 copy fixes.

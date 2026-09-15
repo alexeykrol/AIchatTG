@@ -47,8 +47,10 @@ Exact candidate/tests, PO scope and a new explicit single-writer handoff/lease
 must precede mechanical deployment. Collection/delivery is not activated by
 queue placement.
 
-**Status: proposed; queued, not deployed.** The current candidate still has
-pending local fixes/acceptance. [Release queue](RELEASE_QUEUE.md).
+**Status: proposed; queued, not deployed.** Local source1829573/Console3.3.0
+is accepted with905passed/5fixture-skips, Console159/159 and independent review.
+The mount is disabled; real capture/intake/delivery still require the local
+bridge implementation and exact decisions/lease. [Release queue](RELEASE_QUEUE.md).
 
 ## 2026-09-15 — Retain private review materials until manual removal
 
@@ -63,11 +65,11 @@ linked private evidence/notes/drafts/delivery metadata in one transaction and
 keeps only a minimal content-free receipt. No Telegram or runtime data deletion.
 SQLite erasure does not guarantee erasure from backups or physical media.
 
-**Status: proposed; contract accepted, implementation ongoing.** The owner's
+**Status: partial; synthetic local implementation accepted at1829573.** The owner's
 retention choice is recorded, not a free-storage claim, quota increase or
 production collection approval. Recipient/reviewer identity, production field
 limits, copies/backup handling and exact release remain separate gates.
-Worker contracts v1–v4 are accepted for synthetic local work, newest wins.
+Worker contracts v1–v4 plus root v5 are accepted for synthetic local work, newest wins.
 V4 closes an assurance finding: non-suspect retained observations must also be
 visible and manually erasable, without becoming suspicions, alerts or training
 examples. Their production collection is still not approved.
@@ -88,14 +90,16 @@ The worker owns isolated feature files/Moderation page; the root owns shared
 entrypoints/contracts/storage integration and release. Analytics is a separate
 concurrent workstream, not a second writer on those protected files.
 
-**Status: proposed; implementation chartered.** No feature candidate is accepted
-yet. Code base9d326f4 includes pushed3.1.1 copy fixes, while last verified live
-Console remains3.1.0/eb0f7fe and runtime335a35a. No approved private notification
+**Status: partial; local synthetic candidate accepted.** Source1829573 is
+Console3.3.0 with disabled no-store mount;905tests passed/5fixture-skips,
+Console159/159. No live feature collection or delivery is implemented.
+Current live Console remains3.2.0/f650fe8 and runtime335a35a. No approved private notification
 destination/reviewer identity was found in current checked-in sources. The
 later explicit retention choice is recorded above. Existing notifier is a disabled seam; recovery TTL
 and project-transcript preservation are not review-data permission. Continue
 with synthetic local fixtures and disabled defaults; exact product/data/cost
 decisions and a release lease are required before real collection/delivery.
+[Local acceptance](reports/2026-09-15-moderation-review-integration.md).
 [Charter](proposals/2026-09-15-moderator-review-charter-v1.md).
 
 ## 2026-09-15 — Explain apparent zero prices and add last-five question costs

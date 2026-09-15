@@ -1,6 +1,6 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-15 23:13:28 UTC. The root integrator owns shared integration
+Checkpoint: 2026-09-15, after local Moderator acceptance. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
@@ -17,10 +17,14 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   «Другая сессия сейчас деплоит, когда завершит - будешь деплоить ты.
   Пока можешь встать в очередь.»
 - Root retains shared-source integration, fixes, acceptance and release lock.
-- Candidate: frozen worker source at base9d326f4; imported locally with root
-  corrections for truncated detector evidence and nonempty preview-root guards.
-  Final acceptance is pending: the latest root targeted run was28/29, with one
-  failing test still to diagnose. No integrated release SHA/lease exists.
+- Candidate: accepted local source `1829573015de5d307868afb73e4ef3dcfc0e7fdb`,
+  Console3.3.0, lifecycle `prepared`; not pushed/deployed. Root fixes close
+  truncated-evidence, unsafe grouping and nonempty preview-root defects.
+  Root905passed/5fixture-skips, Console159/159, independent review and source
+  guard passed. [Acceptance](reports/2026-09-15-moderation-review-integration.md).
+- The mounted Review API is disabled without storage/collection/delivery.
+  The next safe step is the [local bridge contract](proposals/2026-09-15-moderation-bridge-charter-v1.md),
+  not deploying the incomplete live workflow. No exact release lease exists.
 - No Moderator feature from this candidate is deployed. Collection, recipient,
   reviewer identity, source checkpoint, limits and real delivery are still gated.
 - Before mechanical delegation: accepted exact source/tests, verified PO scope,

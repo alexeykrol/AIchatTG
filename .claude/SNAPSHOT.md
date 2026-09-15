@@ -17,20 +17,24 @@
   `docs/reports/2026-09-15-console-v32-deployment.md`.
 - **Очередь выпуска:** Moderator position1, PO назначил его механическим
   исполнителем следующего деплоя; root сохраняет integration/lock/acceptance.
-  Точного принятого SHA/lease пока нет. Два P2 исправляются локально, последний
-  targeted run28/29 требует диагностики одного теста; shared hook не применён.
+  Локальный source1829573/Console3.3.0 принят, lifecycle `prepared`, не pushed
+  и не deployed. Два P2 и fingerprint bypass исправлены; root905passed/5skips,
+  Console159/159, independent review/source guard passed. Shared hook строго
+  disabled без store/collector/sender; Help это объясняет. Lease пока нет.
+  Следующий LOCAL contract-only bridge charter передан Moderator, frozen
+  worker source сохраняется. `docs/reports/2026-09-15-moderation-review-integration.md`.
   `docs/RELEASE_QUEUE.md`; никаких SSH/production полномочий не передано.
 - **Новые feature workstreams, local-only:** PO-start Moderation review и
   Analytics last-five costs проверены. База9d326f4; страницы/new modules
   разделены, общие Console/runtime entrypoints/schema/env/Compose/root docs
   пишет только интегратор. Charters в `docs/proposals/2026-09-15-*-charter-v1.md`.
   Оба worker приняли ownership. Moderator retention утверждён: бессрочно до
-  ручного удаления; local contract v1–v4 accepted, private erase с повторным
+  ручного удаления; local contract v1–v5 accepted, private erase с повторным
   подтверждением, uncertain verdict audit-only. V4 делает benign retained
   observations видимыми и удаляемыми, без признака подозрения/уведомлений.
   Recipient/principal/production
   limits ещё не утверждены; реальные сбор/уведомления выключены.
-  Standalone3.1.1 held для объединённого analytics candidate.
+  Standalone3.1.1 включён в production3.2.0.
   Текущее production3.2.0/f650fe8 + runtime335a35a; активной lease/SSH нет.
 - **Cost diagnosis, read-only passed22:33:50UTC:** из последних5 записей все
   имеют answer/analyzer tokens,4 имеют exact event-level no-router proof,1 нет.

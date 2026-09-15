@@ -104,6 +104,13 @@ and updated Help; bot behavior, rates and schema remain unchanged. At acceptance
 four of the last five questions had complete estimates averaging $0.0065898;
 the fifth full price remained unknown. Independent ordinary Chrome QA passed.
 
+**Local candidate only: Console 3.3.0 (`1829573`).** The private Moderator
+review workflow is accepted with synthetic tests and a disabled server mount;
+there is no live collector, private-store bootstrap or Telegram delivery.
+Root905passed/5explicit fixture skips, Console159/159 and independent review
+passed. It is not pushed/deployed; the next step is a local capture/checkpoint/
+delivery bridge contract. See the [acceptance report](docs/reports/2026-09-15-moderation-review-integration.md).
+
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph
 out-of-coverage response are live. The knowledge-enabled boundary now uses
