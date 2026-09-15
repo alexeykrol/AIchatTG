@@ -48,9 +48,25 @@ while the integrator remains the sole technical production writer and lease
 owner. The analogous Assistant/Moderator oversight requests do not authorize
 their separate menu candidates or change the current Console-only scope.
 
-**Status: prepared.** Exact-source integration, tests and Console-only release
-are in progress; deployment is not yet claimed. Menu localization and the
-separate Moderator command-removal proposal are explicitly outside this release.
+**Status: deployed.** Lifecycle `production-verified`, exact Console source
+`82cb8c6`, started21:23:28UTC. Postverify21:24:28 and21:26:58 passed:
+healthy/restart0,29file source match, Russian pages/auth/API/storage verified,
+runtime335a35a unchanged. Existing token/routes preserved; new draft root
+UID1000:1000/mode0700. Lease/master closed; no draft save or paid/Telegram call.
+Menu localization and the separate Moderator command-removal proposal remain
+outside this release. [Receipt](reports/2026-09-15-console-v3-deployment.md).
+
+**Independent visual acceptance:** the Console task checked Settings, both
+Markdown domains and Analytics in ordinary production Chrome with existing
+auth; Russian navigation and draft-only semantics passed. The user then
+started using that tab; automation stopped. Other three pages have HTTP/source
+checks, not a completed production visual check.
+
+**Cost accounting remains partial:**38/44/75 questions for24h/7d/history were
+visible, but none of the75 had complete priced-stage receipts. Sum/average
+remain unknown (dashes), never zero. A complete metadata-only stage/token
+ledger and bounded aggregation remain proposed; this deployment does not
+claim the owner's full spending-analysis request is completed.
 
 ## 2026-09-15 — Implement and release the restored version footer
 

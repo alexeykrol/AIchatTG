@@ -4,6 +4,19 @@
 
 ## Текущее состояние
 
+- **Новая админка, lifecycle `production-verified`:** Console v3, image `82cb8c6`, запуск21:23:28UTC;
+  шесть русских страниц, единое меню, versioned drafts настроек/Markdown,
+  аналитика75 записанных вопросов (стоимость75 unknown, не ноль).
+  Root780/780 + historical29/29 + migration9/9 passed; postverify21:24:28UTC
+  healthy/restart0,29source files match, auth/API/draft permissions passed.
+  Public HTTPS/auth probe21:25:00UTC passed. Assistant/runtime/DB/routes не
+  менялись. RollbackConsole5e67451, папку новых черновиков сохранять.
+  Повтор21:26:58UTC passed, analytics18ms; lease/master закрыты21:27:13UTC.
+  Во внешнем обычном Chrome визуально прошли Settings/Domains/Analytics;
+  владелец начал пользоваться вкладкой, автоматизация остановлена. Остальные
+  три страницы проверены по HTTP/source, визуально в этом проходе not_run.
+  Точная квитанция и визуальная проверка:
+  `docs/reports/2026-09-15-console-v3-deployment.md`.
 - **Production, lifecycle `production-verified`:** Assistant **2.4.37 от 15.09.2026**, image `335a35a`, запуск
   21:01:48 UTC. Восстановлен footer в каждом фактически отправленном ответе,
   один раз внизу последней части. Body-only память и утверждённый текст сохранены.

@@ -3,6 +3,22 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Console v3 / 82cb8c6] — 2026-09-15 — Russian operator panel
+
+Lifecycle `production-verified`; Console-only release started21:23:28UTC;
+Assistant remains2.4.37 on335a35a.
+Existing auth/routes preserved, separate Console-owned draft storage added.
+See the [release receipt](docs/reports/2026-09-15-console-v3-deployment.md).
+
+- Unified six Russian pages and retained legacy variants/redirects.
+- Added validated, versioned Settings and Markdown drafts with no runtime
+  apply endpoint, plus recorded-question analytics with honest unknown costs.
+- Fixed a pre-release async domain-selection race that could pair old text
+  with a newly selected domain; added nine actual-script regressions.
+- Root780/780, historical29/29, migration9/9; deployed29-file source match,
+  health/auth/settings/domain/analytics checks passed. No production draft,
+  Telegram message, paid call or database mutation was used for acceptance.
+
 ## [Assistant 2.4.37] — 2026-09-15 — Restored reply version footer
 
 Lifecycle `production-verified`; runtime image `335a35a` started 21:01:48 UTC.

@@ -8,6 +8,14 @@ updated: 2026-09-15
 
 ## Next
 
+- [x] CONSOLE-V3: русская панель `82cb8c6` выложена отдельно от Assistant;
+      Settings/Markdown сохраняют только versioned drafts, не применяют их.
+      Исправлена гонка выбора домена; 30Console tests,29source-file match,
+      read-only production API/permissions passed. Receipt:
+      `docs/reports/2026-09-15-console-v3-deployment.md`.
+- [ ] CONSOLE-COST-1: полный metadata-only usage ledger и ограниченная
+      агрегация истории. Текущая аналитика честно показывает unknown, если
+      квитанции оплаченных стадий/кэша неполны; не считать это нулевой стоимостью.
 - [x] VERSION-1: Assistant `2.4.37` от `15.09.2026` выложен в image `335a35a`.
       Footer всех существующих send paths, final-part-only transport, bare
       model memory, canonical metadata и version-bump release guard покрыты
