@@ -75,3 +75,12 @@ git diff --check
 - Combined worst-case reservation USD0.5045423, carried48attempts, uncertain48 excluded permanently, unchanged09:11:38.999UTCdeadline.
 - Parent-first merged childjournal/capture identifies carried events and continuation_started; dollar summary can aggregate without duplicate calls.
 - Actual continuation:not_run until exact controllerlease accepted; no parent/source mutation.
+
+## Completed Lease Evidence
+
+- Exactc0ed32b continuation accepted and executed09:07:51–09:09:19UTC beforeoriginaldeadline.
+- All56never-attempted keys dispatched once; cumulative104unique attempts,103valid results,oneoriginaluncertain outcome preserved;no thirdrun.
+- Parent sixfilehashes unchanged. Mergedjournal/capture/costsummary preserve fullcarry withoutdoublebilling.
+- Known token-price estimateUSD0.01543186; total conservativeboundUSD0.07052025 includinguncertainty;invoiceunavailable.
+- Newrouter28/28 vsold14/28; analyzer26/27 vsold13/27 onmatchedcases. Onecompound-domain miss,tworisklabeldifferences,one technicalmissingresult remain explicit.
+- Versioned final report:docs/reports/2026-09-15-routing-measurement-result-v2.md. No source/index/gold tuning orproduction action.
