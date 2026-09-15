@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Add a clarification suggestion without rewriting the boundary reply
+
+**Reported by:** the owner asked to add a rephrasing suggestion, then explicitly
+corrected the broader rewrite: «Твоя задача была добавить, а не жестко
+редактировать». Source messages `01a0a6a2-6a0e-7ad1-9c5d-60b7da5b128d` and
+`01a0a6a4-69dc-7d42-a250-b9f8b7728f8a` in the Assistant task.
+
+**Implementation:** source candidate `60f6b9b` was independently reviewed and
+cherry-picked as `183d7f9`. Every original sentence in the out-of-coverage
+response is preserved; only this sentence is inserted after the opening:
+«Возможно, вам стоит сформулировать вопрос иначе: назовите тему, урок или
+задачу — тогда я смогу попробовать найти ответ.» No insulting copy or
+unsupported claim about automatic moderator escalation or a permanent ban was
+added. The adjacent comment makes clear this is a wording change, not a retry
+limit or moderation rule.
+
+**Status: fixed.** Local integration only; candidate lifecycle `prepared`.
+An exact-text regression checks the single insertion and unchanged original
+wording; root tests passed 688/688, frozen-source receipt checks 29/29.
+Production, paid calls, Telegram settings/messages, push and deployment
+remain `not_run`. See [verification](reports/2026-09-15-coverage-copy-candidate.md).
+
 ## 2026-09-15 — Make Help explicit and menu-first
 
 **Reported by:** the owner asked to spell out every step for an inattentive,

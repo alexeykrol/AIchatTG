@@ -26,6 +26,8 @@ import { exportCoverageDeficits } from '../scripts/export-deficits.mjs';
  * переформулируйте") used to cover two different facts — a hole inside the
  * covered domain and a topic outside it — and a live run proved the advice is
  * harmful for the second: the user rephrased three times into the same wall.
+ * The owner later approved one topic/lesson/task clarification suggestion,
+ * preserving the original boundary text and external alternatives verbatim.
  */
 
 test('the two abstention verdicts carry different routes and different texts', () => {
@@ -33,10 +35,10 @@ test('the two abstention verdicts carry different routes and different texts', (
   assert.equal(outOfCoverage.route, 'boundary:out_of_coverage:domain_no_signal');
   assert.equal(outOfCoverage.text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
   // Warm and useful: names the boundary, points at a place that can help, and
-  // never sends the user to rephrase into the same wall.
+  // asks for a concrete topic rather than promising an answer after any rewording.
   assert.match(outOfCoverage.text, /не уполномочен/);
   assert.match(outOfCoverage.text, /ChatGPT|Claude/);
-  assert.doesNotMatch(outOfCoverage.text, /переформулировать/);
+  assert.match(outOfCoverage.text, /назовите тему, урок или задачу/);
 
   for (const reason of [
     GROUNDING_REASONS.NOT_FOUND,
@@ -48,6 +50,19 @@ test('the two abstention verdicts carry different routes and different texts', (
     assert.equal(reply.route, `boundary:not_in_materials:${reason}`, reason);
     assert.equal(reply.text, ASSISTANT_NOT_IN_MATERIALS_TEXT, reason);
   }
+});
+
+test('the out-of-coverage response preserves every original sentence and adds only the approved suggestion', () => {
+  const original = [
+    'Хороший вопрос, но эта тема за пределами курса, и отвечать на неё я не уполномочен.',
+    'Такой вопрос лучше задать универсальному чату — ChatGPT или Claude — или профильному консультанту.',
+    'А со всем, что касается курса, помогу с радостью: материал уроков, организация обучения,',
+    'выбор курса и подойдёт ли он именно вам.',
+  ];
+  const addition = 'Возможно, вам стоит сформулировать вопрос иначе: назовите тему, урок или задачу — тогда я смогу попробовать найти ответ.';
+  assert.equal(ASSISTANT_OUT_OF_COVERAGE_TEXT, [original[0], addition, ...original.slice(1)].join(' '));
+  assert.equal(ASSISTANT_OUT_OF_COVERAGE_TEXT.replace(` ${addition}`, ''), original.join(' '));
+  assert.doesNotMatch(ASSISTANT_OUT_OF_COVERAGE_TEXT, /туп|навечно|3 попыт|модератор/iu);
 });
 
 test('only the domain no-signal verdict classifies as out of coverage', () => {

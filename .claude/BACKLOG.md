@@ -8,6 +8,10 @@ updated: 2026-09-15
 
 ## Next
 
+- [ ] COVERAGE-COPY-1: одно согласованное предложение о конкретизации вопроса
+      добавлено без переписывания исходного отказа (`183d7f9`); lifecycle
+      `prepared`, включить в следующий exact release candidate вместе с Help.
+      Автоповторы, moderation escalation и санкции этим изменением не вводятся.
 - [ ] HELP-1: локальный menu-first Help кандидат интегрирован, lifecycle
       `prepared`; перед релизом нужны точный approval и release lease.
       Список возможностей сохранён, identity-grounding восстановлен, prompt
