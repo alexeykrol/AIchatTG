@@ -40,7 +40,7 @@ test('explicit operations use only the selected role token and preserve the cuto
     } },
     { url: 'https://api.telegram.org/botmoderator-token/deleteWebhook', body: { drop_pending_updates: false } },
     { url: 'https://api.telegram.org/botassistant-token/setMyCommands', body: { commands: [
-      { command: 'ask', description: 'Ask the assistant' }, { command: 'help', description: 'Show assistant help' },
+      { command: 'ask', description: 'Задать вопрос ассистенту' }, { command: 'help', description: 'Показать справку' },
     ] } },
     { url: 'https://api.telegram.org/botmoderator-token/getWebhookInfo', body: null },
   ]);

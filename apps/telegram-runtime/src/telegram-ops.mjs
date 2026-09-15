@@ -4,8 +4,8 @@ const ROLE_PATHS = Object.freeze({
   assistant: '/webhooks/telegram/assistant',
 });
 const ASSISTANT_COMMANDS = Object.freeze([
-  { command: 'ask', description: 'Ask the assistant' },
-  { command: 'help', description: 'Show assistant help' },
+  { command: 'ask', description: 'Задать вопрос ассистенту' },
+  { command: 'help', description: 'Показать справку' },
 ]);
 
 function ownedRole(role) {
