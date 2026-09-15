@@ -8,7 +8,7 @@ import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeRetrieval } from '../src/knowledge-retrieval.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
-import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
+import { ASSISTANT_OUT_OF_COVERAGE_TEXT } from '../src/assistant-policy.mjs';
 
 /**
  * The whole answer path on hand-built ports: an admitted package, a retriever
@@ -326,7 +326,7 @@ test('a course question reaches the model with retrieved entries carrying title 
   assert.equal(actions.at(-1)[0], 'send');
 });
 
-test('a router-unknown question gets catalog capabilities and a journal entry without retrieval', async () => {
+test('a router-unknown question delivers the exact approved copy and journals it without retrieval', async () => {
   // Scope is the router's verdict; empty retrieval is not an unknown domain.
   const retriever = fakeRetriever({ status: 'not_found' });
   const layer = retrieval({}, { retriever });
@@ -341,14 +341,12 @@ test('a router-unknown question gets catalog capabilities and a journal entry wi
   assert.equal(result.abstained, true);
   assert.equal(result.reason, 'domain_no_signal');
   assert.equal(answers.length, 0, 'an ungrounded question costs no answer call');
-  // Silence would read as a broken bot; the user gets a delivered, honest reply.
-  // "Переформулируйте" is deliberately absent: no rephrasing brings an
-  // uncovered topic into the corpus, so the reply points elsewhere instead.
+  // Check the actual Telegram port, not just the standalone policy constant:
+  // domainBoundaryReply must not shadow the owner's exact three paragraphs.
   assert.equal(actions.at(-1)[0], 'send');
-  assert.match(actions.at(-1)[1].text, /Не нашёл подходящей области знаний/);
-  for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(actions.at(-1)[1].text.includes(domain.capability));
-  assert.doesNotMatch(actions.at(-1)[1].text, /не уполномочен/);
-  assert.doesNotMatch(actions.at(-1)[1].text, /переформулировать/);
+  assert.equal(actions.at(-1)[1].text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
+  assert.equal(actions.at(-1)[1].text.split('\n\n').length, 3);
+  assert.deepEqual(actions.map(([kind]) => kind), ['send'], 'boundary copy adds no moderation action');
   assert.equal(retriever.asked.length, 0);
   assert.match(result.route, /^boundary:out_of_coverage:/);
   // A delivered answer is what the quota pays for, so the reservation completes.

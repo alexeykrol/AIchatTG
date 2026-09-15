@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import Database from 'better-sqlite3';
 import { ASSISTANT_SOURCE_PACKAGES, knowledgeManifestDigest } from '@aichattg/telegram-core';
-import { ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
+import { ASSISTANT_EMPTY_ASK_TEXT, ASSISTANT_OUT_OF_COVERAGE_TEXT } from '../src/assistant-policy.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
 import { loadRuntimeConfig } from '../src/config.mjs';
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
@@ -588,9 +588,7 @@ test('a redirect route answers with the out-of-coverage text instead of falling 
     // Платный ответный вызов не делается: знания нет, отвечать нечем.
     assert.equal(answerCalls, 0);
     const sent = actions.filter(([kind]) => kind === 'send').at(-1);
-    assert.match(sent[1].text, /Не нашёл подходящей области знаний/);
-    for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(sent[1].text.includes(domain.capability));
-    assert.doesNotMatch(sent[1].text, /не уполномочен/);
+    assert.equal(sent[1].text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
     // Вопрос попадает в журнал дефицитов — это сигнал спроса, не мусор.
     assert.equal(store.listCoverageDeficits({ limit: 10 }).length, 1);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
@@ -990,8 +988,7 @@ test('an abstention answer stays in dialogue history because it answers a real q
     const remembered = store.recentDialogue('-100', '7', { limit: 3 });
     assert.equal(remembered.length, 1);
     assert.equal(remembered[0].question, 'посоветуйте crm для салона красоты');
-    assert.match(remembered[0].answer, /Не нашёл подходящей области знаний/);
-    for (const domain of DEFAULT_DOMAIN_CATALOG.domains) assert.ok(remembered[0].answer.includes(domain.capability));
+    assert.equal(remembered[0].answer, ASSISTANT_OUT_OF_COVERAGE_TEXT);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 

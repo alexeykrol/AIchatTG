@@ -1,5 +1,5 @@
 /** Domain interpretation is release data; these functions know no subject names. */
-import { isAbstentionReason } from './assistant-policy.mjs';
+import { assistantAbstentionReply, isAbstentionReason } from './assistant-policy.mjs';
 const MAX_DOMAINS_PER_TURN = 3;
 const RISK_FLAGS = new Set(['abuse', 'prompt_injection', 'privacy']);
 
@@ -215,9 +215,6 @@ export function domainBoundaryReply(routing, catalog) {
     const titles = routing.domainRoutes.map((r) => catalog.get(r.domainId).title).join(', ');
     return { text: `Вопрос относится к моей области: ${titles}. В доступных материалах сейчас нет достаточных сведений для ответа. Уточните вопрос; я не буду заменять недостающие сведения догадкой.`, route: 'boundary:domain_knowledge_missing' };
   }
-  if (routing.reason === 'domain_no_signal') return {
-    text: `Не нашёл подходящей области знаний для этого вопроса. Я могу помочь: ${catalog.domains.map((d) => d.capability).join('; ')}.`,
-    route: 'boundary:out_of_coverage:domain_no_signal',
-  };
+  if (routing.reason === 'domain_no_signal') return assistantAbstentionReply(routing.reason);
   return null;
 }

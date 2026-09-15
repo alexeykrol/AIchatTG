@@ -19,6 +19,30 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Deploy the owner's exact three-paragraph boundary response
+
+**Reported by:** the owner supplied a replacement «точно, без редакции»
+(`01a0a6a8-de9d-72f2-9a00-2bd730adda82`), viewed the final text and explicitly
+requested «Отлично. Деплой.» (`01a0a6ab-a9ea-7c90-ac1c-b4f18bc8dedc`).
+This supersedes the additive-only wording decision recorded below.
+
+**Implementation:** candidate `541a2de` was integrated as `71c6568`. The exact
+three paragraphs, punctuation and «смогу найти ответить» are preserved; text
+SHA-256 is `a58d0b6896776c2431875801e68ffd487807528702bf40427322da949bc902ba`.
+Pre-release review found that the knowledge-enabled `domain_no_signal` path
+still returned its own older catalog text, shadowing the approved constant.
+That path now delegates to the same policy reply. The known-domain knowledge
+gap remains distinct. Real runtime-port and dialogue-history regressions
+verify exact delivery; the copy does not add moderation, escalation, bans,
+retry behavior, model calls or quota changes.
+
+**Status: fixed.** Local integration; release requested, production verification
+pending. Focused offline checks passed 72/72; root suite 688/688, frozen-source
+receipt tests 29/29, migration tests 9/9 and scenario/isolation checks passed.
+Deployment requires the final
+exact root candidate, fresh production preflight and a one-time runtime-only
+lease with image-only rollback. New paid and Telegram acceptance are `not_run`.
+
 ## 2026-09-15 — Add a clarification suggestion without rewriting the boundary reply
 
 **Reported by:** the owner asked to add a rephrasing suggestion, then explicitly
