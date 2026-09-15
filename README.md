@@ -95,6 +95,13 @@ container/config/database were not changed by this Console-only release.
 Open [the panel](https://aikrol.questtales.com/) with the existing login.
 See the [Console receipt](docs/reports/2026-09-15-console-v31-deployment.md).
 
+**Local candidate, not deployed: Console 3.2.0.** Analytics shows the five
+newest saved questions, standard token-price estimates and a mean over fully
+estimated questions only. Missing stage evidence stays unknown; known-stage
+subtotals are separate. The read-only journal covers a subset of chats and is
+not a provider invoice. This candidate includes the pending3.1.1 label fixes
+and updated Help; bot behavior, rates, schema and production remain unchanged.
+
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph
 out-of-coverage response are live. The knowledge-enabled boundary now uses

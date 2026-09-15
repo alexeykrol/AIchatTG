@@ -3,6 +3,19 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Unreleased — Console 3.2.0]
+
+Local candidate only; production remains3.1.0 until a separately approved release.
+
+- Show the five newest saved questions, bounded excerpts, UTC times, evidenced
+  answer/analyzer/router estimates and a priced-only average with its denominator.
+- Recognize event-matched completed analyzer-dispatch receipts as router no-call
+  proof. Missing or conflicting evidence stays unknown, never a fabricated zero.
+- Keep known-stage subtotals distinct from full estimates and unavailable totals.
+- Include the pending3.1.1 Russian-label fixes, tiny-positive-price formatting
+  and Help explaining incomplete costs and the difference from provider invoices.
+- No runtime, pricing catalog, schema, configuration, routes or data change.
+
 ## [Console 3.1.0] — 2026-09-15 — Release header and Russian Help
 
 Lifecycle `production-verified`; image `eb0f7fe`, release22:04:32UTC.

@@ -150,7 +150,7 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
       const page = await response.text();
       assert.match(page, /<html lang="ru">/u);
       assert.match(page, /\/console-v3\.css/u);
-      assert.match(page, /Версия 3\.1\.1 · релиз 15\.09\.2026, 21:40:00 UTC/u);
+      assert.match(page, /Версия 3\.2\.0 · релиз 15\.09\.2026, 21:40:00 UTC/u);
       assert.doesNotMatch(page, /Панель управления AIchatTG|CONSOLE_RELEASE_STAMP|class="subhead"|class="badge"/iu);
       assert.doesNotMatch(page, /Количество вопросов и оценка затрат по сохранённым ответам|Редактирование доступно\. Сохранение создаёт новую версию/u);
       assert.doesNotMatch(page, /Legacy assistant view|Domain knowledge|Assistant settings|Operator pages/u);
@@ -164,10 +164,14 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
     for (const menu of menus) assert.deepEqual(menu, expectedMenu);
     const help = await (await fetch(url + '/help-v3.html', { headers: { authorization: auth() } })).text();
     assert.match(help, /Как подготовить настройки ассистента|Как подготовить базу ответов|Почему в аналитике стоит «—»/u);
+    assert.match(help, /Последние пять сохранённых вопросов/u);
+    assert.match(help, /По 4 оценённым из 5/u);
+    assert.match(help, /деление суммы четырёх известных цен на четыре, а не на пять/u);
+    assert.match(help, /Учтённые этапы/u);
     assert.equal((await fetch(url + '/api/operator/release')).status, 401);
     assert.deepEqual(await (await fetch(url + '/api/operator/release', {
       headers: { authorization: auth() },
-    })).json(), { version: '3.1.1', releasedAt: '2026-09-15T21:40:00Z' });
+    })).json(), { version: '3.2.0', releasedAt: '2026-09-15T21:40:00Z' });
     const aliases = new Map([
       ['/moderation.html', '/moderation-v3.html'], ['/assistant.html', '/assistant-v3.html'],
       ['/eval.html', '/tests-v3.html'], ['/settings-v2.html', '/settings-v3.html'],
