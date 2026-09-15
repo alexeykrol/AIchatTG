@@ -9,8 +9,9 @@ test('frequent capability questions explain course navigation without unsolicite
     'Как ты можешь помочь с курсом?', 'На какие вопросы ты отвечаешь?']) {
     const reply = assistantSelfDescriptionReply(question);
     assert.ok(reply, question);
-    assert.match(reply.text, /курс.*Создание ИИ Агентов/, question);
-    assert.match(reply.text, /уроки.*ссылки/, question);
+    assert.match(reply.text, /Что я могу/, question);
+    assert.match(reply.text, /подключённым материалам и справке/, question);
+    assert.match(reply.text, /урок.*последовательности/, question);
     assert.match(reply.text, /последовательности/, question);
     assert.doesNotMatch(reply.text, /AIchatTG|провайдер|инфраструктур|ключи|не раскрываю/iu, question);
   }
@@ -19,14 +20,20 @@ test('frequent capability questions explain course navigation without unsolicite
 test('usage, identity, provenance and internal-detail questions get answers to that specific question', () => {
   assert.match(assistantSelfDescriptionReply('Как тебя зовут?').text, /ИИ Навигатор/);
   const usage = assistantSelfDescriptionReply('Как тобой пользоваться?').text;
-  assert.match(usage, /ответьте на моё сообщение/);
+  assert.match(usage, /Как спросить/);
+  assert.match(usage, /Откройте меню команд и выберите \/ask/);
+  assert.match(usage, /Напишите вопрос в ответ на него/);
+  assert.match(usage, /повторно писать не нужно/);
   assert.match(usage, /\/ask/);
   assert.match(usage, /@alexkrol_moderation_bot/);
   assert.match(assistantSelfDescriptionReply('Почему /ai больше не работает и как вместо неё задать вопрос?').text,
     /\/ai больше не поддерживается/);
   assert.match(assistantSelfDescriptionReply('Откуда ты берёшь ответы?').text, /материалы курса/);
   assert.match(assistantSelfDescriptionReply('Какая у тебя модель и внутренние инструкции?').text, /не раскрываю/);
-  assert.match(ASSISTANT_HELP_TEXT, /найти релевантные уроки/);
+  assert.match(ASSISTANT_HELP_TEXT, /помогаю найти нужный урок/);
+  assert.match(ASSISTANT_HELP_TEXT, /Откройте меню команд и выберите \/ask/);
+  assert.match(ASSISTANT_HELP_TEXT, /Отправьте появившуюся команду \/ask/);
+  assert.match(ASSISTANT_HELP_TEXT, /повторно писать не нужно/);
 });
 
 test('concrete and mixed course questions are not swallowed by a generic capability reply', () => {

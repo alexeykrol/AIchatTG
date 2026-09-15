@@ -426,12 +426,12 @@ test('the Assistant answers every address to it and stays out of every other con
     assert.match(lastSent(), /а сколько уроков в курсе\?/);
 
     // Одинокая команда — массовый штатный сценарий (клик по меню Telegram):
-    // ответ содержит готовый шаблон, а не объяснение формата, и уходит с
-    // forceReply — следующее сообщение человека Telegram доставит как ответ.
+    // ответ даёт один следующий шаг и уходит с forceReply — следующее
+    // сообщение человека Telegram доставит как ответ.
     const empty = await ask(620, '/ask');
     assert.equal(empty.command, 'ask_empty');
     assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
-    assert.equal(lastSent(), '✍️ Задайте вопрос: ответьте на это сообщение или отправьте /ask ваш вопрос одной строкой');
+    assert.equal(lastSent(), '✍️ Теперь напишите вопрос в ответ на это сообщение и отправьте его. /ask повторно писать не нужно.');
     assert.equal(lastSentInput().forceReply, true);
     // Один тег без текста — тот же случай.
     assert.equal((await ask(630, '@assistant_bot')).command, 'ask_empty');
@@ -814,7 +814,8 @@ test('knowledge-enabled self-description routes and answers from public Markdown
     const sent = actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
     assert.equal(sent.includes('не уполномочен'), false);
     assert.match(sent, /ИИ Навигатор/);
-    assert.match(sent, /уроки.*ссылки/);
+    assert.match(sent, /нужный урок/);
+    assert.match(sent, /ссылки/);
     assert.match(sent, /последовательност[ьи]/);
     assert.equal(sent.includes('инфраструктуру'), false);
     assert.deepEqual({ routeCalls, answerCalls, retrievalCalls, knowledgeCalls }, {
