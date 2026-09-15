@@ -61,9 +61,17 @@ success/loading banners are removed. Errors, unavailable data, stale drafts,
 and save results remain visible. The Help tab explains settings, Markdown,
 read-only tabs, analytics limits, and the separate step needed to apply a draft.
 
-**Status: prepared.** The isolated source candidate has not yet been merged or
-deployed. Console tests31/31 and the relevant Compose contract3/3 passed;
-production checks and visual acceptance are `not_run` until the exact release.
+**Status: deployed.** Lifecycle `production-verified`, source `eb0f7fe`, version
+3.1.0, released2026-09-15T22:04:32Z. All seven page headers/release API match;
+actual container start is0.562637s later. Root782total/777passed/5fixture-skips,
+Console31/31, Compose3/3, migration9/9, independent source/script review passed.
+Repeated production verification22:07:10UTC confirms healthy/restart0 and
+unchanged runtime335a35a/env/schema/routes/drafts; only the Console timestamp
+was added. Lease/master closed22:07:43UTC. Ordinary Chrome passed7/7 pages,
+Help anchors and common header/menu; found two minor Analytics copy defects
+(`в 1 чатах`, English pricing identifier). A separate bounded Console hotfix
+will address them without changing calculations. UI cleanup status is partial
+until that follow-up is verified. [Receipt](reports/2026-09-15-console-v31-deployment.md).
 
 ## 2026-09-15 — Release the Russian Console v3 separately from Assistant
 

@@ -4,13 +4,23 @@
 
 ## Текущее состояние
 
+- **Админка 3.1.0, lifecycle `production-verified`:** image `eb0f7fe`, релиз
+  2026-09-15T22:04:32Z, реальный старт22:04:32.562637294Z (delta0.562637s).
+  Семь вкладок с общей версией/датой/временем и русской Помощью, лишние
+  вводные плашки убраны. Один новый Console-only env `OPERATOR_CONSOLE_RELEASED_AT`.
+  Root777passed/5fixture-skips/0failed из782; Console31/31, migration9/9 passed.
+  Два production checks,31sourcefiles,7headers/API/HTTPS/auth passed; runtime335a35a,
+  настройки/схема/маршруты/черновики не изменены. RollbackConsole82cb8c6.
+  Lease/master закрыты22:07:43UTC; Chrome7/7 passed, но Analytics имеет
+  два copy-дефекта (склонение «чат» и English pricing ID); отдельный hotfix.
+  `docs/reports/2026-09-15-console-v31-deployment.md`.
 - **Moderator menu, lifecycle `production-verified`:** в21:42:34UTC удалена
   одна stale chat-scoped команда `/ask` у `@ai_akrolmoder_bot` в тестовом чате.
   Один API delete,38reads,18-cell before/after passed; runtime335a35a и
   Console82cb8c6 без изменений, healthy/restart0. Lease/master закрыты21:46:03UTC.
   Клиентский refresh not_run; меню Assistant и HYGIENE-1 не затронуты. Receipt:
   `docs/reports/2026-09-15-moderator-menu-cleanup.md`.
-- **Новая админка, lifecycle `production-verified`:** Console v3, image `82cb8c6`, запуск21:23:28UTC;
+- **Предыдущая админка, lifecycle `production-verified`:** Console v3, image `82cb8c6`, запуск21:23:28UTC;
   шесть русских страниц, единое меню, versioned drafts настроек/Markdown,
   аналитика75 записанных вопросов (стоимость75 unknown, не ноль).
   Root780/780 + historical29/29 + migration9/9 passed; postverify21:24:28UTC

@@ -86,13 +86,14 @@ is retained; new live Telegram acceptance was not run. See the
 [current release receipt](docs/reports/2026-09-15-assistant-2.4.37-deployment.md)
 for lifecycle and production verification evidence.
 
-**Current operator panel: Russian v3**, Console image `82cb8c6`, started
-2026-09-15 21:23:28UTC. Six pages share one Russian navigation; Settings and
-Markdown editors save versioned drafts only, not changes to the running bot.
+**Current operator panel: Russian Console 3.1.0**, image `eb0f7fe`, released
+2026-09-15 22:04:32UTC. Seven pages share Russian navigation, an exact
+version/date/time header and detailed Help. Settings and Markdown editors
+save versioned drafts only, not changes to the running bot.
 Analytics preserves unknown cost and limited journal coverage. The Assistant
 container/config/database were not changed by this Console-only release.
 Open [the panel](https://aikrol.questtales.com/) with the existing login.
-See the [Console receipt](docs/reports/2026-09-15-console-v3-deployment.md).
+See the [Console receipt](docs/reports/2026-09-15-console-v31-deployment.md).
 
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph

@@ -8,6 +8,12 @@ updated: 2026-09-15
 
 ## Next
 
+- [x] CONSOLE-V31: Console3.1.0 `eb0f7fe` production-verified, семь общих
+      version/date/time headers + русская Помощь, лишние плашки убраны.
+      Timestamp сравнен с реальным start (delta0.562637s); runtime/drafts сохранены.
+      Lease/master закрыты; Chrome7/7 passed. Два copy-дефекта Analytics
+      (склонение/English pricing ID) требуют отдельного hotfix. Receipt:
+      `docs/reports/2026-09-15-console-v31-deployment.md`.
 - [x] MODERATOR-MENU-1: stale chat-scoped `/ask` removed from Moderator's
       test-chat command menu at21:42:34UTC. Exact one-call cleanup,18-cell
       before/after checks, unchanged app snapshots passed; lease/master closed.

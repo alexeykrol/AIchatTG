@@ -3,6 +3,21 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Console 3.1.0] — 2026-09-15 — Release header and Russian Help
+
+Lifecycle `production-verified`; image `eb0f7fe`, release22:04:32UTC.
+Assistant remains2.4.37 on335a35a. See the
+[release receipt](docs/reports/2026-09-15-console-v31-deployment.md).
+
+- All seven primary tabs show the same server-rendered version/date/time;
+  the timestamp is verified against actual container start, not browser time.
+- Added detailed Russian Help; removed redundant introductory and routine
+  banners while retaining errors, stale-draft warnings and save confirmation.
+- Console-only `OPERATOR_CONSOLE_RELEASED_AT` is required in production.
+  Existing auth/config/routes/mounts/drafts and runtime remain unchanged.
+- Root777passed/5explicit fixture skips/0failed; Console31/31, Compose3/3,
+  migration9/9,31deployed-file hashes,7page/API/HTTPS checks passed.
+
 ## [Console v3 / 82cb8c6] — 2026-09-15 — Russian operator panel
 
 Lifecycle `production-verified`; Console-only release started21:23:28UTC;
