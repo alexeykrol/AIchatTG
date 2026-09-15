@@ -150,7 +150,7 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
       const page = await response.text();
       assert.match(page, /<html lang="ru">/u);
       assert.match(page, /\/console-v3\.css/u);
-      assert.match(page, /Версия 3\.1\.0 · релиз 15\.09\.2026, 21:40:00 UTC/u);
+      assert.match(page, /Версия 3\.1\.1 · релиз 15\.09\.2026, 21:40:00 UTC/u);
       assert.doesNotMatch(page, /Панель управления AIchatTG|CONSOLE_RELEASE_STAMP|class="subhead"|class="badge"/iu);
       assert.doesNotMatch(page, /Количество вопросов и оценка затрат по сохранённым ответам|Редактирование доступно\. Сохранение создаёт новую версию/u);
       assert.doesNotMatch(page, /Legacy assistant view|Domain knowledge|Assistant settings|Operator pages/u);
@@ -167,7 +167,7 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
     assert.equal((await fetch(url + '/api/operator/release')).status, 401);
     assert.deepEqual(await (await fetch(url + '/api/operator/release', {
       headers: { authorization: auth() },
-    })).json(), { version: '3.1.0', releasedAt: '2026-09-15T21:40:00Z' });
+    })).json(), { version: '3.1.1', releasedAt: '2026-09-15T21:40:00Z' });
     const aliases = new Map([
       ['/moderation.html', '/moderation-v3.html'], ['/assistant.html', '/assistant-v3.html'],
       ['/eval.html', '/tests-v3.html'], ['/settings-v2.html', '/settings-v3.html'],

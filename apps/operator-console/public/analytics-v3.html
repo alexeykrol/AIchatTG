@@ -34,6 +34,16 @@
     notice.hidden = !message;
   }
   function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(6) : '—'; }
+  function observedChats(count) {
+    return count + ' ' + (count % 10 === 1 && count % 100 !== 11 ? 'чате' : 'чатах');
+  }
+  function pricingLabel(pricing) {
+    const date = String(pricing.verifiedAt || '');
+    const checked = /^\d{4}-\d{2}-\d{2}$/u.test(date)
+      ? 'Тарифы проверены ' + date.split('-').reverse().join('.')
+      : 'Дата проверки тарифов неизвестна';
+    return checked + ' · оценка, не счёт к оплате.';
+  }
   function metric(label, value, detail) {
     const cell = document.createElement('div'); cell.className = 'metric';
     const l = document.createElement('div'); l.className = 'label'; l.textContent = label;
@@ -58,9 +68,8 @@
       if (data.status !== 'available') { say('Аналитика недоступна: данные об ответах пока не получены.', 'error'); return; }
       bucket('today', data.today); bucket('week', data.week); bucket('total', data.total);
       document.getElementById('coverage').textContent =
-        'Ответы записаны в ' + data.coverage.observedChatCount + ' чатах. Не все обращения и затраты учтены.';
-      document.getElementById('pricing').textContent = 'Тарифы ' + data.pricing.version +
-        ' · проверены ' + data.pricing.verifiedAt + ' · оценка, не счёт к оплате.';
+        'Ответы записаны в ' + observedChats(data.coverage.observedChatCount) + '. Не все обращения и затраты учтены.';
+      document.getElementById('pricing').textContent = pricingLabel(data.pricing);
       say('');
     } catch (error) { say('Аналитика недоступна: ' + error.message, 'error'); }
   }

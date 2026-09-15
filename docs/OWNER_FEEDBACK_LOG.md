@@ -19,6 +19,24 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Analytics copy follow-up from the Console visual acceptance
+
+**Context:** independent Chrome acceptance of the owner's all-Russian Console
+cleanup request found `Ответы записаны в 1 чатах` and an exposed English pricing
+table identifier/ISO date in Console3.1.0. Seven pages otherwise passed. This
+is acceptance feedback for the same owner request, not a pricing-policy change.
+
+**Local fix:** separate Console3.1.1 formats `1/21/101 чате` and `0/2/5/11/111
+чатах`; displays `Тарифы проверены 15.09.2026 · оценка, не счёт к оплате.`
+without the technical identifier. Pricing JSON, computations and API data are
+unchanged. Missing dates and costs remain unknown. Two tests execute the actual
+inline browser script and check formatting, data preservation and read-only use.
+
+**Status: prepared.** Current production remains Console3.1.0 (`eb0f7fe`).
+Its lease and SSH master are closed; no new production action is authorized
+by that consumed lease. The separate3.1.1 candidate needs exact release authority,
+fresh preflight and its own lease before changing the live Console.
+
 ## 2026-09-15 — Remove the Moderator's stale Assistant command in the test chat
 
 **Reported / requested:** the owner flagged the parasite Moderator menu and
