@@ -208,6 +208,7 @@ services:
       OPERATOR_CONSOLE_PORT: "8790"
       OPERATOR_CONSOLE_CONTAINER_BIND: "true"
       AICHATTG_OPERATOR_TOKEN: "${AICHATTG_OPERATOR_TOKEN:-}"
+      OPERATOR_CONSOLE_RELEASED_AT: "${OPERATOR_CONSOLE_RELEASED_AT:-}"
       OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH: /var/lib/aichattg/telegram-runtime/telegram-runtime.sqlite
       OPERATOR_CONSOLE_SAFETY_PROMPT_PATH: /app/apps/operator-console/safety-artifacts/moderation-tg-v3.md
       OPERATOR_CONSOLE_DOMAIN_INDEX_PATH: /app/apps/telegram-runtime/src/domains/INDEX.md

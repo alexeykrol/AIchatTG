@@ -10,11 +10,9 @@
 <main class="shell">
   <header class="masthead">
     <div>
-      <p class="eyebrow">Панель управления AIchatTG</p>
+      <p class="eyebrow">{{CONSOLE_RELEASE_STAMP}}</p>
       <h1>Модерация</h1>
-      <p class="subhead">Режим защиты чатов, решения по сообщениям и действующая версия правил. Данные доступны только для просмотра.</p>
     </div>
-    <span class="badge">Только просмотр</span>
   </header>
   <nav class="nav" aria-label="Разделы панели управления">
     <a class="active" aria-current="page" href="/moderation-v3.html">Модерация</a>
@@ -23,12 +21,12 @@
     <a href="/domains-v3.html">Базы ответов</a>
     <a href="/analytics-v3.html">Аналитика</a>
     <a href="/tests-v3.html">Тесты</a>
+    <a href="/help-v3.html">Помощь</a>
   </nav>
-  <div id="notice" class="status" role="status" aria-live="polite">Загрузка данных модерации…</div>
+  <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card">
       <h2>Действующий режим</h2>
-      <p>Параметры запущенного Telegram-рантайма. Изменения здесь не выполняются.</p>
       <div class="metric-grid">
         <div class="metric"><div class="label">Режим</div><div class="value" id="mode">—</div><div class="detail" id="mode-detail">—</div></div>
         <div class="metric"><div class="label">Модель безопасности</div><div class="value mono" id="safety-model">—</div><div class="detail" id="safety-effort">—</div></div>
@@ -37,7 +35,6 @@
     </section>
     <section class="card">
       <h2>Решения и расход</h2>
-      <p>Счётчики относятся к записям модерации в базе AIchatTG; стоимость в долларах США этим источником не измеряется. При недоступной базе сервис также может вернуть пустые счётчики.</p>
       <div class="metric-grid">
         <div class="metric"><div class="label">Всего событий</div><div class="value" id="events-total">—</div></div>
         <div class="metric"><div class="label">Чисто</div><div class="value" id="clean-total">—</div></div>
@@ -49,14 +46,12 @@
     </section>
     <section class="card wide">
       <h2>Последние решения</h2>
-      <p>До 100 последних записей. Текст сообщений в этой проекции не хранится; показаны только идентификаторы и результат проверки.</p>
-      <div id="events-status" class="status">Загрузка записей…</div>
+      <div id="events-status" class="status" role="status" aria-live="polite" hidden></div>
       <div id="events" style="overflow-x:auto"></div>
       <div class="actions"><button class="secondary" id="refresh" type="button">Обновить данные</button></div>
     </section>
     <section class="card wide">
       <h2>Действующий текст правил</h2>
-      <p>Файл правил из установленного релиза. Версии можно читать, но их нельзя менять на этой странице.</p>
       <div class="metric-grid">
         <div class="metric"><div class="label">Активная версия</div><div class="value mono" id="prompt-version">—</div></div>
         <div class="metric"><div class="label">Доступных версий</div><div class="value" id="prompt-count">—</div></div>
@@ -105,7 +100,11 @@
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     }).format(parsed);
   };
-  function say(node, message, tone = '') { node.textContent = message; node.className = `status ${tone}`.trim(); }
+  function say(node, message, tone = '') {
+    node.textContent = message;
+    node.className = `status ${tone}`.trim();
+    node.hidden = !message;
+  }
   async function get(path) {
     const response = await fetch(path);
     if (!response.ok) throw new Error('Ответ сервиса недоступен');
@@ -132,7 +131,7 @@
     node.replaceChildren();
     if (!Array.isArray(events)) { say(eventsStatus, 'Формат записей недоступен.', 'error'); return; }
     if (!events.length) { say(eventsStatus, 'Ответ сервиса не содержит записей. Пустая выборка не подтверждает отсутствие событий.'); return; }
-    say(eventsStatus, `Показано записей: ${events.length}.`, 'good');
+    say(eventsStatus, '');
     const table = document.createElement('table'); table.className = 'review-table';
     const head = document.createElement('thead'); const heading = document.createElement('tr');
     for (const label of ['Время', 'Чат / сообщение', 'Автор', 'Решение', 'Уверенность', 'Причина', 'Действие', 'Модель', 'Токены вх / исх']) {
@@ -162,7 +161,7 @@
     document.getElementById('prompt-text').value = prompts.activeText || 'Текст действующих правил недоступен.';
   }
   async function load() {
-    say(notice, 'Загрузка данных модерации…');
+    say(notice, '');
     const requests = [
       get('/api/moderation/mode'), get('/api/moderation/stats'),
       get('/api/moderation/events?limit=100'), get('/api/moderation/prompts?platform=telegram'),
@@ -174,9 +173,9 @@
     else say(eventsStatus, 'Последние решения недоступны.', 'error');
     if (results[3].status === 'fulfilled') renderPrompts(results[3].value);
     const missing = results.filter((result) => result.status === 'rejected').length;
-    say(notice, missing === 0 ? 'Данные загружены. Страница доступна только для просмотра.'
+    say(notice, missing === 0 ? ''
       : missing === results.length ? 'Данные модерации недоступны.' : 'Часть данных модерации недоступна.',
-    missing ? 'warn' : 'good');
+    missing ? 'warn' : '');
   }
   document.getElementById('refresh').addEventListener('click', load);
   load();

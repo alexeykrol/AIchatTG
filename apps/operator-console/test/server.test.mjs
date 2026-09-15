@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { loadOperatorConsoleConfig } from '../src/config.mjs';
 import { createOperatorConsoleServer, validOperatorAuthorization } from '../src/server.mjs';
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'aichattg-operator-server-'));
@@ -35,6 +36,17 @@ test('operator auth is explicit and has no default password', () => {
   assert.equal(validOperatorAuthorization(auth(), 'operator-test-token'), true);
   assert.equal(validOperatorAuthorization(auth('operator:wrong'), 'operator-test-token'), false);
   assert.equal(validOperatorAuthorization(auth(), ''), false);
+});
+
+test('Console release time accepts only a real UTC timestamp', () => {
+  assert.equal(loadOperatorConsoleConfig({ OPERATOR_CONSOLE_RELEASED_AT: '2026-09-15T21:40:00Z' }).releasedAt,
+    '2026-09-15T21:40:00Z');
+  for (const value of ['2026-02-30T12:00:00Z', '2026-09-15T21:40:00-07:00', 'tomorrow']) {
+    assert.throws(() => loadOperatorConsoleConfig({ OPERATOR_CONSOLE_RELEASED_AT: value }),
+      /OPERATOR_CONSOLE_RELEASED_AT/u);
+  }
+  assert.throws(() => loadOperatorConsoleConfig({ NODE_ENV: 'production' }),
+    /OPERATOR_CONSOLE_RELEASED_AT is required/u);
 });
 
 test('new pages require operator auth and domain edits save only a versioned candidate', async () => {
@@ -112,7 +124,7 @@ test('new pages require operator auth and domain edits save only a versioned can
   }, serverConfig);
 });
 
-test('operator routes require app-owned authentication while health stays public', async () => {
+test('operator routes share a concise Russian menu and exact release stamp', async () => {
   await withServer(async (url) => {
     assert.equal((await fetch(`${url}/health`)).status, 200);
     assert.equal((await fetch(`${url}/`)).status, 401);
@@ -128,8 +140,9 @@ test('operator routes require app-owned authentication while health stays public
     assert.match(html, /Настройки/u);
     assert.match(html, /Базы ответов/u);
     assert.match(html, /Аналитика/u);
+    assert.match(html, /Помощь/u);
     const pages = ['/moderation-v3.html', '/assistant-v3.html', '/settings-v3.html',
-      '/domains-v3.html', '/analytics-v3.html', '/tests-v3.html'];
+      '/domains-v3.html', '/analytics-v3.html', '/tests-v3.html', '/help-v3.html'];
     const menus = [];
     for (const path of pages) {
       const response = await fetch(`${url}${path}`, { headers: { authorization: auth() } });
@@ -137,13 +150,24 @@ test('operator routes require app-owned authentication while health stays public
       const page = await response.text();
       assert.match(page, /<html lang="ru">/u);
       assert.match(page, /\/console-v3\.css/u);
+      assert.match(page, /Версия 3\.1\.0 · релиз 15\.09\.2026, 21:40:00 UTC/u);
+      assert.doesNotMatch(page, /Панель управления AIchatTG|CONSOLE_RELEASE_STAMP|class="subhead"|class="badge"/iu);
+      assert.doesNotMatch(page, /Количество вопросов и оценка затрат по сохранённым ответам|Редактирование доступно\. Сохранение создаёт новую версию/u);
       assert.doesNotMatch(page, /Legacy assistant view|Domain knowledge|Assistant settings|Operator pages/u);
-      menus.push([...page.matchAll(/<a [^>]*href="(\/[^"]+)"[^>]*>([^<]+)<\/a>/gu)]
+      const navigation = page.match(/<nav class="nav"[^>]*>([\s\S]*?)<\/nav>/u)?.[1];
+      assert.ok(navigation, 'navigation present in ' + path);
+      menus.push([...navigation.matchAll(/<a [^>]*href="(\/[^"]+)"[^>]*>([^<]+)<\/a>/gu)]
         .map((match) => [match[1], match[2]]));
     }
     const expectedMenu = pages.map((path, index) => [path,
-      ['Модерация', 'Ассистент', 'Настройки', 'Базы ответов', 'Аналитика', 'Тесты'][index]]);
+      ['Модерация', 'Ассистент', 'Настройки', 'Базы ответов', 'Аналитика', 'Тесты', 'Помощь'][index]]);
     for (const menu of menus) assert.deepEqual(menu, expectedMenu);
+    const help = await (await fetch(url + '/help-v3.html', { headers: { authorization: auth() } })).text();
+    assert.match(help, /Как подготовить настройки ассистента|Как подготовить базу ответов|Почему в аналитике стоит «—»/u);
+    assert.equal((await fetch(url + '/api/operator/release')).status, 401);
+    assert.deepEqual(await (await fetch(url + '/api/operator/release', {
+      headers: { authorization: auth() },
+    })).json(), { version: '3.1.0', releasedAt: '2026-09-15T21:40:00Z' });
     const aliases = new Map([
       ['/moderation.html', '/moderation-v3.html'], ['/assistant.html', '/assistant-v3.html'],
       ['/eval.html', '/tests-v3.html'], ['/settings-v2.html', '/settings-v3.html'],
@@ -174,7 +198,7 @@ test('operator routes require app-owned authentication while health stays public
       version: 'tg-v3', text: 'Telegram safety prompt v3', active: true, readOnly: true,
     });
     assert.equal((await fetch(`${url}/api/moderation/mode`, { method: 'POST', headers: { authorization: auth() } })).status, 409);
-  });
+  }, { ...config, releasedAt: '2026-09-15T21:40:00Z' });
 });
 
 test('operator routes are hidden when the token is absent', async () => {

@@ -8,9 +8,7 @@
 <body>
 <main class="shell">
   <div class="masthead">
-    <div><p class="eyebrow">Панель управления AIchatTG</p><h1>Настройки ассистента</h1>
-      <p class="subhead">Подготовьте новую версию настроек и проверьте изменения перед выпуском.</p></div>
-    <span class="badge">Редактор черновика</span>
+    <div><p class="eyebrow">{{CONSOLE_RELEASE_STAMP}}</p><h1>Настройки ассистента</h1></div>
   </div>
   <nav class="nav" aria-label="Разделы панели управления">
     <a href="/moderation-v3.html">Модерация</a>
@@ -19,28 +17,26 @@
     <a href="/domains-v3.html">Базы ответов</a>
     <a href="/analytics-v3.html">Аналитика</a>
     <a href="/tests-v3.html">Тесты</a>
+    <a href="/help-v3.html">Помощь</a>
   </nav>
-  <div id="notice" class="status">Загружаем настройки…</div>
+  <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card wide">
       <h2>Лимиты использования и ответов</h2>
-      <p>Здесь можно подготовить черновик настроек. Работающий бот использует текущую версию до отдельного выпуска.</p>
       <div class="fieldrow">
-        <div class="field"><label for="cooldownSec">Пауза между ответами (секунды)</label><input id="cooldownSec" type="number" min="0" max="86400" step="1"><small>Для каждого пользователя. Текущее значение по умолчанию — 20 секунд.</small></div>
-        <div class="field"><label for="dailyPerUser">Ответов в день на пользователя</label><input id="dailyPerUser" type="number" min="0" max="10000" step="1"><small>Лимит для людей. Увеличение может повысить затраты на модель.</small></div>
-        <div class="field"><label for="syntheticDailyPerUser">Ответов в день для автоматических тестов</label><input id="syntheticDailyPerUser" type="number" min="0" max="10000" step="1"><small>Отдельный лимит при включённом автоматическом тестировании.</small></div>
-        <div class="field"><label for="answerMaxTokens">Максимум токенов ответа</label><input id="answerMaxTokens" type="number" min="1" max="4096" step="1"><small>Включает токены рассуждения; это не длина видимого текста.</small></div>
-        <div class="field"><label for="dialogueTurnLimit">Предыдущих реплик диалога</label><input id="dialogueTurnLimit" type="number" min="1" max="100" step="1"><small>Больший контекст помогает уточнениям, но увеличивает число входных токенов.</small></div>
+        <div class="field"><label for="cooldownSec">Пауза между ответами (секунды)</label><input id="cooldownSec" type="number" min="0" max="86400" step="1"></div>
+        <div class="field"><label for="dailyPerUser">Ответов в день на пользователя</label><input id="dailyPerUser" type="number" min="0" max="10000" step="1"></div>
+        <div class="field"><label for="syntheticDailyPerUser">Ответов в день для автоматических тестов</label><input id="syntheticDailyPerUser" type="number" min="0" max="10000" step="1"></div>
+        <div class="field"><label for="answerMaxTokens">Максимум токенов ответа</label><input id="answerMaxTokens" type="number" min="1" max="4096" step="1"></div>
+        <div class="field"><label for="dialogueTurnLimit">Предыдущих реплик диалога</label><input id="dialogueTurnLimit" type="number" min="1" max="100" step="1"></div>
       </div>
     </section>
     <section class="card wide">
       <h2>Приостановка в разрешённых чатах</h2>
-      <p>Можно выбрать только чаты, назначенные ассистенту. Для применения паузы в отдельном чате потребуется отдельное изменение работающей системы.</p>
       <div id="chats"></div>
     </section>
     <section class="card wide">
       <h2>Проверка изменений</h2>
-      <p>Сравните черновик с текущей версией перед сохранением. Таблица не меняет работающего бота.</p>
       <div id="diff"></div>
     </section>
     <section class="card wide">
@@ -58,7 +54,11 @@
   };
   let state;
   const notice = document.getElementById('notice');
-  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  function say(message, tone = '') {
+    notice.textContent = message;
+    notice.className = 'status ' + tone;
+    notice.hidden = !message;
+  }
   async function api(path, options) {
     const response = await fetch(path, options);
     const data = await response.json();
@@ -121,9 +121,9 @@
       document.getElementById('revision').textContent = state.candidateDigest
         ? 'Черновик ' + state.candidateDigest.slice(0, 12) + ' · ' + state.candidateCreatedAt
         : 'Текущая версия ' + state.sourceDigest.slice(0, 12);
-      say(state.stale ? 'Текущие настройки изменились после создания черновика. Перед сохранением проверьте их заново.'
-        : state.editingEnabled ? 'Редактирование доступно. Сохранение создаёт новую версию и не применяет её к боту.'
-        : 'Хранилище черновиков не настроено. Настройки доступны только для просмотра.', state.stale ? 'warn' : '');
+      if (state.stale) say('Текущие настройки изменились после создания черновика. Перед сохранением проверьте их заново.', 'warn');
+      else if (!state.editingEnabled) say('Хранилище черновиков не настроено. Настройки доступны только для просмотра.', 'warn');
+      else say('');
     } catch (error) { say('Настройки недоступны: ' + error.message, 'error'); }
   }
   document.getElementById('reload').addEventListener('click', () => { if (state) fill(state.released); });

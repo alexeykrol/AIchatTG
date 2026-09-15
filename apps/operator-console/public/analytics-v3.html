@@ -7,9 +7,7 @@
 <body>
 <main class="shell">
   <div class="masthead">
-    <div><p class="eyebrow">Панель управления AIchatTG</p><h1>Аналитика ассистента</h1>
-      <p class="subhead">Количество вопросов и оценка затрат по сохранённым ответам ассистента. Неполные данные показаны отдельно.</p></div>
-    <span class="badge">Только просмотр</span>
+    <div><p class="eyebrow">{{CONSOLE_RELEASE_STAMP}}</p><h1>Аналитика ассистента</h1></div>
   </div>
   <nav class="nav" aria-label="Разделы панели управления">
     <a href="/moderation-v3.html">Модерация</a>
@@ -18,18 +16,23 @@
     <a href="/domains-v3.html">Базы ответов</a>
     <a class="active" aria-current="page" href="/analytics-v3.html">Аналитика</a>
     <a href="/tests-v3.html">Тесты</a>
+    <a href="/help-v3.html">Помощь</a>
   </nav>
-  <div id="notice" class="status">Загружаем записи об ответах…</div>
+  <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card wide"><h2>Охват данных</h2><p id="coverage"></p><div id="pricing" class="micro"></div></section>
-    <section class="card"><h2>Последние 24 часа</h2><p>Скользящий период до текущего момента.</p><div id="today" class="metric-grid"></div></section>
-    <section class="card"><h2>Последние 7 дней</h2><p>Скользящий период до текущего момента.</p><div id="week" class="metric-grid"></div></section>
-    <section class="card wide"><h2>Вся записанная история</h2><p>Все сохранённые записи об ответах ассистента в этой базе AIchatTG в пределах учитываемых данных.</p><div id="total" class="metric-grid"></div></section>
+    <section class="card"><h2>Последние 24 часа</h2><div id="today" class="metric-grid"></div></section>
+    <section class="card"><h2>Последние 7 дней</h2><div id="week" class="metric-grid"></div></section>
+    <section class="card wide"><h2>Вся записанная история</h2><div id="total" class="metric-grid"></div></section>
   </div>
 </main>
 <script>
   const notice = document.getElementById('notice');
-  function say(message, tone = '') { notice.textContent = message; notice.className = 'status ' + tone; }
+  function say(message, tone = '') {
+    notice.textContent = message;
+    notice.className = 'status ' + tone;
+    notice.hidden = !message;
+  }
   function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(6) : '—'; }
   function metric(label, value, detail) {
     const cell = document.createElement('div'); cell.className = 'metric';
@@ -55,14 +58,10 @@
       if (data.status !== 'available') { say('Аналитика недоступна: данные об ответах пока не получены.', 'error'); return; }
       bucket('today', data.today); bucket('week', data.week); bucket('total', data.total);
       document.getElementById('coverage').textContent =
-        'История охватывает журнал ответов чата анализатора, а не все чаты ассистента. ' +
-        data.coverage.observedChatCount + ' чат(ов) имеют записанные ответы. Неудачные платные попытки и некоторые дополнительные обращения к модели учтены не полностью.';
-      document.getElementById('pricing').textContent = 'Версия тарифов ' + data.pricing.version +
-        ' · проверена ' + data.pricing.verifiedAt + ' · оценка по стандартной цене текстовых токенов без кеша; не счёт к оплате.';
-      say(data.total.count === 0 ? 'В учитываемом журнале пока нет ответов. Средняя стоимость и сумма не рассчитываются.'
-        : data.total.unknownCount ? 'Стоимость части вопросов неизвестна. Среднее рассчитано только по оценённым вопросам; общая сумма недоступна.'
-        : 'Записанные ответы оценены полностью. Для затрат по всем чатам нужен более полный журнал использования.',
-        data.total.unknownCount ? 'warn' : '');
+        'Ответы записаны в ' + data.coverage.observedChatCount + ' чатах. Не все обращения и затраты учтены.';
+      document.getElementById('pricing').textContent = 'Тарифы ' + data.pricing.version +
+        ' · проверены ' + data.pricing.verifiedAt + ' · оценка, не счёт к оплате.';
+      say('');
     } catch (error) { say('Аналитика недоступна: ' + error.message, 'error'); }
   }
   load();

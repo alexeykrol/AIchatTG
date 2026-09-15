@@ -40,6 +40,31 @@ and unknown language/member scopes are `not_run`. No messages or other bot
 menus were changed. This does not close the separate command-plus-hint live
 acceptance gap. [Receipt](reports/2026-09-15-moderator-menu-cleanup.md).
 
+## 2026-09-15 — Simplify every Console tab and add a Help page
+
+**Reported / requested:** the owner asked to replace the upper-left Console
+brand with a version number and the release date/time on every tab; remove
+repeated descriptive headings and generic status messages; add detailed,
+child-readable Russian setup help; then commit, push and deploy under Console
+task oversight.
+
+**Diagnosis:** the six current v3 pages duplicate their header/menu markup.
+They repeat introductory and success text that does not help the operator act,
+while no Help tab explains what a saved draft does. A static page cannot know
+the true activation time from its Git source alone.
+
+**Preparation:** Console version `3.1.0` comes from its own source metadata.
+The Console-only `OPERATOR_CONSOLE_RELEASED_AT` variable supplies an exact UTC
+activation timestamp to the seven page headers and authenticated release API.
+The seven tabs share Russian navigation; redundant descriptions and routine
+success/loading banners are removed. Errors, unavailable data, stale drafts,
+and save results remain visible. The Help tab explains settings, Markdown,
+read-only tabs, analytics limits, and the separate step needed to apply a draft.
+
+**Status: prepared.** The isolated source candidate has not yet been merged or
+deployed. Console tests31/31 and the relevant Compose contract3/3 passed;
+production checks and visual acceptance are `not_run` until the exact release.
+
 ## 2026-09-15 — Release the Russian Console v3 separately from Assistant
 
 **Reported / requested:** after the Assistant footer release the owner asked

@@ -10,11 +10,9 @@
 <main class="shell">
   <header class="masthead">
     <div>
-      <p class="eyebrow">Панель управления AIchatTG</p>
+      <p class="eyebrow">{{CONSOLE_RELEASE_STAMP}}</p>
       <h1>Тесты</h1>
-      <p class="subhead">Состояние тестового контура и последний сохранённый результат. Эта страница показывает квитанции и не запускает проверки.</p>
     </div>
-    <span class="badge">Только просмотр</span>
   </header>
   <nav class="nav" aria-label="Разделы панели управления">
     <a href="/moderation-v3.html">Модерация</a>
@@ -23,12 +21,12 @@
     <a href="/domains-v3.html">Базы ответов</a>
     <a href="/analytics-v3.html">Аналитика</a>
     <a class="active" aria-current="page" href="/tests-v3.html">Тесты</a>
+    <a href="/help-v3.html">Помощь</a>
   </nav>
-  <div id="notice" class="status" role="status" aria-live="polite">Загрузка состояния тестов…</div>
+  <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card">
-      <h2>Состояние контура</h2>
-      <p>Статус сообщает, доступен ли сохранённый прогон в сервисе панели.</p>
+      <h2>Состояние тестов</h2>
       <div class="metric-grid">
         <div class="metric"><div class="label">Состояние</div><div class="value" id="state">—</div><div class="detail" id="reason">—</div></div>
         <div class="metric"><div class="label">Доступ к данным</div><div class="value" id="read-only">—</div><div class="detail">Без действий с моделью</div></div>
@@ -36,8 +34,7 @@
     </section>
     <section class="card">
       <h2>Последний результат</h2>
-      <p>Показан только результат, который сервис уже сохранил. Отсутствие квитанции не подтверждает качество ответов.</p>
-      <div id="result-status" class="status">Загрузка результата…</div>
+      <div id="result-status" class="status" role="status" aria-live="polite" hidden></div>
       <div class="metric-grid" id="result-metrics" hidden>
         <div class="metric"><div class="label">Всего проверок</div><div class="value" id="total">—</div></div>
         <div class="metric"><div class="label">Успешно</div><div class="value" id="passed">—</div></div>
@@ -46,16 +43,14 @@
       </div>
     </section>
     <section class="card wide">
-      <h2>Квитанция сохранённого прогона</h2>
-      <p>Модель, время, длительность и сумма показываются лишь когда они есть в результате. Пустые поля остаются прочерками.</p>
+      <h2>Данные последнего теста</h2>
       <div class="metric-grid">
         <div class="metric"><div class="label">Модель</div><div class="value mono" id="model">—</div></div>
         <div class="metric"><div class="label">Время прогона</div><div class="value" id="generated">—</div></div>
         <div class="metric"><div class="label">Длительность</div><div class="value" id="duration">—</div></div>
         <div class="metric"><div class="label">Стоимость, долл. США</div><div class="value" id="cost">—</div></div>
       </div>
-      <p class="micro">В этой панели запуск тестов не подключён. Новые проверки выполняются по отдельному плану с собственными квитанциями.</p>
-      <div class="actions"><button class="secondary" id="refresh" type="button">Обновить квитанцию</button></div>
+      <div class="actions"><button class="secondary" id="refresh" type="button">Обновить результат</button></div>
     </section>
   </div>
 </main>
@@ -74,7 +69,11 @@
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     }).format(parsed);
   };
-  function say(node, message, tone = '') { node.textContent = message; node.className = `status ${tone}`.trim(); }
+  function say(node, message, tone = '') {
+    node.textContent = message;
+    node.className = `status ${tone}`.trim();
+    node.hidden = !message;
+  }
   async function get(path) {
     const response = await fetch(path);
     if (!response.ok) throw new Error('Ответ сервиса недоступен');
@@ -93,7 +92,7 @@
       document.getElementById('result-metrics').hidden = true;
       return;
     }
-    say(resultStatus, 'Сохранённый результат доступен.', 'good');
+    say(resultStatus, '');
     document.getElementById('result-metrics').hidden = false;
     text('total', number(result.total));
     text('passed', number(result.passed));
@@ -106,7 +105,7 @@
     text('cost', Number.isFinite(result.costUsd) && result.costUsd >= 0 ? `$${result.costUsd.toFixed(4)}` : '—');
   }
   async function load() {
-    say(notice, 'Загрузка состояния тестов…');
+    say(notice, '');
     const results = await Promise.allSettled([
       get('/api/moderation/assistant/eval/status'),
       get('/api/moderation/assistant/eval/last'),
@@ -115,9 +114,9 @@
     if (results[1].status === 'fulfilled') renderResult(results[1].value);
     else say(resultStatus, 'Последний результат недоступен.', 'error');
     const missing = results.filter((result) => result.status === 'rejected').length;
-    say(notice, missing === 0 ? 'Квитанции загружены. Запуск тестов в панели не подключён.'
+    say(notice, missing === 0 ? ''
       : missing === results.length ? 'Данные тестов недоступны.' : 'Часть данных тестов недоступна.',
-    missing ? 'warn' : 'good');
+    missing ? 'warn' : '');
   }
   document.getElementById('refresh').addEventListener('click', load);
   load();

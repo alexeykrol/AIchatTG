@@ -36,11 +36,28 @@ function csv(env, name) {
   return String(env[name] || '').split(',').map((value) => value.trim()).filter(Boolean);
 }
 
+function releaseTimestamp(env) {
+  const value = String(env.OPERATOR_CONSOLE_RELEASED_AT || '').trim();
+  if (!value) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error('OPERATOR_CONSOLE_RELEASED_AT is required in production');
+    }
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u.test(value)
+    || Number.isNaN(Date.parse(value))
+    || new Date(value).toISOString().replace('.000Z', 'Z') !== value) {
+    throw new Error('OPERATOR_CONSOLE_RELEASED_AT must be an exact UTC timestamp');
+  }
+  return value;
+}
+
 export function loadOperatorConsoleConfig(env = process.env, { cwd = process.cwd() } = {}) {
   return Object.freeze({
     port: port(env),
     bindHost: boolean(env, 'OPERATOR_CONSOLE_CONTAINER_BIND', false) ? '0.0.0.0' : '127.0.0.1',
     token: optionalToken(env),
+    releasedAt: releaseTimestamp(env),
     runtimeDatabasePath: resolve(cwd, String(
       env.OPERATOR_CONSOLE_RUNTIME_DATABASE_PATH || 'data/telegram-runtime/telegram-runtime.sqlite',
     )),

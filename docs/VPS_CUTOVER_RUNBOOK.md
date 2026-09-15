@@ -218,14 +218,20 @@ perform Telegram, provider, or public-routing activity.
 ## Operator console gate
 
 `aichattg-operator-console` is a separate optional service at
-`https://aikrol.questtales.com/`. It serves the ported Moderator, Assistant and
-Tests pages. The v3 candidate adds Settings, Domain knowledge and Analytics;
-its only write APIs create versioned Console-owned drafts, never apply changes
-to the running bots. The Telegram runtime SQLite directory remains read-only.
+`https://aikrol.questtales.com/`. Its v3 navigation serves Moderation,
+Assistant, Settings, Domain knowledge, Analytics, Tests and Help. Its only
+write APIs create versioned Console-owned drafts, never apply changes to the
+running bots. The Telegram runtime SQLite directory remains read-only.
 The route remains disabled until
 both `AICHATTG_OPERATOR_CONSOLE_ROUTING_ENABLED=true` and a non-empty
 runtime-only `AICHATTG_OPERATOR_TOKEN` are present. Its Basic-auth user name is
 fixed to `operator`; never reuse a News Digest session, cookie, or token.
+The Console version comes from `apps/operator-console/src/console-release.json`.
+For a versioned Console activation, set only its `OPERATOR_CONSOLE_RELEASED_AT`
+to the exact UTC activation time in the scoped mode-0600 release config; the
+new production Console refuses to start without it. Verify the header on all
+seven pages and authenticated `GET /api/operator/release` against the container
+start time. The timestamp must never be inferred from a browser's current time.
 
 For v3, prepare a dedicated non-symlink `${AICHATTG_DATA_ROOT}/operator-console`
 and `candidates` subdirectory owned by `1000:1000`, mode `0700`, before the
