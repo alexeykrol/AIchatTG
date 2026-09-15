@@ -6,6 +6,7 @@ import { loadOperatorConsoleConfig } from './config.mjs';
 import { createDomainCandidateStore, DomainCandidateError } from './domain-candidates.mjs';
 import { createSettingsCandidateStore, SettingsCandidateError } from './settings-candidates.mjs';
 import { assistantCostAnalytics } from './assistant-cost-analytics.mjs';
+import { createModerationReviewHandler } from './moderation-review-http.mjs';
 import {
   legacyAssistantAnalytics,
   legacyAssistantConfig,
@@ -180,6 +181,11 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
     candidateRoot: config.candidateRoot ? `${config.candidateRoot}/domain-bundles` : null,
   });
   const settings = createSettingsCandidateStore(config);
+  // Deliberately no store, collector, recipient or live-delivery bootstrap.
+  const moderationReview = createModerationReviewHandler({
+    authenticate: (request) => validOperatorAuthorization(request.headers.authorization, config.token)
+      ? 'operator' : null,
+  });
   const authorize = (request, response) => {
     if (!config.token) {
       json(response, 404, { error: 'not_found' });
@@ -202,6 +208,7 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
         return;
       }
       if (!authorize(request, response)) return;
+      if (await moderationReview(request, response)) return;
 
       if (request.method === 'GET' && ['/', '/index.html', '/operator', '/operator/'].includes(url.pathname)) {
         redirect(response, '/moderation-v3.html');

@@ -5,6 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Модерация · AIchatTG</title>
   <link rel="stylesheet" href="/console-v3.css">
+  <style>
+    .review-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+    .review-tabs button[aria-pressed=true] { background:#ece7f6; border-color:#795fba; }
+    .review-layout { display:grid; grid-template-columns:minmax(220px, .7fr) minmax(0, 1.6fr); gap:18px; align-items:start; }
+    .review-layout > *, .review-record { min-width:0; overflow-wrap:anywhere; }
+    .review-list { display:grid; gap:10px; margin:16px 0; }
+    .review-case { width:100%; text-align:left; min-height:48px; }
+    .review-case[aria-current=true] { border-color:#795fba; background:#f3effa; }
+    .review-case strong, .review-case span { display:block; margin:4px 0; }
+    .review-record { border:1px solid #e4e0d9; border-radius:10px; padding:15px; margin:14px 0; }
+    .review-record h3 { margin:0 0 10px; font-size:16px; }
+    .review-source { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; color:#24242a; }
+    .review-meta { font-size:13px; color:#57535e; line-height:1.55; overflow-wrap:anywhere; }
+    .review-controls label { display:block; margin-bottom:8px; }
+    .review-controls select { width:100%; min-height:44px; padding:8px; font:inherit; border:1px solid #d9d4dc; border-radius:8px; background:white; }
+    .review-controls textarea { min-height:100px; }
+    .review-danger { margin-top:24px; padding-top:20px; border-top:1px solid #e4e0d9; }
+    .review-danger button { border-color:#9c3b3b; color:#8d3030; }
+    .review-confirm { background:#fff1dc; border:1px solid #dbb573; border-radius:10px; padding:15px; margin-top:12px; }
+    .review-tabs button, .review-layout button, .review-record button { min-height:44px; }
+    .review-tabs button:focus-visible, .review-layout button:focus-visible, .review-record button:focus-visible, .review-controls select:focus-visible { outline:3px solid #795fba; outline-offset:3px; }
+    .review-layout button:disabled, .review-tabs button:disabled { opacity:.5; cursor:not-allowed; }
+    @media (max-width:760px) { .review-layout { grid-template-columns:minmax(0, 1fr); } .review-layout > section:last-child { order:-1; } .review-layout .card { padding:16px; } .review-tabs button { flex:1 1 140px; } .review-controls .actions button { width:100%; } }
+  </style>
 </head>
 <body>
 <main class="shell">
@@ -23,6 +47,67 @@
     <a href="/tests-v3.html">Тесты</a>
     <a href="/help-v3.html">Помощь</a>
   </nav>
+  <div class="review-tabs" aria-label="Разделы модерации">
+    <button id="tab-queue" class="secondary" type="button" aria-pressed="true" aria-controls="panel-queue">На проверку</button>
+    <button id="tab-patterns" class="secondary" type="button" aria-pressed="false" aria-controls="panel-patterns">Черновики паттернов</button>
+    <button id="tab-history" class="secondary" type="button" aria-pressed="false" aria-controls="panel-history">История проверки</button>
+    <button id="tab-reference" class="secondary" type="button" aria-pressed="false" aria-controls="panel-reference">Модель и правила</button>
+  </div>
+  <div id="review-status" class="status" role="status" aria-live="polite">Проверяем доступность ручной проверки…</div>
+  <section id="panel-queue" aria-labelledby="tab-queue">
+    <div class="review-layout">
+      <section class="card" aria-labelledby="queue-title">
+        <h2 id="queue-title">На проверку</h2>
+        <p>Подозрение — не доказательство. Решение сохраняется отдельно от действий в Telegram.</p>
+        <p id="retention" class="review-meta"></p>
+        <div class="field review-controls"><label for="queue-filter">Показать</label><select id="queue-filter" disabled><option value="pending">Ожидают проверки</option><option value="retained">Сохранённые наблюдения</option><option value="all">Все кейсы</option></select></div>
+        <div class="actions"><button id="review-refresh" class="secondary" type="button">Обновить проверку</button></div>
+        <div id="queue-status" class="status" role="status" aria-live="polite" hidden></div>
+        <div id="case-list" class="review-list"></div>
+        <div class="actions"><button id="queue-prev" class="secondary" type="button" disabled>Назад</button><button id="queue-next" class="secondary" type="button" disabled>Далее</button></div>
+      </section>
+      <section class="card" aria-labelledby="case-title">
+        <h2 id="case-title" tabindex="-1">Выберите кейс</h2>
+        <div id="case-status" class="status" role="status" aria-live="polite" hidden></div>
+        <div id="case-detail" hidden>
+          <p id="case-meta" class="review-meta"></p>
+          <div id="case-messages"></div>
+          <h3>Основания для проверки</h3>
+          <div id="case-reasons" class="review-meta"></div>
+          <p id="case-alert" class="review-meta"></p>
+          <div id="case-decisions"></div>
+          <div class="review-controls">
+            <div class="field"><label for="review-label">Решение владельца</label><select id="review-label" disabled><option value="">Выберите решение</option><option value="hidden_advertising">Скрытая реклама</option><option value="legitimate">Допустимый комментарий</option><option value="insufficient_evidence">Недостаточно данных</option></select></div>
+            <div class="field"><label for="review-note">Заметка (необязательно)</label><textarea id="review-note" disabled></textarea></div>
+            <p class="review-meta">Реклама и допустимый комментарий создают неизменяемый черновой пример. «Недостаточно данных» сохраняется только в истории. Обучение, активация правил и санкции не выполняются.</p>
+            <div class="actions"><button id="review-save" class="primary" type="button" disabled>Сохранить решение</button></div>
+            <div class="review-danger">
+              <button id="erase-start" class="secondary" type="button" disabled>Удалить сохранённые материалы</button>
+              <div id="erase-confirmation" class="review-confirm" hidden>
+                <p id="erase-explanation"></p>
+                <div class="actions"><button id="erase-confirm" class="secondary" type="button" disabled>Подтверждаю удаление материалов</button><button id="erase-cancel" class="secondary" type="button">Отмена</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+  <section id="panel-patterns" class="card" aria-labelledby="tab-patterns" hidden>
+    <h2>Черновики паттернов</h2>
+    <p>Неизменяемые версии положительных и отрицательных примеров. Это не активные правила и не подтверждение обучения модели.</p>
+    <div id="patterns-status" class="status" role="status" aria-live="polite" hidden></div>
+    <div id="patterns-list"></div>
+    <div class="actions"><button id="patterns-prev" class="secondary" type="button" disabled>Назад</button><button id="patterns-next" class="secondary" type="button" disabled>Далее</button><button id="patterns-refresh" class="secondary" type="button">Обновить</button></div>
+  </section>
+  <section id="panel-history" class="card" aria-labelledby="tab-history" hidden>
+    <h2>История проверки</h2>
+    <p>Решения человека по конкретным версиям материалов. Автор решения определяется сервером после входа.</p>
+    <div id="history-status" class="status" role="status" aria-live="polite" hidden></div>
+    <div id="history-list"></div>
+    <div class="actions"><button id="history-prev" class="secondary" type="button" disabled>Назад</button><button id="history-next" class="secondary" type="button" disabled>Далее</button><button id="history-refresh" class="secondary" type="button">Обновить</button></div>
+  </section>
+  <section id="panel-reference" aria-labelledby="tab-reference" hidden>
   <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
     <section class="card">
@@ -59,6 +144,7 @@
       <div class="field"><label for="prompt-text">Текст правил</label><textarea id="prompt-text" readonly aria-label="Текст действующих правил"></textarea></div>
     </section>
   </div>
+  </section>
 </main>
 <script>
   const notice = document.getElementById('notice');
@@ -178,7 +264,312 @@
     missing ? 'warn' : '');
   }
   document.getElementById('refresh').addEventListener('click', load);
-  load();
+
+  // Private Review data is held only in this page's memory, never in URLs,
+  // browser storage, global notices, HTML strings or client-asserted identity.
+  const api = '/api/operator/moderation-review/v1';
+  const el = (id) => document.getElementById(id);
+  const uuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  const scalar = (value) => typeof value === 'string' || typeof value === 'number' ? String(value) : '—';
+  const labels = new Map([['hidden_advertising', 'Скрытая реклама'], ['legitimate', 'Допустимый комментарий'], ['insufficient_evidence', 'Недостаточно данных']]);
+  const labelName = (value) => labels.get(value) || 'Неизвестное решение';
+  const caseStates = new Map([['pending', 'Ожидает решения'], ['reviewed', 'Проверен'], ['retained', 'Сохранённое наблюдение']]);
+  const queueFilters = new Map([['pending', 'На проверку'], ['retained', 'Сохранённые наблюдения'], ['all', 'Все кейсы']]);
+  const patternNames = new Map([
+    ['personal-experience-promotion', 'Продвижение через личный опыт'],
+    ['dm-funnel', 'Приглашение в личную переписку'],
+    ['generic-comment-promotion', 'Продвижение через общую похвалу'],
+    ['repeated-product-seeding', 'Повторяющееся продвижение продукта'],
+    ['templated-testimonial', 'Повторяющийся отзыв'],
+    ['repeated-standard-reply', 'Повторяющийся шаблонный ответ'],
+  ]);
+  const reasonNames = new Map([
+    ['personal_experience_with_commercial_cues', 'Рассказ о личном опыте содержит признаки коммерческого продвижения.'],
+    ['private_message_funnel_with_commercial_cues', 'Приглашение в личную переписку сочетается с коммерческими признаками.'],
+    ['generic_praise_with_commercial_cues', 'Общая похвала сочетается с коммерческими признаками.'],
+    ['repeated_promotional_text', 'Одинаковый текст с признаками продвижения встречался в нескольких сообщениях этого чата.'],
+    ['commercial_call_to_action', 'Обнаружен призыв к покупке или другому коммерческому действию.'],
+    ['original_context_missing', 'Контекст исходного сообщения отсутствует.'],
+    ['observed_in_multiple_contexts', 'Одинаковый текст наблюдался в ответах на разные исходные сообщения.'],
+    ['repeated_long_standard_reply', 'Длинный одинаковый ответ повторяется в нескольких сообщениях этого чата. Сам по себе повтор не доказывает рекламу.'],
+  ]);
+  const pageSize = 30;
+  let capabilities = null, statusLoading = false, statusEpoch = 0;
+  let selectedId = null, selectedCase = null, selectionEpoch = 0, detailLoading = false, stale = false;
+  let saving = false, confirmation = null, currentPanel = 'queue', queueFilter = 'pending';
+  const pages = { queue: { offset:0, epoch:0, loading:false }, patterns: { offset:0, epoch:0, loading:false }, history: { offset:0, epoch:0, loading:false } };
+  // Keep an ambiguous request's exact ID/payload for a deliberate same-request
+  // retry. A selection change cannot redirect it to another case.
+  const attempts = new Map();
+
+  function add(parent, tag, value, className = '') {
+    const node = document.createElement(tag);
+    node.textContent = scalar(value); node.className = className; parent.append(node); return node;
+  }
+  function cancelConfirmation() {
+    confirmation = null; el('erase-confirmation').hidden = true; text('erase-explanation', '');
+    updateControls();
+  }
+  function ready() {
+    return capabilities?.decisionsEnabled === true && !statusLoading && !detailLoading && !saving && !stale
+      && selectedCase?.id === selectedId && Number.isSafeInteger(selectedCase?.version) && selectedCase.version > 0;
+  }
+  function updateControls() {
+    const enabled = ready();
+    el('review-label').disabled = !enabled; el('review-note').disabled = !enabled;
+    el('review-save').disabled = !enabled || !labels.has(el('review-label').value) || !!confirmation;
+    el('erase-start').disabled = !enabled || !!confirmation;
+    el('erase-confirm').disabled = !enabled || !confirmation;
+    el('review-refresh').disabled = statusLoading;
+    el('queue-filter').disabled = statusLoading || capabilities?.decisionsEnabled !== true;
+  }
+  async function reviewRequest(path, body) {
+    const response = await fetch(api + path, {
+      method: body ? 'POST' : 'GET', credentials:'same-origin', cache:'no-store',
+      ...(body ? { headers:{ 'Content-Type':'application/json', 'X-Operator-Intent':'moderation-review' }, body:JSON.stringify(body) } : {}),
+    });
+    let data;
+    try { data = await response.json(); } catch { throw { status:response.status, ambiguous:true }; }
+    if (!response.ok) throw { status:response.status, code:data?.error, ambiguous:response.status >= 500 && data?.error !== 'review_disabled' };
+    return data;
+  }
+  function failureMessage(error, caseSpecific = false) {
+    if (error?.code === 'review_disabled') return 'Ручная проверка отключена. Это не пустая очередь.';
+    if (error?.code === 'review_note_too_large') return 'Заметка превышает допустимый размер. Сократите её и повторите сохранение.';
+    if (error?.status === 401 || error?.status === 403) return 'Нет доступа к ручной проверке. Проверьте вход и права.';
+    if (error?.status === 404) return caseSpecific ? 'Кейс не найден или сохранённые материалы уже удалены / срок хранения истёк.' : 'Сервис ручной проверки недоступен или ещё не подключён. Это не пустая выборка.';
+    if (error?.status === 409) return 'Материалы изменились или запрос конфликтует. Обновите кейс перед новым действием.';
+    return 'Данные проверки недоступны. Повторите загрузку.';
+  }
+  function clearDetail() {
+    selectedCase = null; stale = false; el('case-detail').hidden = true;
+    el('case-messages').replaceChildren(); el('case-decisions').replaceChildren(); el('case-reasons').replaceChildren();
+    for (const id of ['case-meta', 'case-alert']) text(id, '');
+    el('review-label').value = ''; el('review-note').value = ''; cancelConfirmation();
+  }
+  function markSelection() {
+    for (const button of el('case-list').children) button.setAttribute('aria-current', String(button.dataset.caseId === selectedId));
+  }
+  function setCaseUrl(id) {
+    // Build from a constant same-origin path: never trust a server URL or return target.
+    history.replaceState(null, '', '/moderation-v3.html' + (uuid(id) ? `?case=${encodeURIComponent(id)}` : ''));
+  }
+  async function selectCase(id, { updateUrl = true } = {}) {
+    const epoch = ++selectionEpoch;
+    selectedId = uuid(id) ? id : null; detailLoading = false; clearDetail(); markSelection();
+    if (!selectedId) { text('case-title', 'Кейс недоступен'); say(el('case-status'), 'Некорректная ссылка на кейс.', 'error'); return; }
+    if (updateUrl) setCaseUrl(id);
+    text('case-title', `Кейс ${id.slice(0, 8)}`);
+    if (!capabilities || capabilities.decisionsEnabled !== true || statusLoading) {
+      say(el('case-status'), 'Ручная проверка недоступна. Материалы не загружены.', 'warn'); return;
+    }
+    detailLoading = true; updateControls(); say(el('case-status'), 'Загружаем материалы…');
+    try {
+      const record = await reviewRequest(`/cases/${encodeURIComponent(id)}`);
+      if (epoch !== selectionEpoch || selectedId !== id) return;
+      if (record?.id !== id || !Number.isSafeInteger(record.version) || record.version < 1 || !Array.isArray(record.messages)) throw { status:502 };
+      selectedCase = record; renderCase(record); say(el('case-status'), '');
+    } catch (error) {
+      if (epoch !== selectionEpoch || selectedId !== id) return;
+      clearDetail(); say(el('case-status'), failureMessage(error, true), 'error');
+    } finally {
+      if (epoch === selectionEpoch && selectedId === id) { detailLoading = false; updateControls(); }
+    }
+  }
+  function renderDecision(parent, decision, draft = false) {
+    const card = document.createElement('article'); card.className = 'review-record';
+    add(card, 'h3', labelName(decision.label));
+    add(card, 'div', `${date(decision.createdAt)} · Автор: ${scalar(decision.principal)} · Версия ${scalar(draft ? decision.revision : decision.evidenceVersion)}`, 'review-meta');
+    if (draft) {
+      add(card, 'p', 'Черновик · не активирован · неизменяемая версия', 'review-meta');
+      add(card, 'div', `Паттерны: ${Array.isArray(decision.patternIds) ? decision.patternIds.map((id) => patternNames.get(id) || 'Неизвестный паттерн').join(', ') : '—'}`, 'review-meta');
+    }
+    if (decision.note) add(card, 'div', decision.note, 'review-source');
+    parent.append(card); return card;
+  }
+  function renderCase(record) {
+    text('case-title', `${record.status === 'retained' ? 'Сохранённое наблюдение' : 'Кейс'} ${record.id.slice(0, 8)}`);
+    text('case-meta', `Идентификатор: ${record.id} · Чат: ${scalar(record.chatId)} · Версия материалов: ${record.version} · ${caseStates.get(record.status) || 'Статус неизвестен'} · Хранение: ${record.expiresAt === null ? 'Бессрочно, до ручного удаления' : date(record.expiresAt)}`);
+    const messages = el('case-messages'); messages.replaceChildren();
+    if (!record.messages.length) add(messages, 'p', 'Сохранённые сообщения отсутствуют. Контекст не восстановлен.', 'review-meta');
+    for (const message of record.messages) {
+      const card = document.createElement('article'); card.className = 'review-record';
+      add(card, 'h3', `Сообщение ${scalar(message.messageId)} · редакция ${scalar(message.revision)}`);
+      add(card, 'div', `Наблюдение: ${date(message.observedAt)} · Автор: ${scalar(message.userId)}`, 'review-meta');
+      add(card, 'div', message.text, 'review-source');
+      add(card, 'h3', 'Контекст исходного сообщения');
+      if (typeof message.context?.text === 'string' && message.context.text.length) add(card, 'div', message.context.text, 'review-source');
+      else add(card, 'p', 'Контекст отсутствует или недоступен; он не был восстановлен.', 'review-meta');
+      const truncated = message.truncated;
+      if (truncated === true || (truncated && typeof truncated === 'object' && Object.values(truncated).some((value) => value === true)) || message.context?.truncated === true) add(card, 'p', 'Материалы / контекст сохранены с сокращением. Полнота не подтверждена.', 'review-meta');
+      messages.append(card);
+    }
+    const reasons = el('case-reasons'); reasons.replaceChildren();
+    add(reasons, 'p', record.status === 'retained' ? 'Подозрения не обнаружены. Это обычное сохранённое наблюдение, а не запрос на проверку или решение о нарушении.' : 'Причины детектора являются подозрениями, а не доказательством рекламы, автоматизации или авторства ИИ.');
+    for (const reason of Array.isArray(record.reasons) ? record.reasons : []) add(reasons, 'p', reasonNames.get(reason) || 'Дополнительный признак детектора; требуется оценка человека.');
+    if (Array.isArray(record.patternIds) && record.patternIds.length) add(reasons, 'p', `Паттерны: ${record.patternIds.map((id) => patternNames.get(id) || 'Неизвестный паттерн').join(', ')}`);
+    const technical = document.createElement('details'); add(technical, 'summary', 'Технические сведения');
+    add(technical, 'p', `Детектор: ${scalar(record.detectorVersion)}`);
+    for (const reason of Array.isArray(record.reasons) ? record.reasons : []) add(technical, 'div', reason, 'mono');
+    for (const id of Array.isArray(record.patternIds) ? record.patternIds : []) add(technical, 'div', id, 'mono');
+    reasons.append(technical);
+    const alerts = new Map([['pending', 'ожидает отправки'], ['calling', 'отправляется'], ['sent', 'отправлено'], ['failed', 'не доставлено'], ['uncertain', 'результат неизвестен'], ['disabled', 'отключено']]);
+    text('case-alert', record.status === 'retained' ? 'Уведомление отключено. Сохранённое наблюдение не вызывает отправку в Telegram.' : `Уведомление: ${alerts.get(record.alert?.state) || 'статус неизвестен'}. Это не действие в Telegram.`);
+    const decisions = el('case-decisions'); decisions.replaceChildren();
+    for (const decision of Array.isArray(record.decisions) ? record.decisions : []) renderDecision(decisions, decision);
+    el('case-detail').hidden = false;
+  }
+  function pageButtons(kind, total) {
+    const page = pages[kind], disabled = page.loading || capabilities?.decisionsEnabled !== true;
+    el(`${kind}-prev`).disabled = disabled || page.offset === 0;
+    el(`${kind}-next`).disabled = disabled || !Number.isSafeInteger(total) || page.offset + pageSize >= total;
+  }
+  async function loadPage(kind) {
+    const page = pages[kind], epoch = ++page.epoch, filter = queueFilter;
+    const status = el(`${kind}-status`), list = el(kind === 'queue' ? 'case-list' : `${kind}-list`);
+    page.loading = true; pageButtons(kind, 0); list.replaceChildren();
+    if (capabilities?.decisionsEnabled !== true) { page.loading = false; say(status, 'Ручная проверка отключена или недоступна. Это не пустая выборка.', 'warn'); return; }
+    say(status, 'Загружаем…');
+    const suffix = kind === 'queue' ? `/cases?status=${filter}&limit=${pageSize}&offset=${page.offset}` : `/${kind}?limit=${pageSize}&offset=${page.offset}`;
+    try {
+      const data = await reviewRequest(suffix);
+      if (epoch !== page.epoch) return;
+      const records = data?.[kind === 'queue' ? 'cases' : kind];
+      if (!Array.isArray(records) || !Number.isSafeInteger(data.total) || data.total < 0) throw { status:502 };
+      for (const record of records) {
+        if (kind === 'queue') {
+          if (!uuid(record.id)) continue;
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary review-case'; button.dataset.caseId = record.id;
+          add(button, 'strong', `${record.status === 'retained' ? 'Сохранённое наблюдение' : 'Кейс'} ${record.id.slice(0, 8)}`); add(button, 'span', record.preview, 'review-source');
+          add(button, 'span', `${caseStates.get(record.status) || 'Статус неизвестен'} · ${date(record.updatedAt)} · Сообщений: ${scalar(record.messageCount)} · Версия ${scalar(record.version)}`, 'review-meta');
+          button.addEventListener('click', () => selectCase(record.id)); list.append(button);
+        } else {
+          const card = renderDecision(list, record, kind === 'patterns');
+          if (uuid(record.caseId)) {
+            const button = add(card, 'button', 'Открыть кейс', 'secondary'); button.type = 'button';
+            button.addEventListener('click', () => { showPanel('queue'); return selectCase(record.caseId); });
+          }
+        }
+      }
+      markSelection();
+      const emptyQueue = filter === 'retained' ? 'Сохранённых наблюдений в этой выборке нет. Это не подтверждает, что сбор включён.' : filter === 'all' ? 'Сохранённых кейсов в этой выборке нет. Это не подтверждает, что сбор включён.' : 'Кейсов, ожидающих проверки, нет.';
+      say(status, records.length ? `Записи ${page.offset + 1}–${page.offset + records.length} из ${data.total}.` : kind === 'queue' ? emptyQueue : kind === 'patterns' ? 'Черновых примеров пока нет.' : 'Решений пока нет.');
+      page.loading = false; pageButtons(kind, data.total);
+    } catch (error) {
+      if (epoch !== page.epoch) return;
+      page.loading = false; say(status, failureMessage(error), 'error'); pageButtons(kind, 0);
+    }
+  }
+  async function refreshReview() {
+    const epoch = ++statusEpoch, id = selectedId;
+    ++selectionEpoch; detailLoading = false; clearDetail();
+    statusLoading = true; capabilities = null; updateControls();
+    // Invalidate every pending list read before a new capability check.
+    for (const kind of ['queue', 'patterns', 'history']) { ++pages[kind].epoch; pages[kind].loading = false; pageButtons(kind, 0); el(kind === 'queue' ? 'case-list' : `${kind}-list`).replaceChildren(); }
+    say(el('review-status'), 'Проверяем доступность ручной проверки…'); text('retention', '');
+    try {
+      const status = await reviewRequest('/status');
+      if (epoch !== statusEpoch) return;
+      capabilities = status; statusLoading = false;
+      if (status?.decisionsEnabled !== true) {
+        say(el('review-status'), 'Ручная проверка отключена. Это не пустая очередь; новые материалы и решения здесь недоступны.', 'warn');
+        say(el('case-status'), id ? 'Кейс не загружен: ручная проверка отключена.' : 'Выберите кейс после включения ручной проверки.', 'warn');
+        return;
+      }
+      say(el('review-status'), status.mode === 'synthetic' ? 'Локальная синтетическая проверка. Сбор, доставка, обучение и санкции не включаются этой страницей.' : 'Ручная проверка доступна. Решения не включают обучение или санкции.');
+      text('retention', status.retentionMs === null ? 'Бессрочно, до ручного удаления' : Number.isSafeInteger(status.retentionMs) && status.retentionMs > 0 ? `Срок хранения: ${status.retentionMs} мс` : 'Срок хранения не указан');
+      loadPage('queue');
+      if (currentPanel === 'patterns' || currentPanel === 'history') loadPage(currentPanel);
+      if (selectedId === id && uuid(id)) selectCase(id, { updateUrl:false });
+    } catch (error) {
+      if (epoch !== statusEpoch) return;
+      statusLoading = false; say(el('review-status'), failureMessage(error), 'error');
+      say(el('case-status'), 'Материалы не загружены: сервис проверки недоступен.', 'warn');
+    } finally { if (epoch === statusEpoch) updateControls(); }
+  }
+  async function submit(kind) {
+    if (!ready()) return;
+    const record = selectedCase, id = record.id, epoch = selectionEpoch, version = record.version;
+    if (kind === 'erase' && (!confirmation || confirmation.id !== id || confirmation.version !== version || confirmation.epoch !== epoch)) return;
+    if (kind === 'decision' && (confirmation || !labels.has(el('review-label').value))) return;
+    const payload = kind === 'erase' ? { expectedVersion:version } : { expectedVersion:version, label:el('review-label').value, note:el('review-note').value };
+    const key = JSON.stringify([kind, id, payload]);
+    let request = attempts.get(key);
+    if (!request) {
+      if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') { say(el('case-status'), 'Безопасный идентификатор запроса недоступен. Сохранение заблокировано.', 'error'); return; }
+      request = { ...payload, [kind === 'erase' ? 'requestId' : 'decisionId']:crypto.randomUUID() }; attempts.set(key, request);
+    }
+    saving = true; cancelConfirmation(); updateControls();
+    say(el('case-status'), kind === 'erase' ? 'Удаляем материалы из Review…' : 'Сохраняем решение…');
+    let success = false;
+    try {
+      const response = await reviewRequest(`/cases/${encodeURIComponent(id)}/${kind === 'erase' ? 'erase' : 'decisions'}`, request);
+      const valid = response?.caseId === id && (kind === 'erase'
+        ? response.erased === true && response.requestId === request.requestId && response.expectedVersion === version
+        : response.decisionId === request.decisionId && response.label === request.label && Number.isSafeInteger(response.version));
+      if (!valid) throw { ambiguous:true };
+      attempts.delete(key); success = true;
+      if (epoch !== selectionEpoch || selectedId !== id) return;
+      if (kind === 'erase') {
+        ++selectionEpoch; selectedId = null; clearDetail(); setCaseUrl(null); text('case-title', 'Материалы удалены');
+        say(el('case-status'), 'Материалы кейса удалены из Review. Telegram не затронут.', 'good');
+      } else {
+        stale = true;
+        say(el('case-status'), request.label === 'insufficient_evidence' ? 'Решение сохранено в истории. Черновой пример не создан. Обновите кейс для нового действия.' : 'Решение и черновой пример сохранены. Правила не активированы. Обновите кейс для нового действия.', 'good');
+      }
+      loadPage('queue');
+    } catch (error) {
+      const ambiguous = error?.ambiguous === true || !Number.isInteger(error?.status);
+      if (!ambiguous) attempts.delete(key);
+      if (epoch !== selectionEpoch || selectedId !== id) return;
+      if (error?.status === 409 || error?.status === 404 || error?.status === 401 || error?.status === 403 || error?.code === 'review_disabled') stale = true;
+      say(el('case-status'), ambiguous ? 'Результат запроса не подтверждён. Для безопасного повтора оставьте решение и заметку без изменений: будет отправлен тот же запрос. Для удаления потребуется повторное подтверждение.' : failureMessage(error, true), 'error');
+    } finally {
+      saving = false; updateControls();
+      // No late completion may reload, clear or display private data in a
+      // different selection. Successful writes require an explicit refresh.
+      if (success && epoch === selectionEpoch && selectedId === id) updateControls();
+    }
+  }
+  function showPanel(panel) {
+    cancelConfirmation(); currentPanel = panel;
+    for (const kind of ['queue', 'patterns', 'history', 'reference']) {
+      el(`panel-${kind}`).hidden = kind !== panel; el(`tab-${kind}`).setAttribute('aria-pressed', String(kind === panel));
+    }
+    if (panel === 'patterns' || panel === 'history') return loadPage(panel);
+    if (panel === 'reference') return load();
+  }
+  for (const kind of ['queue', 'patterns', 'history', 'reference']) el(`tab-${kind}`).addEventListener('click', () => showPanel(kind));
+  for (const kind of ['queue', 'patterns', 'history']) {
+    el(`${kind}-prev`).addEventListener('click', () => { if (pages[kind].loading || pages[kind].offset === 0) return; pages[kind].offset = Math.max(0, pages[kind].offset - pageSize); return loadPage(kind); });
+    el(`${kind}-next`).addEventListener('click', () => { if (el(`${kind}-next`).disabled) return; pages[kind].offset += pageSize; return loadPage(kind); });
+  }
+  for (const kind of ['patterns', 'history']) el(`${kind}-refresh`).addEventListener('click', () => { cancelConfirmation(); return loadPage(kind); });
+  el('review-refresh').addEventListener('click', refreshReview);
+  el('queue-filter').value = queueFilter;
+  el('queue-filter').addEventListener('change', () => {
+    const filter = el('queue-filter').value;
+    if (!queueFilters.has(filter) || statusLoading || capabilities?.decisionsEnabled !== true) { el('queue-filter').value = queueFilter; return; }
+    cancelConfirmation(); queueFilter = filter; pages.queue.offset = 0;
+    text('queue-title', queueFilters.get(filter));
+    return loadPage('queue');
+  });
+  el('review-label').addEventListener('change', updateControls);
+  el('review-save').addEventListener('click', () => submit('decision'));
+  el('erase-start').addEventListener('click', () => {
+    if (!ready()) return;
+    confirmation = { id:selectedId, version:selectedCase.version, epoch:selectionEpoch };
+    text('erase-explanation', `Удалить материалы кейса ${selectedId}, версия ${selectedCase.version}? Из хранилища Review будут удалены исходные сообщения, контекст, заметки, решения и связанные черновые примеры. Telegram не затрагивается. Восстановление через Review невозможно. Физическое удаление с диска, из снимков или резервных копий не гарантируется.`);
+    el('erase-confirmation').hidden = false; updateControls();
+  });
+  el('erase-cancel').addEventListener('click', cancelConfirmation);
+  el('erase-confirm').addEventListener('click', () => submit('erase'));
+  const caseParams = new URLSearchParams(location.search).getAll('case');
+  const invalidDeepLink = caseParams.length > 1 || (caseParams.length === 1 && !uuid(caseParams[0]));
+  if (!invalidDeepLink && caseParams.length === 1) selectedId = caseParams[0];
+  refreshReview().then(() => {
+    if (invalidDeepLink) { text('case-title', 'Кейс недоступен'); say(el('case-status'), 'Некорректная ссылка на кейс. Выберите кейс из очереди.', 'error'); }
+  });
 </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -150,7 +150,7 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
       const page = await response.text();
       assert.match(page, /<html lang="ru">/u);
       assert.match(page, /\/console-v3\.css/u);
-      assert.match(page, /Версия 3\.2\.0 · релиз 15\.09\.2026, 21:40:00 UTC/u);
+      assert.match(page, /Версия 3\.3\.0 · релиз 15\.09\.2026, 21:40:00 UTC/u);
       assert.doesNotMatch(page, /Панель управления AIchatTG|CONSOLE_RELEASE_STAMP|class="subhead"|class="badge"/iu);
       assert.doesNotMatch(page, /Количество вопросов и оценка затрат по сохранённым ответам|Редактирование доступно\. Сохранение создаёт новую версию/u);
       assert.doesNotMatch(page, /Legacy assistant view|Domain knowledge|Assistant settings|Operator pages/u);
@@ -168,10 +168,12 @@ test('operator routes share a concise Russian menu and exact release stamp', asy
     assert.match(help, /По 4 оценённым из 5/u);
     assert.match(help, /деление суммы четырёх известных цен на четыре, а не на пять/u);
     assert.match(help, /Учтённые этапы/u);
+    assert.match(help, /очередь ручной проверки в «Модерации» пока отключена/u);
+    assert.match(help, /не собирает сообщения и не отправляет уведомления/u);
     assert.equal((await fetch(url + '/api/operator/release')).status, 401);
     assert.deepEqual(await (await fetch(url + '/api/operator/release', {
       headers: { authorization: auth() },
-    })).json(), { version: '3.2.0', releasedAt: '2026-09-15T21:40:00Z' });
+    })).json(), { version: '3.3.0', releasedAt: '2026-09-15T21:40:00Z' });
     const aliases = new Map([
       ['/moderation.html', '/moderation-v3.html'], ['/assistant.html', '/assistant-v3.html'],
       ['/eval.html', '/tests-v3.html'], ['/settings-v2.html', '/settings-v3.html'],
@@ -211,5 +213,36 @@ test('operator routes are hidden when the token is absent', async () => {
   try {
     const url = `http://127.0.0.1:${server.address().port}`;
     assert.equal((await fetch(`${url}/api/moderation/mode`, { headers: { authorization: auth() } })).status, 404);
+    assert.equal((await fetch(`${url}/api/operator/moderation-review/v1/status`, { headers: { authorization: auth() } })).status, 404);
   } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test('integrated review stays disabled behind existing auth without storage or writes', async () => {
+  const candidateRoot = mkdtempSync(join(tmpdir(), 'aichattg-disabled-review-'));
+  await withServer(async (url) => {
+    const prefix = url + '/api/operator/moderation-review/v1';
+    const headers = { authorization: auth() };
+    assert.equal((await fetch(prefix + '/status')).status, 401);
+    assert.equal((await fetch(prefix + '/status', { headers: { authorization: auth('operator:wrong') } })).status, 401);
+    const response = await fetch(prefix + '/status', { headers });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), {
+      mode: 'disabled', collectionEnabled: false, deliveryEnabled: false,
+      decisionsEnabled: false, patternActivationEnabled: false, sanctionsEnabled: false,
+      retentionMs: null, counts: null,
+    });
+    const caseId = '00000000-0000-4000-8000-000000000001';
+    for (const [method, path] of [['GET', '/cases'], ['GET', '/patterns'], ['GET', '/history'],
+      ['GET', '/cases/' + caseId], ['POST', '/cases/' + caseId + '/decisions'],
+      ['POST', '/cases/' + caseId + '/erase']]) {
+      const result = await fetch(prefix + path, { method, headers });
+      assert.equal(result.status, 503);
+      assert.deepEqual(await result.json(), { error: 'review_disabled' });
+    }
+    assert.equal((await fetch(prefix + '/ingest', { method: 'POST', headers })).status, 404);
+    assert.equal((await fetch(url + '/api/moderation/mode', { method: 'POST', headers })).status, 409);
+    assert.equal((await fetch(url + '/api/operator/analytics', { headers })).status, 200);
+    assert.deepEqual(readdirSync(candidateRoot), [], 'no review DB, collector or synthetic seed is bootstrapped');
+  }, { ...config, candidateRoot });
 });
