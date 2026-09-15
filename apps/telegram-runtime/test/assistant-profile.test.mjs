@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assistantSelfDescriptionReply, ASSISTANT_HELP_TEXT } from '../src/assistant-policy.mjs';
+import { readFileSync } from 'node:fs';
+import { assistantSelfDescriptionReply, ASSISTANT_HELP_TEXT, ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
+
+test('menu instructions match the actual prompt and public knowledge without changing capabilities', () => {
+  const markdown = readFileSync(new URL('../src/domains/assistant-self.md', import.meta.url), 'utf8');
+  const quotedPrefix = /«([^»]+)…»/.exec(ASSISTANT_HELP_TEXT)?.[1];
+  assert.ok(quotedPrefix);
+  assert.ok(ASSISTANT_EMPTY_ASK_TEXT.startsWith(`✍️ ${quotedPrefix}`));
+  for (const line of ASSISTANT_HELP_TEXT.split('\n').filter((line) => /^\d\.|^•/.test(line))) {
+    assert.ok(markdown.includes(line), line);
+  }
+  assert.match(markdown, /не Алексей Крол и не человек/);
+});
 
 test('frequent capability questions explain course navigation without unsolicited technical refusals', () => {
   for (const question of ['Что ты можешь?', 'Что ты умеешь?', 'Чем ты можешь мне помочь?',

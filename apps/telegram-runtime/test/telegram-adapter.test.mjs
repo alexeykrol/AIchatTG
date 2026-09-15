@@ -28,6 +28,16 @@ test('without the markup flag the text goes out exactly as written, with no pars
   assert.equal('parse_mode' in calls[0].body, false);
 });
 
+test('the menu prompt requests a selective reply to the exact command without altering its text', async () => {
+  const { calls, fetchFn } = recorder();
+  const adapter = createTelegramAdapter({ botToken: 'T', fetchFn });
+  const text = '✍️ Теперь напишите вопрос в ответ на это сообщение и отправьте его. /ask повторно писать не нужно.';
+  await adapter.sendMessage({ chatId: -1, text, replyToMessageId: 7, forceReply: true });
+  assert.deepEqual(calls[0].body, { chat_id: -1, text, reply_to_message_id: 7,
+    reply_markup: { force_reply: true, selective: true } });
+  assert.equal(calls.length, 1);
+});
+
 test('with the markup flag the answer is rendered to HTML and the link preview stays off', async () => {
   const { calls, fetchFn } = recorder();
   const adapter = createTelegramAdapter({ botToken: 'T', fetchFn });
