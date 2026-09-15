@@ -1,7 +1,7 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-14
+updated: 2026-09-15
 ---
 
 # Backlog
@@ -14,14 +14,26 @@ updated: 2026-09-14
 - [ ] RISK-1: спроектировать durable webhook inbox + per-chat worker recovery.
       Немедленный HTTP 200 разрешён только после надёжной записи валидированного
       update; in-memory очередь может потерять update при crash после ACK.
-- [ ] HYGIENE-1: завершить приёмку новой уборки пары «команда + hint»;
-      локальный candidate использует существующий Moderator Guard.
+- [ ] HYGIENE-1: завершить приёмку уборки пары «команда + hint» в `852a8d2`;
+      runtime использует существующий Moderator Guard.
       Read-only права уже проверены: Moderator имеет delete/restrict во всех
-      трёх группах, Assistant delete — в тестовой. Production пока `049cc22`.
-- [ ] PROFILE-1: принять восстановленный «ИИ Навигатор» и содержательную
-      навигацию курса вместо технического fallback. Предварительные ожидания:
-      `docs/reports/2026-09-15-assistant-acceptance-plan.json`; не считать
-      успешную доставку доказательством адекватности ответа.
+      трёх группах, Assistant delete — в тестовой. Живой synthetic MENU-01:
+      hint удалён, команда получила not-found; uncertain fenced, без повтора.
+      Нет Moderator receipt для команды. Проверить обычного пользователя в
+      закрытом чате; не менять права/токен из неподтверждённой гипотезы.
+- [x] PROFILE-1: основные вопросы о возможностях и способах обращения
+      используют «ИИ Навигатор», а не технический fallback; CAP-01/USE-01/
+      USE-02 прошли живую проверку содержания на `852a8d2`. CAP-03 partial:
+      цели курса перечислены, account-boundary подожидание не выполнено.
+- [ ] PROFILE-2: «Кто ты и как тебя зовут?» пропущено identity matcher и
+      получает out_of_coverage. Расширить только anchored identity pattern;
+      добавить compound-positive / mixed-course-negative / provider-bypass
+      регрессии. Новая выкладка потребует точного candidate approval.
+      Отдельно закрыть пропущенную в CAP-03 границу общих правил/операций аккаунта.
+- [ ] RELEASE-2-ACCEPTANCE: `852a8d2` deployed, инфраструктура passed,
+      приёмка не завершена. 622 offline tests passed; 6 live вопросов,
+      content 4 passed / 1 partial / 1 failed; MENU-02/MIXED-RAG not_run после stop.
+      Receipt: `docs/reports/2026-09-15-runtime-852a8d2-deployment.md`.
 
 ## Soon
 

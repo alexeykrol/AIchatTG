@@ -3,6 +3,28 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [852a8d2] — 2026-09-15 UTC — Course profile and linked menu cleanup
+
+Lifecycle `deployed`; runtime started at 06:49:50 UTC. Environment, schema,
+routes, knowledge and Console are unchanged. Rollback image `049cc22` retained.
+
+- Restored «ИИ Навигатор» course purpose, capabilities and current invocation
+  instructions; internal-detail restrictions no longer replace ordinary
+  capability answers. `/ai` retirement is explicit in usage replies.
+- Persisted exact command/hint ownership; complete answer delivery triggers
+  one-shot cleanup of the proven service pair, with Guard rights checks and
+  edit-race fences. Real Q/A and uncertain/legacy targets are retained.
+- Added profile/cleanup regressions and wired 17 acceptance-runner safety
+  tests into root `npm test`: 622 tests passed with no skips.
+- Live acceptance is **not complete**: 6/6 delivered, content 4 passed / 1
+  partial / 1 failed; compound identity was refused and CAP-03 omitted the
+  expected account-operation boundary. Menu hint deleted, but Guard received
+  not-found for the synthetic command; run stopped without retries. Human-menu
+  verification and two unexecuted cases remain open. This entry does not claim
+  the owner's menu issue is completely resolved.
+
+See the [release receipt](docs/reports/2026-09-15-runtime-852a8d2-deployment.md).
+
 ## [049cc22] — 2026-09-15 UTC — Runtime deadlines and assistant fixes
 
 Production-verified at image `049cc22`; runtime started at 00:20:48 UTC.

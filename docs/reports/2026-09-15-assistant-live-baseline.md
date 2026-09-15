@@ -2,6 +2,11 @@
 
 ## Outcome
 
+Historical baseline checkpoint. The subsequent release and stopped post-fix
+run are recorded separately in [the 852a8d2 receipt](2026-09-15-runtime-852a8d2-deployment.md).
+Question counts and `not_run` results below are as of this baseline, not the
+current cumulative state.
+
 `passed`: all 28 substantive questions were delivered and answered, with exact
 Telegram message → inbound event → answer-record joins. Content assessment:
 **19 passed, 6 partial, 2 failed, 1 inconclusive**. Transport success is not
@@ -9,7 +14,7 @@ content acceptance.
 
 This measured **production `049cc22d02aa052a5002cf8377185b1e3dcb4943`**, not
 the new local fix. Runtime-source candidate `62e1ebf` restores the public
-profile and completes service-pair cleanup; its lifecycle remains `prepared`.
+profile and implements service-pair cleanup; its lifecycle at this checkpoint was `prepared`.
 No new candidate was deployed or pushed during this acceptance run.
 
 ## Scope and reproducibility

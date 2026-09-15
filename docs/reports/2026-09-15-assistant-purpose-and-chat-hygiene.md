@@ -1,6 +1,9 @@
 # Assistant purpose and menu-message hygiene — 2026-09-15 UTC
 
-Lifecycle: `prepared`. Production baseline: runtime `049cc22`.
+Historical preparation checkpoint (baseline runtime `049cc22`). The later
+`852a8d2` release is `deployed`, but live acceptance remains incomplete:
+see [its separate receipt](2026-09-15-runtime-852a8d2-deployment.md).
+The evidence below describes the pre-deployment checkpoint, not current status.
 
 This is a follow-up to the [instruction reconciliation](2026-09-14-owner-instruction-reconciliation.md),
 not a replacement for its historical checkpoint. The Product Owner supplied

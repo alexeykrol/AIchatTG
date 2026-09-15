@@ -37,7 +37,14 @@ the bare command. Preserve Q/A, reject unrelated or edited targets, fence
 unknown deletion outcomes. Read-only checks verified existing Moderator
 delete rights in all three groups; no new permissions are needed.
 
-**Status:** prepared; production `049cc22` still has the earlier partial fix.
+**Status:** partial. The linked service-pair implementation was deployed as
+`852a8d2` at 2026-09-15 06:49:50 UTC with unchanged rights/configuration.
+In the closed synthetic test, hint 525 was deleted but command 524 received
+`message to delete not found` from Telegram through Guard. The one-shot
+uncertain receipt is fenced; no repeated delete or alternative-token attempt.
+No Moderator inbound receipt exists for this synthetic command. Ordinary
+human-menu deletion is not yet verified, so the owner's issue remains open.
+Evidence: `docs/reports/2026-09-15-runtime-852a8d2-deployment.md`.
 History and acceptance contract:
 `docs/reports/2026-09-15-assistant-purpose-and-chat-hygiene.md`.
 
@@ -57,11 +64,17 @@ accepted News source `a729ccd`, retain current invocation rules, and reserve
 internal-detail boundaries for corresponding questions. Freeze a source-backed
 acceptance bank and inspect actual answers, not merely HTTP/delivery success.
 
-**Status:** prepared. Paid closed-chat testing is owner-authorized; no new
-production candidate is claimed deployed by this entry.
+**Status:** partial. Restored profile is deployed in `852a8d2`; actual
+CAP-01/USE-01/USE-02 replies passed content review. CAP-03 is partial because
+it omits the expected general-rules/account-operation distinction. The extra compound
+question “Кто ты и как тебя зовут?” still falls through the narrow profile
+matcher and is refused; tracked as PROFILE-2. Post-fix run delivered 6/6,
+content 4 passed / 1 partial / 1 failed, then stopped on MENU-01 cleanup. Cumulative
+question count: 34/50; no blind send/deletion retries. Release receipt:
+`docs/reports/2026-09-15-runtime-852a8d2-deployment.md`.
 Baseline completed against `049cc22`: 28/28 answers delivered, 19 content
 passes, 6 partial, 2 failed, 1 inconclusive. The profile failures and `/ai`
-explanation are repaired in local candidate `62e1ebf`; remaining source and
+explanation were repaired in `62e1ebf`, included in deployed `852a8d2`; remaining source and
 navigation findings are preserved in
 `docs/reports/2026-09-15-assistant-live-baseline.md`.
 

@@ -69,18 +69,26 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current production image: `049cc22`** (started 2026-09-15 00:20:48 UTC;
-production-verified). Includes deterministic self-description, hint cleanup,
-15s Telegram / 45s provider deadlines and complete-input dialogue budgeting.
-Both public webhook paths retain their authentication guard; the container is
-healthy with zero restarts. Rollback image `f51753f` is retained. See the
-[deployment receipt](docs/reports/2026-09-15-runtime-049cc22-deployment.md).
+**Current production image: `852a8d2`** (started 2026-09-15 06:49:50 UTC;
+lifecycle `deployed`). Restores the course navigator profile and adds durable
+command/hint cleanup. Infrastructure checks passed: exact source, preserved
+configuration/schema/routes, healthy and zero restarts. Rollback `049cc22`
+is retained; Console was not recreated. Live acceptance stopped after six
+questions: a compound identity question was refused, and synthetic command
+deletion returned not-found after the hint was deleted. Ordinary human-menu
+cleanup is still unverified. See the
+[deployment and acceptance receipt](docs/reports/2026-09-15-runtime-852a8d2-deployment.md).
 
 Two local assistant instances that can hold a recorded conversation with each
 other (wave 3) remain a lab tool in scripts, not on the live answer path.
 
 ## Known open defects
 
+- **Profile and menu acceptance are incomplete.** “Кто ты и как тебя зовут?”
+  misses the single-clause identity matcher. Synthetic menu-pair deletion was
+  not confirmed; no Moderator inbound receipt exists for that synthetic
+  command. Do not infer ordinary-user success/failure or change permissions
+  from this alone. See `PROFILE-2` / `HYGIENE-1` in `.claude/BACKLOG.md`.
 - **Acceptance does not judge answer content.** The deterministic leg checks
   behaviour and the model judge is explicitly barred from judging factual
   grounding, so neither leg verifies whether an answer is true to the

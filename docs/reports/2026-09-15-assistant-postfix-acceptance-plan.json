@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "chatId": "-1002222077798",
+  "syntheticUserId": "8994494918",
+  "maxQuestions": 8,
+  "cases": [
+    {
+      "id": "CAP-01",
+      "question": "Что ты можешь?",
+      "mode": "ask",
+      "expects": [
+        "Описывает полезные возможности навигатора по курсам: объяснение материалов, поиск уроков и выбор последовательности обучения.",
+        "Не отвечает отказом вне области курса и не подменяет описание возможностей перечнем скрытых инструкций, провайдеров, ключей и логов.",
+        "Не обещает выполнять разработку, менять аккаунты, оплачивать услуги или действовать от имени Алексея Крола."
+      ],
+      "sources": [
+        "News Git a729ccd5138288b7c921e0a677b5b9e9281e7399:news-digest-pipeline/src/pro/moderation/assistant.js:423-429",
+        "News Git a729ccd5138288b7c921e0a677b5b9e9281e7399:news-digest-pipeline/src/pro/moderation/prompts/assistant-profile-v2.md:5-17"
+      ]
+    },
+    {
+      "id": "CAP-03",
+      "question": "На какие вопросы ты отвечаешь?",
+      "mode": "ask",
+      "expects": [
+        "Называет вопросы по подключённым курсам и материалам, ИИ и автоматизациям в их пределах, выбору обучения и общим организационным правилам.",
+        "Не ограничивает свою пользу исключительно справкой по команде /ask.",
+        "Отделяет общие правила от операций с личным аккаунтом и не обещает знания любой темы."
+      ],
+      "sources": [
+        "News Git a729ccd5138288b7c921e0a677b5b9e9281e7399:news-digest-pipeline/src/pro/moderation/assistant.js:423-433",
+        "/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/news-bank/knowledge-org.md:3-8"
+      ]
+    },
+    {
+      "id": "USE-01",
+      "question": "Как к тебе обращаться, чтобы мой вопрос не остался без ответа?",
+      "mode": "ask",
+      "expects": [
+        "Называет все три действующих способа: ответ на сообщение ассистента, /ask с вопросом, упоминание ассистента с вопросом.",
+        "Объясняет, что обычный неадресованный разговор не вызывает ассистента; упоминает /help.",
+        "Не возвращает историческое ограничение только /ask в начале сообщения и не требует команды при ответе на собственное сообщение бота."
+      ],
+      "sources": [
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/assistant-policy.mjs:ASSISTANT_HELP_TEXT",
+        "/Users/alexeykrolmini/Code/AIchatTG/docs/OWNER_FEEDBACK_LOG.md:No answer to a follow-up message after an empty /ask"
+      ]
+    },
+    {
+      "id": "USE-02",
+      "question": "Почему /ai больше не работает и как вместо неё задать вопрос?",
+      "mode": "ask",
+      "expects": [
+        "Прямо сообщает, что /ai больше не поддерживается, и даёт рабочий пример /ask ваш вопрос.",
+        "Не представляет /ai и /ask как равнозначные действующие команды.",
+        "Не запускает поиск урока о командах и не отвечает отказом по границе курса."
+      ],
+      "sources": [
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/assistant-policy.mjs:ASSISTANT_RETIRED_COMMAND_TEXT",
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/assistant-policy.mjs:ASSISTANT_HELP_TEXT"
+      ]
+    },
+    {
+      "id": "PROFILE-ID",
+      "mode": "ask",
+      "question": "Кто ты и как тебя зовут?",
+      "expects": [
+        "Представляется ИИ Навигатором и ботом-помощником по курсу Создание ИИ Агентов.",
+        "Не выдаёт себя за Алексея Крола или человека; не начинает с технических запретов."
+      ],
+      "sources": [
+        "News Git a729ccd5138288b7c921e0a677b5b9e9281e7399:news-digest-pipeline/src/pro/moderation/prompts/assistant-profile-v2.md:5-17",
+        "apps/telegram-runtime/src/assistant-policy.mjs"
+      ]
+    },
+    {
+      "id": "MENU-01",
+      "question": "В курсе говорят сначала описать процесс, а потом выбирать инструмент. Что именно записать о процессе перед сборкой первого агента?",
+      "mode": "menu_reply",
+      "expects": [
+        "Сценарий начинается с отдельной пустой команды /ask@alexkrol_moderation_bot от синтетического пользователя; затем этот содержательный вопрос отправляется ответом на приглашение бота, без новой /ask в тексте.",
+        "Даёт содержательный ответ про цель, триггер, шаги, данные или ресурсы, условия, исключения и контроль результата по материалам проектирования.",
+        "После успешной доставки ответа удалены ровно два временных сообщения этой цепочки: исходная пустая /ask@alexkrol_moderation_bot и подсказка бота; настоящий вопрос и ответ остаются.",
+        "Успех удаления подтверждён отдельными квитанциями для обоих точных message_id, а не только намерением в коде; при отказе Telegram или неполной доставке результат не считается passed.",
+        "Чужие команды, прежние ответы и другие цепочки не удалены; сам факт чтения или отправки вопроса ещё не повод очищать незавершённую цепочку."
+      ],
+      "sources": [
+        "/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/news-bank/knowledge-topic-design-basics.md:8-13",
+        "/Users/alexeykrolmini/Code/AIchatTG/docs/OWNER_FEEDBACK_LOG.md:Chat hygiene: service messages should self-delete",
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/assistant-policy.mjs:ASSISTANT_EMPTY_ASK_TEXT",
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/runtime.mjs:sendAssistantTurn"
+      ],
+      "bareCommand": "/ask@alexkrol_moderation_bot"
+    },
+    {
+      "id": "MENU-02",
+      "question": "По методике курса достаточно посмотреть видеоурок, или что нужно сделать, чтобы действительно пройти его?",
+      "mode": "menu_reply",
+      "expects": [
+        "Сценарий начинается с отдельной пустой команды /ask от синтетического пользователя; затем этот содержательный вопрос отправляется ответом на подсказку бота, без команды или упоминания в тексте.",
+        "Объясняет активное прохождение: скачать или открыть материалы, запустить, воспроизвести и адаптировать под свою задачу; не приравнивает просмотр к освоению.",
+        "После успешной доставки ответа удалены и исходная пустая /ask, и подсказка именно этой второй цепочки; содержательный вопрос, ответ и результаты MENU-01 остаются.",
+        "Для обоих удалений сохранены точные message_id и успешные квитанции; права бота и успешное удаление пользовательской команды не предполагаются без доказательства.",
+        "Повторная доставка того же обновления не должна создавать новый ответ или удалять сообщения другой цепочки; если повтор не выполнялся в лимите разрешённого прогона, это ожидание отмечается not_run, а не passed."
+      ],
+      "sources": [
+        "/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/news-bank/knowledge-topic-flagship.md:14-22",
+        "/Users/alexeykrolmini/Code/AIchatTG/docs/OWNER_FEEDBACK_LOG.md:Chat hygiene: service messages should self-delete",
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/assistant-policy.mjs:ASSISTANT_EMPTY_ASK_TEXT",
+        "/Users/alexeykrolmini/Code/AIchatTG/apps/telegram-runtime/src/runtime.mjs:sendAssistantTurn"
+      ],
+      "bareCommand": "/ask"
+    },
+    {
+      "id": "MIXED-RAG",
+      "mode": "ask",
+      "question": "Что ты можешь рассказать про RAG?",
+      "expects": [
+        "Объясняет RAG как поиск релевантных фрагментов собственной базы и ответ по контексту.",
+        "Не подменяет конкретный вопрос о RAG общей самопрезентацией; не обещает отсутствие ошибок."
+      ],
+      "sources": [
+        "/Users/alexeykrolmini/Code/allcourses/code/data/knowledge/news-bank/knowledge-topic-agent-core.md",
+        "apps/telegram-runtime/test/assistant-profile.test.mjs"
+      ]
+    }
+  ]
+}
