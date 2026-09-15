@@ -74,3 +74,11 @@ git diff --check
 - Preflight parser on approved local credential route:passed; key present, enabled=true, official endpoint, exact Luna/low/256 tuple. No key output/copy.
 - Collector SHA256:6ff77d67661904aa633c3d021d9955f5c35030214df403951a62112b67845905.
 - Experiment execution:not_run pending exact lease. Evidence:docs/reports/2026-09-15-routing-measurement-preflight-v2.md.
+
+## Consumed Experiment and Closure
+
+- Exactfc5a741 collector accepted; one-shot controller lease executed2026-09-15 08:51:38–08:52:51UTC.
+- Terminaltransport_failure onattempt48:47valid modelrecords,1uncertain,56unattempted,57missing results; no retry/reset/continuation.
+- Known token-price estimateUSD0.00785592; total conservativeboundUSD0.03717845 includinguncertainty. Invoiceunavailable.
+- Controller explicitly required offline closure; no self-issued replacementlease, runtime/index/gold change or deployment.
+- Partial results and per-question/dialogue accounting:docs/reports/2026-09-15-routing-measurement-result-v1.md.
