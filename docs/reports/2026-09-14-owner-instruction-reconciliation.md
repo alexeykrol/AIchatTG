@@ -13,6 +13,13 @@ self-description, hint cleanup, deadlines, dialogue budgeting and Compose
 passthrough are now deployed. Open product/architecture items remain open.
 See the [deployment receipt](2026-09-15-runtime-049cc22-deployment.md).
 
+**Reopened after live feedback:** the deployed self-description dispatched
+correctly but retained the wrong technical fallback; cleanup covered only the
+hint, not the bare menu command. Do not read the historical `done` rows below
+as full product acceptance. The recovered prior profile, complete cleanup
+contract and new counterexamples are tracked in the
+[September 15 follow-up](2026-09-15-assistant-purpose-and-chat-hygiene.md).
+
 Statuses: `passed`, `failed`, `not_run`, `inconclusive`; implementation state:
 `done`, `partial`, `superseded`, `proposed`.
 

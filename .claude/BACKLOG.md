@@ -14,9 +14,14 @@ updated: 2026-09-14
 - [ ] RISK-1: спроектировать durable webhook inbox + per-chat worker recovery.
       Немедленный HTTP 200 разрешён только после надёжной записи валидированного
       update; in-memory очередь может потерять update при crash после ACK.
-- [ ] HYGIENE-1: read-only проверить `can_delete_messages` ассистент-бота в
-      покрываемых группах. Без прав удаляется только собственная hint-подсказка,
-      а не пользовательская команда `/ask@bot`.
+- [ ] HYGIENE-1: завершить приёмку новой уборки пары «команда + hint»;
+      локальный candidate использует существующий Moderator Guard.
+      Read-only права уже проверены: Moderator имеет delete/restrict во всех
+      трёх группах, Assistant delete — в тестовой. Production пока `049cc22`.
+- [ ] PROFILE-1: принять восстановленный «ИИ Навигатор» и содержательную
+      навигацию курса вместо технического fallback. Предварительные ожидания:
+      `docs/reports/2026-09-15-assistant-acceptance-plan.json`; не считать
+      успешную доставку доказательством адекватности ответа.
 
 ## Soon
 

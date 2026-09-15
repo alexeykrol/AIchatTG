@@ -129,9 +129,25 @@ export function createGuardAdapter({
     return { proven: true, exempt: false, reason: null };
   }
 
-  async function callWithProof(chatId, invoke, fallback) {
+  async function callWithProof(chatId, invoke, fallback, beforeInvoke = null) {
     const proof = await verifyEnforcement({ chatId });
     if (!proof.proven) return { ok: false, skipped: proof.reason, uncertain: false };
+    if (beforeInvoke != null) {
+      try {
+        // A synchronous literal-true predicate closes the local edit race at
+        // the final boundary. Never await it: false, a Promise or a throw is
+        // not permission to mutate a message after the live rights lookup.
+        const decision = typeof beforeInvoke === 'function' ? beforeInvoke() : null;
+        if (decision !== true) {
+          // Refuse accidental async predicates without leaving a rejected
+          // Promise unhandled. This does not await or authorize the decision.
+          if (decision && typeof decision.then === 'function') Promise.resolve(decision).catch(() => {});
+          return { ok: false, skipped: 'delete_precondition_unproven', uncertain: false };
+        }
+      } catch {
+        return { ok: false, skipped: 'delete_precondition_unproven', uncertain: false };
+      }
+    }
     try {
       return normalizedResult(await invoke(), fallback);
     } catch {
@@ -153,8 +169,8 @@ export function createGuardAdapter({
     verifyEnforcement,
     verifyPinGovernance,
     senderDisposition,
-    deleteMessage({ chatId, messageId }) {
-      return callWithProof(chatId, () => telegram.deleteMessage({ chatId: String(chatId), messageId: String(messageId) }), 'delete_failed');
+    deleteMessage({ chatId, messageId, beforeDelete = null }) {
+      return callWithProof(chatId, () => telegram.deleteMessage({ chatId: String(chatId), messageId: String(messageId) }), 'delete_failed', beforeDelete);
     },
     sendWarning({ chatId, messageId, text }) {
       return callWithProof(chatId, () => telegram.sendMessage({

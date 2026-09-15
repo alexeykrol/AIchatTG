@@ -8,6 +8,7 @@ import {
   botIdFromToken,
   classifyTelegramUpdate,
   incomingEventId,
+  messageIdentity,
   isCourseOperationsSupportQuestion,
   isCourseValueQuestion,
   isDefinitiveDomainRouteReason,
@@ -99,8 +100,16 @@ function inboundPayloadFingerprint(update) {
   return createHash('sha256').update(canonicalJson(update)).digest('hex');
 }
 
-function inboundRevisionIdentity(classified, update) {
-  return classified.comment?.platformMessageId || classified.question?.platformMessageId || `update:${update.update_id}`;
+function inboundRevisionIdentity(classified, update, acceptedChatIds) {
+  const edited = update.edited_message;
+  // An edit that removes /ask is still evidence that the command is no longer
+  // disposable. Keep its content-free identity even when classification skips
+  // it, and before any asynchronous moderation/answer work can begin.
+  const rawEditIdentity = edited?.message_id != null && edited?.chat?.id != null
+    && acceptedChatIds.map(String).includes(String(edited.chat.id))
+    ? messageIdentity(edited, update).platformMessageId : null;
+  return classified.comment?.platformMessageId || classified.question?.platformMessageId
+    || rawEditIdentity || `update:${update.update_id}`;
 }
 
 function replayInboundResult({ eventId, receiptId, existing, collision }) {
@@ -382,6 +391,57 @@ export function createTelegramRuntime({
   async function completeEnforcement(claim, status, receipt, errorCode = null) {
     const completed = store.completeModerationEnforcement({ claim, status, receipt, errorCode });
     return { receipt, persisted: completed.completed === true, status };
+  }
+
+  /**
+   * Delete only the exact, same-user bare-command/prompt pair whose completed
+   * receipt proves ownership. Claim before any external call: a crash or an
+   * ambiguous Telegram result must never cause another deletion attempt.
+   */
+  async function cleanupAssistantAskPrompt(eventId, question) {
+    if (!question.replyToMessageId || !question.text?.trim()) return;
+    try {
+      const claim = store.claimAssistantAskCleanup({
+        chatId: question.chatId, userId: question.userId,
+        promptMessageId: question.replyToMessageId, questionMessageId: question.messageId,
+        answerEventId: eventId,
+      });
+      if (!claim) return;
+      async function remove(messageId, target, adapter, actor) {
+        if (typeof adapter?.deleteMessage !== 'function') {
+          return { state: 'skipped', reason: `${actor}_delete_unavailable`, actor };
+        }
+        try {
+          const result = await adapter.deleteMessage({
+            chatId: claim.chatId, messageId,
+            ...(target === 'command' ? {
+              // Guard runs this synchronously AFTER its asynchronous live
+              // rights check, immediately before invoking raw deleteMessage.
+              beforeDelete: () => store.isAssistantAskCommandUnedited(claim),
+            } : {}),
+          });
+          if (result?.ok === true) return { state: 'deleted', actor };
+          console.error(`[runtime] ask cleanup failed event=${eventId} target=${target} `
+            + `error=${String(result?.error || result?.skipped || 'telegram_refused').slice(0, 120)}`);
+          return {
+            state: result?.uncertain === true ? 'uncertain' : 'skipped', actor,
+            reason: result?.skipped ? String(result.skipped).slice(0, 120) : 'telegram_refused',
+          };
+        } catch {
+          console.error(`[runtime] ask cleanup uncertain event=${eventId} target=${target}`);
+          return { state: 'uncertain', reason: 'delete_transport_unknown', actor };
+        }
+      }
+      // Own hint uses its author token. User-message deletion always follows
+      // Guard's existing configured-chat and live-rights proof; there is no
+      // second-token fallback or permission mutation after any attempted call.
+      const prompt = await remove(claim.promptMessageId, 'prompt', assistantTelegram, 'assistant');
+      const command = await remove(claim.commandMessageId, 'command', guardAdapter, 'guard');
+      store.completeAssistantAskCleanup({ claim, prompt, command });
+    } catch (error) {
+      // Cleanup is secondary to an already delivered and recorded answer.
+      console.error(`[runtime] ask cleanup failed event=${eventId} ${runtimeErrorSummary(error)}`);
+    }
   }
 
   /**
@@ -1106,27 +1166,6 @@ export function createTelegramRuntime({
         + `error=${String(transport.error || '').slice(0, 120)}`);
     }
     const receipt = assistantDeliveryReceipt(transport);
-    // The empty-`/ask` hint (`ASSISTANT_EMPTY_ASK_TEXT`, sent with
-    // `forceReply`) is pure clutter once its own reply has been answered: the
-    // exchange it invited now exists as a real question and a real answer.
-    // Matched on the replied-to text, not merely "was this a reply to the
-    // bot" — replying to a PAST real answer must never delete that answer.
-    // Best-effort: the assistant bot deletes only its own message, which
-    // Telegram always permits without admin rights; a failure here must never
-    // cost the user their answer.
-    if (question.replyToMessageId && question.replyToText === ASSISTANT_EMPTY_ASK_TEXT) {
-      try {
-        const cleanup = await assistantTelegram.deleteMessage({
-          chatId: question.chatId, messageId: question.replyToMessageId,
-        });
-        if (cleanup?.ok !== true) {
-          console.error(`[runtime] hint cleanup failed event=${eventId} `
-            + `error=${String(cleanup?.error || cleanup?.skipped || 'telegram_refused').slice(0, 120)}`);
-        }
-      } catch (error) {
-        console.error(`[runtime] hint cleanup failed event=${eventId} ${runtimeErrorSummary(error)}`);
-      }
-    }
     if (persist) {
       store.recordBoundedAssistantTurn({
         ...question, eventId, question: question.text, answer: answer.text.trim(),
@@ -1147,8 +1186,23 @@ export function createTelegramRuntime({
         // счётчики останутся пустыми, и это честное «вызова не было».
         usage: providerCallUsage(answer.receipt),
       });
+      if (!transport?.partial && !transport?.uncertain) {
+        await cleanupAssistantAskPrompt(eventId, question);
+      }
     }
-    return { kind: 'answered', receipt, route };
+    return {
+      kind: 'answered', receipt, route,
+      ...(route === 'command:ask_empty' && forceReply && question.bareAskCommand === true
+        && !transport?.partial && !transport?.uncertain && receipt.messageId
+        && store.isAssistantAskCommandUnedited({
+          eventId, chatId: question.chatId, commandMessageId: question.messageId,
+        }) ? {
+          askPrompt: {
+            chatId: String(question.chatId), userId: String(question.userId),
+            commandMessageId: String(question.messageId), promptMessageId: receipt.messageId,
+          },
+        } : {}),
+    };
   }
 
   /**
@@ -1538,7 +1592,7 @@ export function createTelegramRuntime({
       const receiptId = eventId;
       const inboundClaim = store.claimInboundDelivery({
         receiptId, role, updateId: update.update_id,
-        revisionIdentity: inboundRevisionIdentity(classified, update),
+        revisionIdentity: inboundRevisionIdentity(classified, update, adapterConfig.chatIds),
         payloadFingerprint: inboundPayloadFingerprint(update),
       });
       if (!inboundClaim.claimed) {
@@ -1553,6 +1607,23 @@ export function createTelegramRuntime({
         return { kind: 'uncertain_delivery', eventId, receiptId, reason: 'legacy_event_unresolved', recoveryId: null };
       }
       try {
+        const assistantMessage = role === BOT_ROLES.ASSISTANT
+          ? update.message || update.edited_message : null;
+        if (classified.kind === 'question') {
+          // The classifier also accepts mentions and replies. Only a literal
+          // empty /ask (optionally addressed to this bot) owns a deletable
+          // command; a real question with /ask must always remain in the chat.
+          classified.question.bareAskCommand = !update.edited_message && /^\s*\/ask(?:@[A-Za-z0-9_]+)?\s*$/i
+            .test(assistantMessage?.text || '');
+        }
+        if (role === BOT_ROLES.ASSISTANT && update.edited_message
+          && adapterConfig.chatIds.map(String).includes(String(assistantMessage?.chat?.id))
+          && assistantMessage?.from?.id != null) {
+          store.invalidateAssistantAskPrompt({
+            chatId: assistantMessage.chat.id, userId: assistantMessage.from.id,
+            commandMessageId: assistantMessage.message_id,
+          });
+        }
         const result = classified.kind === 'comment'
           ? await handleModerator(eventId, receiptId, classified.comment)
           : classified.kind === 'question'

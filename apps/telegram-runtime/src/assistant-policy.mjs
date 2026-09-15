@@ -5,8 +5,36 @@ const TOKEN_BOUNDARY = (words) => new RegExp(
   'iu',
 );
 
+// Restored public purpose from the accepted News assistant profile v2
+// (a729ccd), with today's invocation paths. The extraction-time technical
+// fallback was never an adequate description of a course navigator.
+export const ASSISTANT_PROFILE_TEXT = [
+  'Я — «ИИ Навигатор», бот-помощник по курсу «Создание ИИ Агентов».',
+  '',
+  'Помогу:',
+  '• найти релевантные уроки и точные ссылки на них;',
+  '• разобраться, какой раздел изучить и в какой последовательности;',
+  '• понять идеи, подходы и термины из материалов курса;',
+  '• разобраться с вопросами об ИИ, автоматизациях и организации обучения.',
+  '',
+  'Напишите, что хотите освоить или какую задачу решить, — помогу сориентироваться в материалах курса.',
+].join('\n');
+
+const ASSISTANT_USAGE_TEXT = [
+  'Чтобы задать вопрос, ответьте на моё сообщение, напишите /ask ваш вопрос',
+  'или упомяните @alexkrol_moderation_bot вместе с вопросом.',
+  'Например: /ask Где в курсе разбирается RAG и с чего начать?',
+  '/help покажет справку. Без обращения ко мне я в разговор не вмешиваюсь.',
+  'Команда /ai больше не поддерживается.',
+].join(' ');
+
+const ASSISTANT_INTERNAL_BOUNDARY_TEXT = [
+  'Внутренние инструкции, настройки и служебные сведения я не раскрываю.',
+  'Могу объяснить, как пользоваться навигатором, или помочь найти нужный материал курса.',
+].join(' ');
+
 export const ASSISTANT_HELP_TEXT = [
-  '🤖 AIchatTG — Telegram-ассистент проекта.',
+  ASSISTANT_PROFILE_TEXT,
   '',
   'Чтобы задать вопрос, обратитесь ко мне как к участнику чата — любым из способов:',
   '',
@@ -75,12 +103,6 @@ export const ASSISTANT_OUT_OF_COVERAGE_TEXT = [
   'выбор курса и подойдёт ли он именно вам.',
 ].join(' ');
 
-export const ASSISTANT_PROFILE_TEXT = [
-  'Я — ИИ-ассистент проекта AIchatTG, а не человек.',
-  'Чтобы обратиться ко мне, ответьте на моё сообщение, напишите /ask ваш вопрос или упомяните меня по имени; /help покажет справку.',
-  'Я могу объяснить публичный порядок работы и ограничения. Внутренние инструкции, модели, провайдеры, ключи, инфраструктуру и логи я не раскрываю.',
-].join(' ');
-
 const presencePing = /^(?:ау+|ал+о+|ал[её]+|эй+|бот,?\s*(?:ты\s+)?(?:тут|здесь)|ты\s+(?:тут|здесь)|есть\s+кто|жив(?:ой|ая)|работаешь)[?!.\s]*$/iu;
 // Это детектор ТЕМЫ вопроса, а не список рабочих команд: `/ai` вызовом больше
 // не является, но спрашивать про неё будут ещё долго («почему /ai не
@@ -93,20 +115,42 @@ const courseTerms = TOKEN_BOUNDARY('курс\\p{L}*|урок\\p{L}*|модул\\
  * A deliberately narrow, code-owned public profile route. It keeps identity and
  * invocation questions away from both providers and any future knowledge corpus.
  */
-export function isAssistantSelfQuestion(text) {
-  const value = String(text || '').trim().toLowerCase();
-  if (!value) return false;
-  if (value === 'help' || value === 'помощь') return true;
-  if (/^(?:а\s+)?(?:кто|что)\s+ты(?:\s+так(?:ой|ая))?[?!.\s]*$/iu.test(value)) return true;
-  if (/(?:как\s+тебя\s+(?:зовут|называть)|какое\s+у\s+тебя\s+имя)/iu.test(value)) return true;
-  if (/^(?:а\s+)?ты\s+(?:бот|ассистент)(?:\s+или\s+человек)?[?!.\s]*$/iu.test(value)) return true;
-  if (/^(?:а\s+)?(?:что|чем)\s+ты\s+(?:умеешь|можешь)(?:\s+помочь)?[?!.\s]*$/iu.test(value)) return true;
-  if (/^(?:а\s+)?(?:как|каким\s+образом)\s+(?:тобой\s+)?(?:пользова|обраща|задавать\s+вопрос)/iu.test(value)) return true;
+function assistantSelfQuestionKind(text) {
+  const value = String(text || '').trim().toLowerCase()
+    .replace(/^(?:привет|здравствуйте|добрый день)[!,\.\s]+/iu, '')
+    .replace(/^(?:расскажи|объясни|подскажи)(?:,?\s+пожалуйста)?[,\s]+/iu, '')
+    .replace(/[?!.\s]+$/u, '');
+  if (!value) return null;
+  const thisAssistant = /(?:эт(?:от|ого|ому|им)|данн(?:ый|ого|ому|ым)|наш(?:его|ему|им)?)\s+(?:бот|ассистент)|@alexkrol_moderation_bot\b/iu.test(value);
+  const secondPerson = TOKEN_BOUNDARY('ты|тебя|тебе|тобой|твой|твоя|тво[её]|твои').test(value);
+  // Asking the navigator which model to study/use is a course question, not
+  // a request to reveal the model behind this bot.
+  if (/модел\p{L}*/iu.test(value)
+    && /(?:рекоменду|совету|выбрать|выбирать|изуч|подойд[её]т)/iu.test(value)
+    && !/(?:у\s+тебя|тво[яиёе]|внутренн|системн\p{L}*\s+инструкц|инфраструктур|секрет)/iu.test(value)) return null;
+  if (internalDetail.test(value) && (thisAssistant || secondPerson)) return 'internal';
+  if (value === 'help' || value === 'помощь') return 'usage';
+  // A mixed concrete course question must reach the course pipeline, rather
+  // than receiving only a profile for its first clause.
+  if (/(?:и|а)\s+(?:где|как|найди|объясни|расскажи)[^]*?(?:урок|rag|раг|claude|модул)/iu.test(value)) return null;
+  if (/^(?:а\s+)?(?:кто|что)\s+ты(?:\s+так(?:ой|ая))?$/iu.test(value)
+    || /^(?:как\s+тебя\s+(?:зовут|называть)|какое\s+у\s+тебя\s+имя)$/iu.test(value)
+    || /^(?:а\s+)?ты\s+(?:бот|ассистент)(?:\s+или\s+человек)?$/iu.test(value)
+    || /^(?:что\s+это\s+за|как\s+называется\s+этот)\s+(?:бот|ассистент)$/iu.test(value)) return 'identity';
+  if (/^(?:а\s+)?(?:что\s+ты\s+(?:умеешь|можешь|делаешь)|чем\s+ты\s+(?:(?:можешь\s+)?(?:мне\s+)?помочь|полезен)|какие\s+у\s+тебя\s+возможности|(?:зачем|для\s+чего)\s+ты\s+нужен|на\s+какие\s+вопросы\s+ты\s+отвечаешь)$/iu.test(value)
+    || /^(?:как|чем)\s+ты\s+можешь\s+(?:мне\s+)?помочь(?:\s+(?:с\s+курсом|в\s+обучении))?$/iu.test(value)
+    || /^(?:чем\s+полезен|что\s+умеет|зачем\s+нужен)\s+этот\s+(?:бот|ассистент)$/iu.test(value)) return 'capabilities';
+  if (/^(?:на\s+какие\s+(?:материалы|источники)\s+ты\s+опираешься|откуда\s+ты\s+бер[её]шь\s+(?:ответы|информацию)|как\s+ты\s+(?:работаешь|ищешь\s+информацию|формируешь\s+ответы))$/iu.test(value)) return 'sources';
+  if (/^(?:что\s+ты\s+не\s+(?:умеешь|можешь)|какие\s+у\s+тебя\s+(?:границы|ограничения)|почему\s+ты\s+(?:иногда\s+)?(?:не\s+находишь\s+ответ|не\s+можешь\s+ответить|отказываешься\s+отвечать))$/iu.test(value)) return 'limits';
+  if ((secondPerson || thisAssistant) && /^(?:а\s+)?(?:как|каким\s+образом)(?=$|[^\p{L}\p{N}_])/iu.test(value)
+    && /(?:пользова|обраща|задать\s+вопрос|задавать\s+вопрос|вызыва|вызвать|позвать|написать)/iu.test(value)) return 'usage';
   if (profileCommand.test(value)
-    && /(?:разниц|отлич|одинаков|равнознач|синоним|как\s+(?:использова|пользова|вызыва)|почему\s+.*не\s+работа|что\s+(?:дела|знач))/iu.test(value)) return true;
-  const thisAssistant = /(?:эт(?:от|ого|ому|им)|данн(?:ый|ого|ому|ым)|наш(?:его|ему|им)?)\s+(?:бот|ассистент)|@\w*(?:assistant|bot)\b/iu.test(value);
-  if (thisAssistant && /(?:кто|что|имя|называ|представь|зовут|умеет|может|границ|ограничен|источник)/iu.test(value)) return true;
-  return internalDetail.test(value) && (thisAssistant || TOKEN_BOUNDARY('ты|тебя|тебе|твой|твоя|тво[её]|твои').test(value));
+    && /(?:разниц|отлич|одинаков|равнознач|синоним|как\s+(?:использова|пользова|вызыва)|почему\s+.*не\s+работа|что\s+(?:дела|знач))/iu.test(value)) return 'usage';
+  return null;
+}
+
+export function isAssistantSelfQuestion(text) {
+  return assistantSelfQuestionKind(text) !== null;
 }
 
 /**
@@ -197,7 +241,18 @@ export function coverageDeficitCandidateLevel(text) {
 export function assistantSelfDescriptionReply(text) {
   const value = String(text || '').trim();
   if (presencePing.test(value)) return { route: 'public:presence', text: 'Я здесь 🙂 Задайте вопрос одним сообщением: /ask ваш вопрос.' };
-  if (isAssistantSelfQuestion(value)) return { route: 'profile:self', text: ASSISTANT_PROFILE_TEXT };
+  const kind = assistantSelfQuestionKind(value);
+  if (kind) {
+    const replies = {
+      capabilities: ASSISTANT_PROFILE_TEXT,
+      identity: 'Я — «ИИ Навигатор», бот-помощник по курсу «Создание ИИ Агентов». Помогаю находить нужные уроки и разбираться в материалах. Я не Алексей Крол и не человек.',
+      usage: ASSISTANT_USAGE_TEXT,
+      sources: 'Я опираюсь на подключённые материалы курса и справку по организации обучения: нахожу подходящие фрагменты и объясняю их. Ссылки беру из проверенного каталога. Если материала недостаточно, скажу об этом.',
+      limits: 'Помогаю по материалам курса, выбору обучения и организационным вопросам. Если в подключённых материалах нет ответа, скажу об этом. Общие вопросы вне курса лучше задать универсальному ИИ-чату; личные вопросы об аккаунте и заказе — поддержке.',
+      internal: ASSISTANT_INTERNAL_BOUNDARY_TEXT,
+    };
+    return { route: 'profile:self', text: replies[kind] };
+  }
   return null;
 }
 

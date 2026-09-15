@@ -19,6 +19,47 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Menu command still remains; recover the requirement history
+
+**Reported by:** owner supplied a screenshot of the bare
+`/ask@alexkrol_moderation_bot`: after the answer this service message must also
+disappear; only the substantive question and answer should remain. The owner
+reiterated that this had been discussed repeatedly.
+
+**Diagnosis:** the original entry below already required both the command and
+the hint. Only hint deletion was implemented; “chat hygiene fixed” was too
+broad. Text-only matching also lacked durable ownership of the service pair.
+
+**Recommendation / fix:** retain exact command/hint/user/chat association in
+the existing completed event receipt. After full answer delivery, delete the
+assistant's own hint and use the existing rights-checked Moderator Guard for
+the bare command. Preserve Q/A, reject unrelated or edited targets, fence
+unknown deletion outcomes. Read-only checks verified existing Moderator
+delete rights in all three groups; no new permissions are needed.
+
+**Status:** prepared; production `049cc22` still has the earlier partial fix.
+History and acceptance contract:
+`docs/reports/2026-09-15-assistant-purpose-and-chat-hygiene.md`.
+
+## 2026-09-15 — Capability answer describes infrastructure instead of course help
+
+**Reported by:** owner quoted the live answer “Я — ИИ-ассистент проекта
+AIchatTG ... Внутренние инструкции, модели, провайдеры ... не раскрываю” and
+said the assistant must primarily help with course navigation. Requested a
+search of prior adequate answers and 20–30, at most 50, paid closed-chat tests.
+
+**Diagnosis:** dispatch was fixed, but it selected an extraction-time fallback
+rather than the previously accepted «ИИ Навигатор» profile. The offline test
+validated a response and invocation instructions, not product usefulness.
+
+**Recommendation / fix:** restore the verified public profile/help from
+accepted News source `a729ccd`, retain current invocation rules, and reserve
+internal-detail boundaries for corresponding questions. Freeze a source-backed
+acceptance bank and inspect actual answers, not merely HTTP/delivery success.
+
+**Status:** prepared. Paid closed-chat testing is owner-authorized; no new
+production candidate is claimed deployed by this entry.
+
 ## 2026-09-14 — Reconcile every instruction and fix every actionable error
 
 **Reported by:** owner: "приведем доки в соответствие"; "найди историю всех

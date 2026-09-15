@@ -80,7 +80,10 @@ function adapters(actions) {
     guard: {
       async verifyEnforcement() { return { proven: true, status: 'administrator' }; },
       async senderDisposition() { return { proven: true, exempt: false, reason: null }; },
-      deleteMessage(input) { return moderatorTelegram.deleteMessage(input); },
+      deleteMessage({ beforeDelete = null, ...input }) {
+        if (beforeDelete && beforeDelete() !== true) return Promise.resolve({ ok: false, skipped: 'delete_precondition_unproven' });
+        return moderatorTelegram.deleteMessage(input);
+      },
       unpinMessage(input) { return moderatorTelegram.unpinMessage(input); },
       sendWarning(input) { return moderatorTelegram.sendMessage(input); },
       banAuthor(input) { return input.senderChatId != null
@@ -432,9 +435,8 @@ test('the Assistant answers every address to it and stays out of every other con
 
     // Ответ (Telegram reply) на сообщение бота — обращение без /ask и без
     // тега: человек продолжает диалог, который бот начал подсказкой выше.
-    // Реплай на саму подсказку `ASSISTANT_EMPTY_ASK_TEXT` (текст совпадает —
-    // это и был предыдущий шаг сценария) — после ответа человеку подсказка
-    // больше не несёт пользы и удаляется как мусор.
+    // Реплай на подсказку с сохранённой связкой command→prompt: после полного
+    // ответа удаляются только служебные сообщения, настоящий вопрос остаётся.
     const replySendsBefore = actions.filter(([kind]) => kind === 'send').length;
     const replyExtra = {
       reply_to_message: { message_id: 90, from: { id: assistantBotId, is_bot: true }, text: ASSISTANT_EMPTY_ASK_TEXT },
@@ -444,7 +446,11 @@ test('the Assistant answers every address to it and stays out of every other con
     assert.equal(replied.kind, 'answered');
     assert.match(lastSent(), /сколько стоит курс\?/);
     assert.equal(actions.filter(([kind]) => kind === 'send').length, replySendsBefore + 1);
-    assert.deepEqual(actions.at(-1), ['assistant_delete', { chatId: '-100', messageId: '90' }]);
+    assert.deepEqual(actions.slice(-2), [
+      ['assistant_delete', { chatId: '-100', messageId: '90' }],
+      ['delete', { chatId: '-100', messageId: '620' }],
+    ]);
+    assert.equal(lastSentInput().replyToMessageId, '660');
 
     // Ответ на сообщение ЧУЖОГO бота — не наше обращение, даже с тем же текстом.
     const otherBotReply = { reply_to_message: { message_id: 91, from: { id: assistantBotId + 1, is_bot: true } } };
@@ -788,8 +794,10 @@ test('self-description answers instantly even with knowledge enabled, never reac
     assert.deepEqual({ kind: result.kind, route: result.route }, { kind: 'answered', route: 'profile:self' });
     const sent = actions.filter(([kind]) => kind === 'send').at(-1)[1].text;
     assert.equal(sent.includes('не уполномочен'), false);
-    assert.equal(sent.includes('ИИ-ассистент проекта'), true);
-    assert.equal(sent.includes('ответьте на моё сообщение'), true);
+    assert.match(sent, /ИИ Навигатор/);
+    assert.match(sent, /уроки.*ссылки/);
+    assert.match(sent, /последовательности/);
+    assert.equal(sent.includes('инфраструктуру'), false);
     assert.equal(providerCalls, 0);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
@@ -811,7 +819,7 @@ test('a soft failure deleting the empty-ask hint is logged but never costs the d
     store: createRuntimeStore(db), provider: fakeLlm(), knowledge: availableKnowledge(),
     ...base,
     assistantTelegram: {
-      async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: 91 } }; },
+      async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: input.forceReply ? 90 : 91 } }; },
       async deleteMessage(input) { actions.push(['assistant_delete', input]); return { ok: false, error: 'message_cannot_be_deleted' }; },
     },
   });
@@ -819,12 +827,14 @@ test('a soft failure deleting the empty-ask hint is logged but never costs the d
     reply_to_message: { message_id: 90, from: { id: botId, is_bot: true }, text: ASSISTANT_EMPTY_ASK_TEXT },
   };
   try {
+    await runtime.handleUpdate('moderator', update(678, 678, '/ask'));
+    await runtime.handleUpdate('assistant', update(679, 678, '/ask'));
     await runtime.handleUpdate('moderator', update(680, 680, 'сколько уроков?', undefined, extra));
     const result = await runtime.handleUpdate('assistant', update(681, 680, 'сколько уроков?', undefined, extra));
     assert.equal(result.kind, 'answered');
     assert.equal(actions.some(([kind]) => kind === 'send'), true);
     assert.equal(logged.length, 1);
-    assert.match(logged[0], /hint cleanup failed.*message_cannot_be_deleted/);
+    assert.match(logged[0], /ask cleanup failed.*target=prompt.*message_cannot_be_deleted/);
   } finally {
     console.error = originalError;
     db.close(); rmSync(folder, { recursive: true, force: true });

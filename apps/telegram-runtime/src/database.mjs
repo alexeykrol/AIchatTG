@@ -542,6 +542,85 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   const event = db.prepare('SELECT * FROM runtime_inbound_events WHERE event_id = ?');
   const finish = db.prepare(`UPDATE runtime_inbound_events
     SET status = ?, result_json = ?, error_text = ?, completed_at = ? WHERE event_id = ?`);
+  // No new table/index or message text: prompt ownership lives in the existing
+  // completed empty-command receipt. Bound work BEFORE filtering so a large
+  // historical ledger cannot turn best-effort UI cleanup into a full scan.
+  const recentAskEvents = db.prepare(`SELECT event_id, bot_role, status, result_json, created_at
+    FROM runtime_inbound_events ORDER BY rowid DESC LIMIT 2048`);
+  const recentAskReceipts = db.prepare(`SELECT receipt_id, bot_role, update_id, revision_identity, received_at
+    FROM runtime_inbound_update_receipts ORDER BY rowid DESC LIMIT 2048`);
+  function askCommandUnedited({ eventId, chatId, commandMessageId }) {
+    const rows = recentAskReceipts.all();
+    const original = rows.find((row) => row.receipt_id === String(eventId) && row.bot_role === 'assistant');
+    const at = now();
+    if (!original || original.revision_identity !== `${chatId}:${commandMessageId}`
+      || original.received_at < at - 47 * 60 * 60 || original.received_at > at) return false;
+    // No status filter: even processing/uncertain/skipped edits revoke deletion
+    // authority. Both role streams can witness an edit of the same message.
+    if (rows.some((row) => row.revision_identity.startsWith(`${chatId}:edit:`)
+      && row.revision_identity.endsWith(`:${commandMessageId}`))) return false;
+    if (rows.length === 2048) {
+      const otherAssistantIds = rows.filter((row) => row.bot_role === 'assistant'
+        && row.receipt_id !== original.receipt_id).map((row) => row.update_id);
+      // An out-of-order original can arrive after its edit fell out of this
+      // bounded window. Reject originals older than the retained role boundary;
+      // with no retained same-role boundary, absence of edits is not proof.
+      if (!otherAssistantIds.length || original.update_id < Math.min(...otherAssistantIds)) return false;
+    }
+    return true;
+  }
+  const writeAskResult = db.prepare(`UPDATE runtime_inbound_events SET result_json = ?
+    WHERE event_id = ? AND status = 'completed' AND result_json = ?`);
+  function pendingAskPrompt({ chatId, userId, promptMessageId = null, commandMessageId = null }) {
+    const at = now();
+    for (const row of recentAskEvents.all()) {
+      if (row.bot_role !== 'assistant' || row.status !== 'completed'
+        || row.created_at < at - 47 * 60 * 60 || row.created_at > at) continue;
+      let result;
+      try { result = JSON.parse(row.result_json); } catch { continue; }
+      const prompt = result?.askPrompt;
+      if (result?.route !== 'command:ask_empty' || result?.command !== 'ask_empty'
+        || result?.kind !== 'answered' || result?.receipt?.ok !== true
+        || result.askPromptCleanup != null || !prompt
+        || String(prompt.chatId) !== String(chatId) || String(prompt.userId) !== String(userId)
+        || !/^\d+$/.test(String(prompt.commandMessageId)) || !/^\d+$/.test(String(prompt.promptMessageId))
+        || String(prompt.commandMessageId) === String(prompt.promptMessageId)
+        || String(result.receipt.messageId) !== String(prompt.promptMessageId)
+        || (promptMessageId != null && String(prompt.promptMessageId) !== String(promptMessageId))
+        || (commandMessageId != null && String(prompt.commandMessageId) !== String(commandMessageId))) continue;
+      return { row, result, prompt };
+    }
+    return null;
+  }
+  const claimAskCleanup = db.transaction((input) => {
+    const found = pendingAskPrompt(input);
+    if (!found || !askCommandUnedited({ eventId: found.row.event_id, ...found.prompt })
+      || [found.prompt.commandMessageId, found.prompt.promptMessageId]
+      .map(String).includes(String(input.questionMessageId))) return null;
+    const cleanup = { state: 'calling', answerEventId: String(input.answerEventId), claimedAt: now() };
+    const changed = writeAskResult.run(JSON.stringify({ ...found.result, askPromptCleanup: cleanup }),
+      found.row.event_id, found.row.result_json).changes === 1;
+    return changed ? { eventId: found.row.event_id, ...found.prompt, ...cleanup } : null;
+  });
+  const finishAskCleanup = db.transaction(({ claim: cleanupClaim, prompt, command }) => {
+    const row = event.get(cleanupClaim.eventId);
+    if (!row || row.status !== 'completed') return false;
+    let result;
+    try { result = JSON.parse(row.result_json); } catch { return false; }
+    const cleanup = result?.askPromptCleanup;
+    if (cleanup?.state !== 'calling' || cleanup.answerEventId !== cleanupClaim.answerEventId
+      || cleanup.claimedAt !== cleanupClaim.claimedAt) return false;
+    return writeAskResult.run(JSON.stringify({ ...result, askPromptCleanup: {
+      ...cleanup, state: 'finished', completedAt: now(), prompt, command,
+    } }), row.event_id, row.result_json).changes === 1;
+  });
+  const invalidateAskPrompt = db.transaction((input) => {
+    const found = pendingAskPrompt(input);
+    if (!found) return false;
+    return writeAskResult.run(JSON.stringify({ ...found.result, askPromptCleanup: {
+      state: 'skipped', reason: 'command_edited', completedAt: now(),
+    } }), found.row.event_id, found.row.result_json).changes === 1;
+  });
   const inboundReceipt = db.prepare('SELECT * FROM runtime_inbound_update_receipts WHERE receipt_id = ?');
   const createInboundReceipt = db.prepare(`INSERT INTO runtime_inbound_update_receipts
     (receipt_id, bot_role, update_id, revision_identity, payload_fingerprint,
@@ -1082,6 +1161,10 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
     completeEvent(eventId, status, result = null, error = null) {
       finish.run(status, result == null ? null : JSON.stringify(result), error, now(), eventId);
     },
+    claimAssistantAskCleanup(input) { return claimAskCleanup(input); },
+    isAssistantAskCommandUnedited(input) { return askCommandUnedited(input); },
+    completeAssistantAskCleanup(input) { return { completed: finishAskCleanup(input) }; },
+    invalidateAssistantAskPrompt(input) { return { invalidated: invalidateAskPrompt(input) }; },
     /**
      * Запись состоявшейся модерации вместе с ценой вызова. Имя модели берётся
      * из самого вердикта (`decision.modelId`), а не из квитанции: вердикт
