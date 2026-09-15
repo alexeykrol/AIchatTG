@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Open the local Console in an existing full Chrome tab
+
+**Reported by:** the owner said «ничего не запущено», rejected the in-app
+browser as inconvenient, and requested a full tab in an already open browser.
+The supplied screenshot showed `ERR_INVALID_AUTH_CREDENTIALS` at `127.0.0.1`.
+
+**Diagnosis / passed:** the local Console process was listening on
+`127.0.0.1:8790` and unauthenticated `/health` returned HTTP 200. The in-app
+browser failed at the Basic-auth boundary. A tab created through the Chrome
+browser integration also returned `ERR_BLOCKED_BY_CLIENT` for both the Console
+and its public `/health` route. This was a browser access failure, not evidence
+that the server was stopped.
+
+**Resolution / passed:** in the owner's already open Chrome window, a normal
+tab outside the integration-created group opened the same localhost URL. Basic
+sign-in completed and Chrome's accessibility state showed the Assistant
+settings page, navigation and editable candidate fields. No credential was
+saved by the agent; no application code or production system was changed.
+
+**Status: partial.** Local browser access is verified for this running process.
+Automatic restart after a reboot and production data access are `not_run`.
+
 ## 2026-09-15 — Edit domain Markdown and show Assistant question costs
 
 **Reported by:** the owner agreed with editable Assistant parameters and added:
