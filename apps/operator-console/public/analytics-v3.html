@@ -3,6 +3,16 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Аналитика ассистента · AIchatTG</title><link rel="stylesheet" href="/console-v3.css">
+  <style>
+    .cost-list { list-style: none; margin: 18px 0 0; padding: 0; }
+    .cost-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 230px); gap: 12px 22px;
+      border-top: 1px solid #e9e6e0; padding: 16px 0; }
+    .cost-question { font-weight: 650; overflow-wrap: anywhere; }
+    .cost-time, .cost-stages, .cost-partial { font-size: 12px; color: #77727a; line-height: 1.5; }
+    .cost-price { font-size: 20px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .cost-stages { grid-column: 1 / -1; }
+    @media (max-width: 760px) { .cost-item { grid-template-columns: 1fr; } .cost-stages { grid-column: auto; } }
+  </style>
 </head>
 <body>
 <main class="shell">
@@ -20,10 +30,14 @@
   </nav>
   <div id="notice" class="status" role="status" aria-live="polite" hidden></div>
   <div class="grid">
-    <section class="card wide"><h2>Охват данных</h2><p id="coverage"></p><div id="pricing" class="micro"></div></section>
+    <section class="card wide"><h2>Цена последних 5 вопросов</h2>
+      <div id="last-five-metrics" class="metric-grid"></div>
+      <ol id="last-five-rows" class="cost-list"></ol>
+    </section>
     <section class="card"><h2>Последние 24 часа</h2><div id="today" class="metric-grid"></div></section>
     <section class="card"><h2>Последние 7 дней</h2><div id="week" class="metric-grid"></div></section>
     <section class="card wide"><h2>Вся записанная история</h2><div id="total" class="metric-grid"></div></section>
+    <section class="card wide"><h2>Охват данных</h2><p id="coverage"></p><div id="pricing" class="micro"></div></section>
   </div>
 </main>
 <script>
@@ -33,16 +47,36 @@
     notice.className = 'status ' + tone;
     notice.hidden = !message;
   }
-  function money(value) { return typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(6) : '—'; }
+  function money(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—';
+    if (value === 0) return '$0';
+    return value < 0.000001 ? '<$0.000001' : '$' + value.toFixed(6);
+  }
   function observedChats(count) {
     return count + ' ' + (count % 10 === 1 && count % 100 !== 11 ? 'чате' : 'чатах');
+  }
+  function meanDetail(priced, total) {
+    if (priced === 0) return 'Оценённых вопросов нет';
+    const form = priced % 10 === 1 && priced % 100 !== 11 ? 'оценённому' : 'оценённым';
+    return 'По ' + priced + ' ' + form + ' из ' + total;
   }
   function pricingLabel(pricing) {
     const date = String(pricing.verifiedAt || '');
     const checked = /^\d{4}-\d{2}-\d{2}$/u.test(date)
       ? 'Тарифы проверены ' + date.split('-').reverse().join('.')
       : 'Дата проверки тарифов неизвестна';
-    return checked + ' · оценка, не счёт к оплате.';
+    return checked + ' · оценка, не счёт: в журнале нет сведений о кешировании и типе тарифа.';
+  }
+  function utcTime(seconds) {
+    if (!Number.isSafeInteger(seconds) || seconds < 0) return 'Время неизвестно';
+    return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: '2-digit', month: '2-digit',
+      year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(seconds * 1000)) + ' UTC';
+  }
+  function stageText(label, stage) {
+    if (!stage || !stage.known) return label + ': данных нет';
+    if (stage.noCall) return label + ': не вызывался';
+    return label + ': ' + money(stage.usd) + ' · ' + stage.modelId + ' · '
+      + stage.inputTokens + ' входящих / ' + stage.outputTokens + ' исходящих токенов';
   }
   function metric(label, value, detail) {
     const cell = document.createElement('div'); cell.className = 'metric';
@@ -52,20 +86,67 @@
     cell.append(l, v, d); return cell;
   }
   function bucket(target, data) {
-    const node = document.getElementById(target); node.replaceChildren(
+    const cells = [
       metric('Вопросов и ответов', data.count, 'Сохранённые записи'),
       metric('С известной стоимостью', data.pricedCount, data.unknownCount + ' без оценки'),
       metric('Известные затраты', money(data.knownEstimatedUsd), 'Только вопросы с оценкой'),
-      metric('Средняя стоимость вопроса', money(data.averageCostUsd), 'По вопросам с оценкой'),
+      metric('Средняя стоимость вопроса', money(data.averageCostUsd), meanDetail(data.pricedCount, data.count)),
       metric('Общие затраты', money(data.cost), data.count === 0 ? 'Нет вопросов для оценки'
         : data.unknownCount ? 'Недоступно: часть затрат неизвестна' : 'Все записанные вопросы оценены'),
+    ];
+    if (data.partiallyPricedCount > 0) {
+      cells.push(metric('Учтённые этапы', money(data.knownStagesUsd),
+        'Все известные этапы, включая ' + data.partiallyPricedCount + ' вопросов с неполной ценой'));
+    }
+    document.getElementById(target).replaceChildren(...cells);
+  }
+  function lastFive(data) {
+    const metrics = document.getElementById('last-five-metrics');
+    const rows = document.getElementById('last-five-rows');
+    if (!data || !Array.isArray(data.rows)) {
+      const empty = document.createElement('li'); empty.textContent = 'Данные о последних вопросах недоступны.';
+      metrics.replaceChildren(); rows.replaceChildren(empty);
+      return;
+    }
+    metrics.replaceChildren(
+      metric('С полной оценкой', data.pricedCount + ' из ' + data.count, data.unknownCount + ' без полной цены'),
+      metric('Сумма последних вопросов', money(data.cost), data.count === 0 ? 'Нет сохранённых вопросов'
+        : data.unknownCount ? 'Часть стоимости неизвестна' : 'Все выбранные вопросы оценены'),
+      metric('Средняя цена вопроса', money(data.averageCostUsd), meanDetail(data.pricedCount, data.count)),
+      metric('Учтённые этапы', money(data.knownStagesUsd),
+        'Все известные этапы; ' + data.partiallyPricedCount + ' вопросов с неполной ценой'),
     );
+    if (data.rows.length === 0) {
+      const empty = document.createElement('li'); empty.textContent = 'Сохранённых вопросов пока нет.';
+      rows.replaceChildren(empty); return;
+    }
+    const items = data.rows.map((record) => {
+      const item = document.createElement('li'); item.className = 'cost-item';
+      const question = document.createElement('div'); question.className = 'cost-question';
+      question.textContent = record.question || 'Текст вопроса не сохранён';
+      const time = document.createElement('div'); time.className = 'cost-time';
+      time.textContent = utcTime(record.askedAt);
+      const price = document.createElement('div'); price.className = 'cost-price';
+      price.textContent = money(record.estimatedUsd);
+      const partial = document.createElement('div'); partial.className = 'cost-partial';
+      partial.textContent = record.estimatedUsd == null
+        ? record.knownStagesUsd == null ? 'Полная цена неизвестна'
+          : 'Полная цена неизвестна · учтённые этапы: ' + money(record.knownStagesUsd)
+        : 'Оценка всех подтверждённых этапов';
+      const stages = document.createElement('div'); stages.className = 'cost-stages';
+      stages.textContent = [stageText('Ответ', record.stages?.answer),
+        stageText('Анализ', record.stages?.analyzer), stageText('Маршрут', record.stages?.router)].join(' · ');
+      item.append(question, price, time, partial, stages);
+      return item;
+    });
+    rows.replaceChildren(...items);
   }
   async function load() {
     try {
       const response = await fetch('/api/operator/analytics'); const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
       if (data.status !== 'available') { say('Аналитика недоступна: данные об ответах пока не получены.', 'error'); return; }
+      lastFive(data.lastFive);
       bucket('today', data.today); bucket('week', data.week); bucket('total', data.total);
       document.getElementById('coverage').textContent =
         'Ответы записаны в ' + observedChats(data.coverage.observedChatCount) + '. Не все обращения и затраты учтены.';

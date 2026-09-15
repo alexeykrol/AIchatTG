@@ -9,14 +9,14 @@ import { assistantCostAnalytics } from '../src/assistant-cost-analytics.mjs';
 const NOW = Math.floor(Date.parse('2026-09-15T12:00:00Z') / 1000);
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} != ${expected}`);
 
-function fixture(t, { schema = true } = {}) {
+function fixture(t, { schema = true, receipts = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'aichattg-assistant-cost-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const runtimeDatabasePath = join(root, 'runtime.sqlite');
   const db = new Database(runtimeDatabasePath);
   if (schema) db.exec(`
     CREATE TABLE runtime_assistant_answer_records (
-      event_id TEXT PRIMARY KEY, chat_id TEXT, model_id TEXT, input_tokens INTEGER,
+      event_id TEXT PRIMARY KEY, chat_id TEXT, question TEXT, model_id TEXT, input_tokens INTEGER,
       output_tokens INTEGER, total_tokens INTEGER, delivery TEXT, created_at INTEGER
     );
     CREATE TABLE runtime_assistant_analyzer_observations (
@@ -26,13 +26,28 @@ function fixture(t, { schema = true } = {}) {
       created_at INTEGER
     );
   `);
+  if (schema && receipts) db.exec(`
+    CREATE TABLE runtime_inbound_update_receipts (
+      receipt_id TEXT PRIMARY KEY, bot_role TEXT, status TEXT, result_json TEXT
+    );
+  `);
   return { db, config: { runtimeDatabasePath } };
 }
 
-function answer(db, id, at, { model = 'gpt-5.6-terra', input = 1000, output = 100, total = 1100, delivery = 'ok', chat = '-100' } = {}) {
+function answer(db, id, at, { model = 'gpt-5.6-terra', input = 1000, output = 100, total = 1100,
+  delivery = 'ok', chat = '-100', question = `Вопрос ${id}` } = {}) {
   db.prepare(`INSERT INTO runtime_assistant_answer_records
-    (event_id, chat_id, model_id, input_tokens, output_tokens, total_tokens, delivery, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, chat, model, input, output, total, delivery, at);
+    (event_id, chat_id, question, model_id, input_tokens, output_tokens, total_tokens, delivery, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, chat, question, model, input, output, total, delivery, at);
+}
+
+function receipt(db, id, { status = 'completed', botRole = 'assistant', origin = 'analyzer_dispatch',
+  eventId = id, schemaVersion = 'assistant-routing-diagnosis-v1', kind = 'answered' } = {}) {
+  db.prepare(`INSERT INTO runtime_inbound_update_receipts
+    (receipt_id, bot_role, status, result_json) VALUES (?, ?, ?, ?)`).run(
+    id, botRole, status, JSON.stringify({ eventId, kind,
+      routingDiagnosis: { schemaVersion, origin } }),
+  );
 }
 
 function observation(db, id, at, { model = 'gpt-5.6-luna', input = 500, output = 50, total = 550,
@@ -159,4 +174,104 @@ test('an empty compatible journal has no fabricated dollar average', (t) => {
   assert.equal(result.total.count, 0);
   assert.equal(result.total.cost, null);
   assert.equal(result.total.averageCostUsd, null);
+  assert.deepEqual(result.lastFive.rows, []);
+  assert.equal(result.lastFive.averageCostUsd, null);
+});
+
+test('completed event-level analyzer dispatch proves router no-call and prices the newest five', (t) => {
+  const { db, config } = fixture(t);
+  for (let number = 1; number <= 6; number += 1) {
+    const at = number < 5 ? NOW - 10 + number : NOW - 1;
+    answer(db, `event-${number}`, at, { question: `  Вопрос   ${number}  ` });
+    observation(db, `event-${number}`, at - 1);
+    receipt(db, `event-${number}`);
+  }
+  db.close();
+  const result = assistantCostAnalytics(config, { nowSeconds: NOW });
+  assert.equal(result.status, 'available');
+  assert.equal(result.total.pricedCount, 6);
+  assert.deepEqual(result.lastFive.rows.map((row) => row.question),
+    ['Вопрос 6', 'Вопрос 5', 'Вопрос 4', 'Вопрос 3', 'Вопрос 2']);
+  assert.equal(result.lastFive.count, 5);
+  assert.equal(result.lastFive.pricedCount, 5);
+  assert.equal(result.lastFive.unknownCount, 0);
+  near(result.lastFive.cost, 5 * 0.00336);
+  near(result.lastFive.averageCostUsd, 0.00336);
+  for (const row of result.lastFive.rows) {
+    near(row.estimatedUsd, 0.00336);
+    assert.equal(row.stages.router.noCall, true);
+    assert.equal(row.stages.router.usd, 0);
+  }
+});
+
+test('one missing routing proof keeps the full-five mean unknown and exposes only known stages', (t) => {
+  const { db, config } = fixture(t);
+  for (let number = 1; number <= 5; number += 1) {
+    const id = `event-${number}`;
+    answer(db, id, NOW - number);
+    observation(db, id, NOW - number - 1);
+    if (number !== 1) receipt(db, id);
+  }
+  db.close();
+  const result = assistantCostAnalytics(config, { nowSeconds: NOW });
+  assert.equal(result.lastFive.pricedCount, 4);
+  assert.equal(result.lastFive.unknownCount, 1);
+  assert.equal(result.lastFive.partiallyPricedCount, 1);
+  assert.equal(result.lastFive.cost, null);
+  near(result.lastFive.averageCostUsd, 0.00336);
+  near(result.lastFive.knownEstimatedUsd, 4 * 0.00336);
+  near(result.lastFive.knownStagesUsd, 5 * 0.00336);
+  assert.equal(result.lastFive.rows[0].estimatedUsd, null);
+  near(result.lastFive.rows[0].knownStagesUsd, 0.00336);
+  assert.equal(result.lastFive.rows[0].stages.router.known, false);
+});
+
+test('invalid, mismatched and conflicting dispatch receipts never turn absent router usage into zero', (t) => {
+  const { db, config } = fixture(t);
+  const cases = [
+    { id: 'wrong-event', receipt: { eventId: 'someone-else' } },
+    { id: 'wrong-schema', receipt: { schemaVersion: 'unknown' } },
+    { id: 'not-completed', receipt: { status: 'processing' } },
+    { id: 'other-role', receipt: { botRole: 'moderator' } },
+    { id: 'fallback', receipt: { origin: 'router_fallback' } },
+  ];
+  for (const [index, item] of cases.entries()) {
+    answer(db, item.id, NOW - index);
+    observation(db, item.id, NOW - index - 1);
+    receipt(db, item.id, item.receipt);
+  }
+  db.close();
+  const result = assistantCostAnalytics(config, { nowSeconds: NOW });
+  assert.equal(result.lastFive.pricedCount, 0);
+  assert.equal(result.lastFive.unknownCount, 5);
+  assert.equal(result.lastFive.cost, null);
+  assert.equal(result.lastFive.averageCostUsd, null);
+  for (const row of result.lastFive.rows) {
+    assert.equal(row.estimatedUsd, null);
+    assert.equal(row.stages.router.known, false);
+    near(row.knownStagesUsd, 0.00336);
+  }
+});
+
+test('missing receipt table and conflicting route tokens fail closed; excerpts are bounded', (t) => {
+  const { db, config } = fixture(t, { receipts: false });
+  answer(db, 'legacy', NOW - 2, { question: 'я'.repeat(300) });
+  observation(db, 'legacy', NOW - 3);
+  db.close();
+  const legacy = assistantCostAnalytics(config, { nowSeconds: NOW });
+  assert.equal(legacy.status, 'available');
+  assert.equal(legacy.lastFive.rows[0].estimatedUsd, null);
+  assert.equal([...legacy.lastFive.rows[0].question].length, 240);
+  assert.equal(legacy.lastFive.rows[0].question.endsWith('…'), true);
+
+  const second = fixture(t);
+  answer(second.db, 'contradiction', NOW - 1);
+  observation(second.db, 'contradiction', NOW - 2, {
+    router: 'gpt-5.6-luna', routerInput: 200, routerOutput: 20, routerTotal: 220,
+  });
+  receipt(second.db, 'contradiction');
+  second.db.close();
+  const result = assistantCostAnalytics(second.config, { nowSeconds: NOW });
+  assert.equal(result.lastFive.pricedCount, 0);
+  assert.equal(result.lastFive.rows[0].stages.router.known, false);
 });
