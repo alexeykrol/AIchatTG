@@ -8,14 +8,13 @@ updated: 2026-09-15
 
 ## Next
 
-- [ ] COVERAGE-COPY-1: одно согласованное предложение о конкретизации вопроса
-      добавлено без переписывания исходного отказа (`183d7f9`); lifecycle
-      `prepared`, включить в следующий exact release candidate вместе с Help.
-      Автоповторы, moderation escalation и санкции этим изменением не вводятся.
-- [ ] HELP-1: локальный menu-first Help кандидат интегрирован, lifecycle
-      `prepared`; перед релизом нужны точный approval и release lease.
-      Список возможностей сохранён, identity-grounding восстановлен, prompt
-      и Help синхронизированы. Отчёт: `docs/reports/2026-09-15-help-menu-candidate.md`.
+- [x] COVERAGE-COPY-1: финальные три абзаца владельца из `541a2de` заменили
+      additive-вариант; дословно выложены в `0b54148`. Исправлено перекрытие
+      текста в domain boundary; санкции/модерация не менялись. Receipt:
+      `docs/reports/2026-09-15-runtime-0b54148-deployment.md`.
+- [x] HELP-1: menu-first Help выложен в `0b54148`; список возможностей
+      сохранён, identity-grounding восстановлен, prompt и Help согласованы.
+      Клиентская приёмка остаётся отдельным открытым пунктом HYGIENE-1/INLINE-1.
 - [ ] INLINE-1: отключение inline владельцем подтверждено через `getMe`
       2026-09-15 18:47:46 UTC; проверить обычный @mention в клиенте отдельно.
       Не включать inline или новые webhook update types без нового решения.

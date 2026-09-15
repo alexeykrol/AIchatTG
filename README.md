@@ -74,7 +74,16 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current production image: `5600afd`** (started 2026-09-15 16:07:36 UTC;
+**Current production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
+lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph
+out-of-coverage response are live. The knowledge-enabled boundary now uses
+the same approved copy. No moderation rules, config, schema, routes, knowledge
+or model limits changed. Root tests 688/688, historical receipt checks 29/29,
+migration checks 9/9 and exact 55-file production source match passed.
+Rollback `5600afd` retained. New live Telegram/client acceptance was not run.
+See the [current receipt](docs/reports/2026-09-15-runtime-0b54148-deployment.md).
+
+**Previous production image: `5600afd`** (started 2026-09-15 16:07:36 UTC;
 lifecycle `deployed`). Bundled six-domain routing, multi-domain attribution and
 decision diagnostics are live. Exact55-file source match, healthy/restart0,
 unchanged environment/schema/routes/Console and offline container checks passed.
@@ -82,7 +91,7 @@ Rollback `852a8d2` retained. Routing-only comparison:28/28 router,26/27 analyzer
 one compound-domain miss and two risk-label discrepancies remain. New live
 answer/menu acceptance was not run. Knowledge-enabled self questions now use
 the existing model path and can cost tokens; configured limits are unchanged.
-See the [current receipt](docs/reports/2026-09-15-runtime-5600afd-deployment.md).
+See its [release receipt](docs/reports/2026-09-15-runtime-5600afd-deployment.md).
 
 **Previous production image: `852a8d2`** (started 2026-09-15 06:49:50 UTC;
 lifecycle `deployed`). Restores the course navigator profile and adds durable

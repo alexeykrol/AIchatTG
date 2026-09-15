@@ -4,21 +4,22 @@
 
 ## Текущее состояние
 
-- **Дополнение к локальному кандидату, lifecycle `prepared`:** `60f6b9b`
-  перенесён как `183d7f9`: в out-of-coverage ответ добавлено одно предложение
-  с просьбой назвать тему/урок/задачу. Исходный текст сохранён дословно,
-  автоматические повторы и правила модерации не менялись. 688 текущих проверок
-  и 29 исторических с квитанциями прошли. Не запушено/не задеплоено.
-  `docs/reports/2026-09-15-coverage-copy-candidate.md`.
-- **Локальный кандидат, lifecycle `prepared`:** menu-first Help из `f69cd84`
-  принят с восстановлением identity-grounding и синхронизацией текста подсказки.
-  Исторический routing suite проверяется на точном `5600afd`, текущие маршруты
-  и provider-boundary — на текущем коде. Кандидат ещё не запушен/не задеплоен.
-  `docs/reports/2026-09-15-help-menu-candidate.md`.
+- **Production, lifecycle `production-verified`:** `0b54148`, запуск 20:16:45 UTC,
+  healthy/restart 0. Выложены menu-first Help и финальные три абзаца владельца
+  дословно (supersedes additive `183d7f9`). Исправлено перекрытие текста в
+  knowledge-enabled domain boundary. Правила модерации/санкции не менялись.
+  688 текущих тестов, 29 исторических с квитанциями, 9 migration tests прошли.
+  Повторная проверка 20:20:00 UTC passed: 55 source-файлов совпали;
+  env/schema/routes/mounts/Console сохранены.
+  Rollback `5600afd`; новая Telegram/client приёмка `not_run`. Receipt:
+  `docs/reports/2026-09-15-runtime-0b54148-deployment.md`.
+- **Исторические тесты:** frozen routing проверяется на точном `5600afd`,
+  текущие маршруты и provider-boundary — на текущем коде. Старые gold,
+  артефакты платных экспериментов и source hashes не менялись.
 - **Inline-setting:** владелец отключил inline в BotFather; `getMe`
   подтвердил `supports_inline_queries=false` в 18:47:46 UTC. Проверка была
   read-only; свежая проверка поля ввода/доставки ответа остаётся `not_run`.
-- **Production, lifecycle `deployed`:** `telegram-runtime` image `5600afd`
+- **Предыдущий production, lifecycle `deployed`:** `telegram-runtime` image `5600afd`
   (запуск 2026-09-15 16:07:36 UTC), healthy / restart 0; конфигурация, schema,
   mounts/routes сохранены. Moderator и Assistant покрывают 3 чата, знание и
   retrieval включены, rewrite выключен. Operator Console не менялась.
@@ -99,16 +100,11 @@
 
 ## Следующий безопасный шаг
 
-Menu-first Help локально подготовлен и закоммичен: исходный перенос `74918c6`,
-review fixes `ab0352e`, test isolation `fb40fce`. Итог: 687 текущих проверок,
-29 исторических с квитанциями и 9 migration tests прошли. Публикация/деплой
-не выполнены; следующий release требует нового exact approval и live preflight.
-Не выдавать успех frozen test lane за новую платную или клиентскую приёмку.
-
-Деплой `5600afd` завершён и запушен;698 canonical tests passed,6 artifact-only
-checks отдельно passed,9 migration checks passed. 55 source-файлов совпали с
-архивом. Инфраструктура исправна, новая live функциональная приёмка not_run.
-Одноразовый release lease использован, rollback `852a8d2` сохранён.
+Menu-first Help и финальный текст владельца выложены в `0b54148` и запушены;
+688 текущих, 29 исторических с квитанциями и 9 migration tests прошли.
+55 source-файлов совпали с архивом. Rollback `5600afd` сохранён.
+Не выдавать успех frozen lane или offline container check за новую платную
+или клиентскую приёмку. Следующий release требует нового exact approval/lease.
 Не повторять удаление uncertain команды 524 и не обходить stop harness.
 Следующее: offline ROUTING-1, live PROFILE-2 и проверка меню обычным пользователем в закрытом
 чате. Новые image/права/BotFather/тестовый identity требуют своего точного

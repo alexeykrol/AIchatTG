@@ -36,12 +36,14 @@ gap remains distinct. Real runtime-port and dialogue-history regressions
 verify exact delivery; the copy does not add moderation, escalation, bans,
 retry behavior, model calls or quota changes.
 
-**Status: fixed.** Local integration; release requested, production verification
-pending. Focused offline checks passed 72/72; root suite 688/688, frozen-source
-receipt tests 29/29, migration tests 9/9 and scenario/isolation checks passed.
-Deployment requires the final
-exact root candidate, fresh production preflight and a one-time runtime-only
-lease with image-only rollback. New paid and Telegram acceptance are `not_run`.
+**Status: deployed.** Exact root candidate `0b54148` was pushed and deployed
+at 20:16:45 UTC under a one-time runtime-only lease; lifecycle
+`production-verified`. Checks at 20:17:31 and 20:20:00 UTC both passed:
+healthy/restart 0, 55-file source match, exact copy digest through the domain
+boundary, unchanged env/schema/routes/Console and retained rollback `5600afd`.
+Focused checks passed 72/72; root 688/688, frozen-source receipt checks 29/29,
+migration 9/9 and scenario/isolation checks passed. New paid and Telegram
+acceptance are `not_run`. See the [receipt](reports/2026-09-15-runtime-0b54148-deployment.md).
 
 ## 2026-09-15 — Add a clarification suggestion without rewriting the boundary reply
 

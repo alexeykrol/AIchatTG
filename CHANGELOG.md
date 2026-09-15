@@ -3,6 +3,24 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [0b54148] — 2026-09-15 UTC — Menu-first Help and approved boundary copy
+
+Lifecycle `production-verified`; runtime started 20:16:45 UTC. Only runtime was recreated;
+config, schema, routes, knowledge admission and Console remain unchanged.
+Rollback `5600afd` is retained. See the
+[release receipt](docs/reports/2026-09-15-runtime-0b54148-deployment.md).
+
+- Help spells out the menu/prompt/reply workflow while retaining capabilities,
+  identity grounding, text commands and mentions.
+- The owner's final three-paragraph out-of-coverage response is preserved
+  verbatim. The knowledge-enabled domain boundary now delivers that same text;
+  known-domain knowledge gaps remain distinct. No new sanctions or retry rules.
+- Frozen routing checks run on their original source; current checks remain
+  current. No historical gold, hashes, paid captures or leases were changed.
+- Root tests 688/688, historical receipt checks 29/29, migration checks 9/9,
+  exact source/copy and repeated production health checks passed. New live
+  Telegram/client acceptance was not run.
+
 ## [5600afd] — 2026-09-15 UTC — Registered Assistant domain routing
 
 Lifecycle `deployed`; runtime started16:07:36UTC. Only telegram-runtime was
