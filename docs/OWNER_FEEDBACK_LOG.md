@@ -19,6 +19,22 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Focus only on understanding and domain selection
+
+**Reported by:** the owner explicitly separated understanding/classifying a
+question from answering it using domain knowledge. They asked to focus on the
+first problem: index, criteria, patterns, examples and comparison with failures.
+Text knowledge is sufficient for now; answer-system optimization is not in scope.
+
+**Candidate:** repaired compound labels and generic dry routing; added bounded
+raw-versus-final routing diagnostics and an offline comparison harness with four
+regressions plus 24 independently authored held-out cases. Knowledge and answer
+policies were frozen. See [evidence and measurement gate](reports/2026-09-15-routing-only-comparison.md).
+
+**Status: prepared.** 682 local tests passed with zero skips. Real model
+comparison is `not_run`; test mechanics and exact-example overrides do not
+establish improved recognition. No paid call or deployment was performed.
+
 ## 2026-09-15 — Domain index instead of a fixed set of course routes
 
 **Reported by:** the owner showed refusals to “На какие вопросы ты отвечаешь?”

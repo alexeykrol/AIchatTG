@@ -41,7 +41,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  ASSISTANT_ROLE_ACTIONS,
   ASSISTANT_SOURCE_PACKAGES,
 } from '@aichattg/telegram-core';
 import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
@@ -53,6 +52,7 @@ import { createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createAnalyzerAdapter } from '../src/analyzer-adapter.mjs';
 import { runtimeAnalyzerSpec } from '../src/analyzer-spec.mjs';
+import { DEFAULT_DOMAIN_CATALOG } from '../src/assistant-domains.mjs';
 
 const LAB_CHAT_ID = '-100';
 const LAB_USER_ID = '7';
@@ -63,6 +63,11 @@ export const LAB_SUBSTITUTIONS = Object.freeze([
   'telegram_transport_recorded_in_memory',
   'moderator_verdict_decided_locally_without_safety_model',
   'store_is_a_temporary_sqlite_file',
+]);
+
+export const DRY_SUBSTITUTIONS = Object.freeze([
+  'router_is_fake_catalog_hints_else_first_retrieval_domain_not_semantic_measurement',
+  'answer_model_not_called_input_count_only',
 ]);
 
 function parseArgs(argv) {
@@ -135,24 +140,23 @@ function createLabModeratorGuard() {
 }
 
 /**
- * Провайдер стенда. `routeAssistant` решается локально по тем же правилам, что
- * закреплены в контракте роутера (teach → course-content-v1), поэтому маршрут
- * не выдуман, а выведен из вопроса; в dry-режиме `answer` не вызывает сеть, но
- * фиксирует ровно то, что ушло БЫ в модель.
+ * Локальная подстановка, НЕ измерение понимания вопроса моделью. Берёт все
+ * готовые подсказки доменов из контракта рантайма; без них выбирает первый
+ * retrieval-домен каталога только для проверки проводки поиска. Ни словарей
+ * предметных маркеров, ни самостоятельного классификатора здесь нет.
+ * `answer` фиксирует то, что ушло БЫ в модель, не вызывая сеть.
  */
-function createDryProvider({ captured }) {
+export function createDryProvider({ captured, domainCatalog = DEFAULT_DOMAIN_CATALOG }) {
   return {
     async moderate() {
       return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
     },
-    async routeAssistant({ courseOperationsHint, courseValueHint }) {
-      if (courseOperationsHint) {
-        return { action: ASSISTANT_ROLE_ACTIONS.SUPPORT, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_OPERATIONS };
+    async routeAssistant({ domainHints }) {
+      if (Array.isArray(domainHints?.domains) && domainHints.domains.length) {
+        return { domains: [...domainHints.domains] };
       }
-      if (courseValueHint) {
-        return { action: ASSISTANT_ROLE_ACTIONS.ADVISE, sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_VALUE };
-      }
-      return { action: 'teach', sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT };
+      const fallback = domainCatalog.domains.find((domain) => domain.sourceKind === 'retrieval');
+      return { domains: fallback ? [fallback.id] : [] };
     },
     async answer(input) {
       const entries = input.knowledge?.entries || [];
@@ -310,14 +314,15 @@ function routeLabel(route) {
 }
 
 /**
- * Два разных вердикта воздержания — не одна метка: out_of_coverage (домен не
- * покрыт, «переформулируйте» бесполезен) и not_in_materials (дыра внутри
- * домена). Оценщик стенограммы должен видеть различие явно, а не выводить его
- * из префикса маршрута.
+ * Неизвестный домен и известный домен с недостающим материалом — разные
+ * вердикты. Старый not_in_materials остаётся читаемым для прежних маршрутов.
+ * В dry-режиме эти метки описывают проводку после подставленного маршрута,
+ * а не качество модельной классификации.
  */
 function abstentionVerdict(routeString) {
   if (typeof routeString !== 'string') return null;
   if (routeString.startsWith('boundary:out_of_coverage:')) return 'out_of_coverage';
+  if (routeString === 'boundary:domain_knowledge_missing') return 'domain_knowledge_missing';
   if (routeString.startsWith('boundary:not_in_materials:')) return 'not_in_materials';
   return null;
 }
@@ -465,7 +470,7 @@ export async function runLocalAssistant({
         entries: valueSlice?.snapshot?.entries?.length ?? 0,
       }
       : null,
-    substitutions: [...LAB_SUBSTITUTIONS],
+    substitutions: [...LAB_SUBSTITUTIONS, ...(mode === 'dry' ? DRY_SUBSTITUTIONS : [])],
     turns: [],
     coverage_deficits: [],
   };

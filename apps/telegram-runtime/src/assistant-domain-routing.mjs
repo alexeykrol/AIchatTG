@@ -78,9 +78,9 @@ export function domainQuestionHints(text, catalog) {
 }
 
 /** Preserve diagnostic form rules without discarding other parts of a question. */
-export function diagnosticDomainTopics(verdict, rules, catalog) {
+export function diagnosticDomainDecision(verdict, rules, catalog) {
   const topics = verdict?.topics;
-  if (!Array.isArray(topics) || !topics.length) return null;
+  if (!Array.isArray(topics) || !topics.length) return { topics: null, primacy: null };
   for (const rule of rules || []) {
     const when = rule.when || {};
     if (when.level && !when.level.includes(verdict.level?.hypothesis)) continue;
@@ -88,14 +88,21 @@ export function diagnosticDomainTopics(verdict, rules, catalog) {
     if (when.topic_first && !when.topic_first.includes(topics[0])) continue;
     if (when.topic_listed && !when.topic_listed.some((t) => topics.includes(t))) continue;
     const target = rule.then?.main_topic;
-    if (catalog.get(target)) return [...new Set([target, ...topics.slice(1)])];
+    if (catalog.get(target)) return {
+      topics: [...new Set([target, ...topics.slice(1)])],
+      primacy: target === topics[0] ? null : { ruleId: rule.id, from: topics[0], to: target },
+    };
   }
-  return topics;
+  return { topics, primacy: null };
 }
 
-export async function resolveDomainSelection(selection, {
-  catalog, knowledge, retrievals, question, dialogue = [], hints = { domains: [] },
-}) {
+/** Compatibility projection; diagnostic consumers can retain the applied rule. */
+export function diagnosticDomainTopics(verdict, rules, catalog) {
+  return diagnosticDomainDecision(verdict, rules, catalog).topics;
+}
+
+/** Pure selection boundary shared by runtime and route-only evaluation. */
+export function selectDomainRoutes(selection, { catalog, hints = { domains: [] } }) {
   let routes = selection.routes;
   let arbitration = null;
   if (hints.domains?.length) {
@@ -108,6 +115,13 @@ export async function resolveDomainSelection(selection, {
       routes = labelled;
     }
   }
+  return { routes, arbitration };
+}
+
+export async function resolveDomainSelection(selection, {
+  catalog, knowledge, retrievals, question, dialogue = [], hints = { domains: [] },
+}) {
+  const { routes, arbitration } = selectDomainRoutes(selection, { catalog, hints });
   const redirect = { action: 'redirect', sourceId: null };
   if (!routes.length) return { route: redirect, domainRoutes: [], riskFlags: selection.riskFlags,
     knowledge: null, abstain: true, reason: 'domain_no_signal', domainCoverage: [], registryDigest: catalog.digest };

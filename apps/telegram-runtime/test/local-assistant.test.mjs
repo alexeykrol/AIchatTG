@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   LAB_SUBSTITUTIONS,
+  DRY_SUBSTITUTIONS,
+  createDryProvider,
   createRecordingTelegram,
   parseDialogueFile,
   runLocalAssistant,
@@ -16,6 +18,28 @@ import {
  * него — молчаливо зелёный прогон на отсутствующих данных был бы хуже пропуска.
  */
 const PACKAGE_DIR = process.env.AICHATTG_KNOWLEDGE_PACKAGE_DIR || '';
+const VALUE_SLICE_PATH = process.env.AICHATTG_VALUE_SLICE_PATH || '';
+const VALUE_REGRESSION_QUESTION = 'мне самой учиться некогда вообще ноль времени но я хочу понимать это лучше своих админов чтобы они мне лапшу не вешали';
+
+test('dry router consumes arbitrary and compound domain hints, not subject-name booleans', async () => {
+  const captured = [];
+  const domainCatalog = { domains: [{ id: 'local-notes', sourceKind: 'markdown' }, { id: 'unrelated-first', sourceKind: 'retrieval' }] };
+  const provider = createDryProvider({ captured, domainCatalog });
+  assert.deepEqual(await provider.routeAssistant({ domainHints: { domains: ['seventh-domain'] } }), { domains: ['seventh-domain'] });
+  const hinted = ['self-renamed', 'billing-renamed'];
+  const route = await provider.routeAssistant({ domainHints: { domains: hinted } });
+  assert.deepEqual(route, { domains: hinted });
+  assert.notEqual(route.domains, hinted);
+  assert.deepEqual(await provider.routeAssistant({ domainHints: { domains: [] } }), { domains: ['unrelated-first'] });
+  // These obsolete flags do not secretly retain a second classifier.
+  assert.deepEqual(await provider.routeAssistant({ courseOperationsHint: true, courseValueHint: true }), { domains: ['unrelated-first'] });
+  const withoutRetrieval = createDryProvider({ captured, domainCatalog: { domains: [] } });
+  assert.deepEqual(await withoutRetrieval.routeAssistant({ domainHints: { domains: [] } }), { domains: [] });
+  const answer = await provider.answer({ text: 'fixture question', route, knowledge: { entries: [{ id: 'fixture', content: 'fixture evidence' }] } });
+  assert.match(answer.text, /dry-run: модель не вызывалась/);
+  assert.equal(answer.receipt, null);
+  assert.equal(captured.length, 1);
+});
 
 test('the recording transport returns a Telegram-shaped receipt instead of sending', async () => {
   const telegram = createRecordingTelegram();
@@ -69,14 +93,14 @@ test('the transcript names its substitutions so a lab run is never read as produ
       packageDigest: '0'.repeat(64), files: { 'ai.db': '1'.repeat(64) },
     }));
     const transcript = await runLocalAssistant({ questions: ['x'], packageDir: folder });
-    assert.deepEqual(transcript.substitutions, [...LAB_SUBSTITUTIONS]);
+    assert.deepEqual(transcript.substitutions, [...LAB_SUBSTITUTIONS, ...DRY_SUBSTITUTIONS]);
     assert.equal(transcript.mode, 'dry');
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
 });
 
-test('a course question retrieves a non-empty pack and an off-domain question abstains', {
+test('dry fallback retrieves course evidence and honestly records missing knowledge without claiming semantic scope', {
   skip: PACKAGE_DIR ? false : 'AICHATTG_KNOWLEDGE_PACKAGE_DIR is not set',
 }, async () => {
   const transcript = await runLocalAssistant({
@@ -93,15 +117,19 @@ test('a course question retrieves a non-empty pack and an off-domain question ab
   assert.ok(course.units.length > 0, 'у найденного материала должны быть уроки');
   assert.equal(course.route, 'teach:course-content-v1');
 
-  // Вопрос вне покрытого домена: вето срабатывает до модели, ответ — тёплое
-  // «не уполномочен» вместо вредного «переформулируйте», и вопрос попадает в
-  // журнал дефицитов как сигнал интереса.
+  // Роутер в dry подставил первый retrieval-домен, а не распознал предмет.
+  // Пустой поиск означает недостаток знания для ЭТОГО маршрута. Он не
+  // доказывает правильную модельную классификацию «вне домена».
   assert.equal(offDomain.abstained, true);
   assert.equal(offDomain.entries, 0);
-  assert.equal(offDomain.verdict, 'out_of_coverage');
-  assert.match(offDomain.route, /^boundary:out_of_coverage:/);
-  assert.ok(offDomain.answer.includes('не уполномочен'));
-  assert.ok(!offDomain.answer.includes('переформулировать'));
+  assert.equal(offDomain.verdict, 'domain_knowledge_missing');
+  assert.equal(offDomain.reason, 'domain_knowledge_missing');
+  assert.equal(offDomain.route, 'boundary:domain_knowledge_missing');
+  assert.match(offDomain.answer, /нет достаточных сведений/);
+  assert.doesNotMatch(offDomain.answer, /не уполномочен/);
+  assert.ok(transcript.substitutions.includes(DRY_SUBSTITUTIONS[0]));
+  assert.equal(offDomain.model, null);
+  assert.equal(offDomain.cost, null);
 
   assert.equal(transcript.coverage_deficits.length, 1);
   assert.equal(transcript.coverage_deficits[0].question, 'Как приготовить шашлык?');
@@ -125,7 +153,7 @@ test('a value question routes to the value slice while operations and content st
       }],
     }), 'utf8');
     const transcript = await runLocalAssistant({
-      questions: ['мне самой учиться некогда вообще ноль времени но я хочу понимать это лучше своих админов чтобы они мне лапшу не вешали'],
+      questions: [VALUE_REGRESSION_QUESTION],
       packageDir: PACKAGE_DIR,
       valueSlicePath: slicePath,
     });
@@ -137,9 +165,28 @@ test('a value question routes to the value slice while operations and content st
     assert.equal(turn.route, 'advise:course-value-v1');
     assert.equal(turn.abstained, false);
     assert.equal(turn.entries, 1);
+    assert.match(turn.answer, /dry-run: модель не вызывалась/);
+    assert.equal(turn.model, null);
+    assert.equal(turn.cost, null);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
+});
+
+test('the supplied admitted value fixture remains used through generic dry hints', {
+  skip: PACKAGE_DIR && VALUE_SLICE_PATH ? false : 'knowledge package and value slice fixture paths are required',
+}, async () => {
+  const transcript = await runLocalAssistant({
+    questions: [VALUE_REGRESSION_QUESTION], packageDir: PACKAGE_DIR, valueSlicePath: VALUE_SLICE_PATH,
+  });
+  assert.equal(transcript.package.admitted, true);
+  assert.equal(transcript.value_slice.admitted, true);
+  assert.ok(transcript.value_slice.entries > 0);
+  assert.equal(transcript.turns[0].route, 'advise:course-value-v1');
+  assert.equal(transcript.turns[0].abstained, false);
+  assert.equal(transcript.turns[0].entries, transcript.value_slice.entries);
+  assert.match(transcript.turns[0].answer, /dry-run: модель не вызывалась/);
+  assert.equal(transcript.turns[0].cost, null);
 });
 
 test('dialogue memory carries earlier turns inside one session', {

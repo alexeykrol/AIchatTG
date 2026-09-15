@@ -26,7 +26,7 @@ import {
 import { assistantDialogue } from './assistant-dialogue.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
-import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainTopics } from './assistant-domain-routing.mjs';
+import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainDecision, selectDomainRoutes } from './assistant-domain-routing.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
@@ -381,6 +381,49 @@ export function createTelegramRuntime({
     retrievals.set(ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, contentRetrieval);
   }
   const guardAdapter = guard;
+
+  // Routing receipts contain only bounded contract fields. Never retain raw
+  // provider text, diagnostic evidence, questions, dialogue or knowledge here.
+  function normalizedRoutingChoice(selection) {
+    if (!selection) return null;
+    return {
+      domains: selection.routes.map((route) => route.domainId),
+      routes: selection.routes.map(({ domainId, action, sourceId }) => ({ domainId, action, sourceId })),
+      riskFlags: [...selection.riskFlags],
+    };
+  }
+
+  function routingPrimacy(primacy) {
+    if (!primacy) return null;
+    const ruleId = typeof primacy.ruleId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,95}$/u.test(primacy.ruleId)
+      ? primacy.ruleId : null;
+    return { ruleId,
+      from: domainCatalog.get(primacy.from) ? primacy.from : null,
+      to: domainCatalog.get(primacy.to) ? primacy.to : null };
+  }
+
+  function captureRoutingDiagnosis(context, {
+    selection = null, rawSelection = selection, hints, origin = 'router', primacy = null,
+    analyzerAttempt = null, error = null,
+  }) {
+    const decision = selection ? selectDomainRoutes(selection, { catalog: domainCatalog, hints }) : null;
+    context.routingDiagnosis = {
+      schemaVersion: 'assistant-routing-diagnosis-v1', origin,
+      registryDigest: domainCatalog.digest,
+      selectionStatus: rawSelection ? 'valid' : error === 'router_unavailable' ? 'unavailable' : 'invalid',
+      rawModelChoice: normalizedRoutingChoice(rawSelection),
+      afterPrimacyDomains: selection?.routes.map((route) => route.domainId) || [],
+      finalDomains: decision?.routes.map((route) => route.domainId) || [],
+      exactExampleDomains: [...(hints.domains || [])],
+      primacy: routingPrimacy(primacy),
+      override: {
+        applied: Boolean(decision?.arbitration),
+        debt: decision?.arbitration?.debt || null,
+      },
+      riskFlags: [...(rawSelection?.riskFlags || [])],
+      analyzerAttempt, error,
+    };
+  }
 
   async function completeEnforcement(claim, status, receipt, errorCode = null) {
     const completed = store.completeModerationEnforcement({ claim, status, receipt, errorCode });
@@ -1020,7 +1063,8 @@ export function createTelegramRuntime({
    * Учёт, считающий только удачные вызовы, показывал бы систему дешевле, чем
    * она есть, — а нужен ровно обратный эффект.
    */
-  async function routeAssistantQuestion(question, hints, dialogue, workingState) {
+  async function routeAssistantQuestion(question, hints, dialogue, workingState, context,
+    { origin = 'router', analyzerAttempt = null } = {}) {
     let answered;
     try {
       answered = await modelProvider.routeAssistant({
@@ -1034,11 +1078,16 @@ export function createTelegramRuntime({
     } catch (error) {
       // Провайдера нет вовсе — вызова не было, и расхода тоже: квитанции здесь
       // не существует, поэтому счётчики остаются пустыми, а не нулевыми.
-      if (isProviderUnavailableError(error)) return { error: error.code, routerUsage: providerCallUsage(error?.receipt) };
+      if (isProviderUnavailableError(error)) {
+        captureRoutingDiagnosis(context, { hints, origin, analyzerAttempt, error: 'router_unavailable' });
+        return { error: error.code, routerUsage: providerCallUsage(error?.receipt) };
+      }
       throw error;
     }
     const routerUsage = providerCallUsage(answered?.receipt);
     const selection = normalizeDomainSelection(answered, domainCatalog);
+    captureRoutingDiagnosis(context, { selection, hints, origin, analyzerAttempt,
+      error: selection ? null : 'selection_invalid' });
     if (!selection) return { error: 'assistant_route_invalid', routerUsage };
     return { ...(await resolveAssistantRoute(question, hints, selection, dialogue)), routerUsage };
   }
@@ -1239,7 +1288,7 @@ export function createTelegramRuntime({
   /** Analyzer dispatch replaces the router call and retains all selected domains.
    * Invalid analysis falls back to the same catalog-backed router.
    */
-  async function dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState }) {
+  async function dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState, routingContext }) {
     let observation;
     try {
       observation = await analyzeAssistantQuestion(question, dialogue, workingState);
@@ -1247,8 +1296,14 @@ export function createTelegramRuntime({
       observation = { status: 'error', code: String(error?.code || error?.message || 'analyzer_failed') };
     }
     // The analyzer and router share domain IDs, validation and source resolution.
-    const topics = observation.status === 'ok'
-      ? diagnosticDomainTopics(observation.verdict, analyzer.domainPrimacyRules, domainCatalog) : null;
+    const diagnostic = observation.status === 'ok'
+      ? diagnosticDomainDecision(observation.verdict, analyzer.domainPrimacyRules, domainCatalog)
+      : { topics: null, primacy: null };
+    const topics = diagnostic.topics;
+    const rawTopics = observation.status === 'ok' ? observation.verdict.topics : null;
+    const rawSelection = Array.isArray(rawTopics) && !(rawTopics.includes('out_of_corpus') && rawTopics.length > 1)
+      ? normalizeDomainSelection({ domains: rawTopics[0] === 'out_of_corpus' ? [] : rawTopics,
+        riskFlags: observation.verdict.riskFlags || [] }, domainCatalog) : null;
     const mapped = topics && !(topics.includes('out_of_corpus') && topics.length > 1)
       ? normalizeDomainSelection({
         domains: topics[0] === 'out_of_corpus' ? [] : topics,
@@ -1258,9 +1313,19 @@ export function createTelegramRuntime({
       console.error(`[runtime] analyzer dispatch degraded to the previous router event=${eventId} `
         + `status=${observation.status} error=${String(observation.error || observation.code || '').slice(0, 200)}`);
     }
+    if (mapped) captureRoutingDiagnosis(routingContext, { selection: mapped, rawSelection, hints,
+      origin: 'analyzer_dispatch', primacy: diagnostic.primacy });
     const routing = mapped
       ? await resolveAssistantRoute(question, hints, mapped, dialogue)
-      : await routeAssistantQuestion(question, hints, dialogue, workingState);
+      : await routeAssistantQuestion(question, hints, dialogue, workingState, routingContext, {
+        origin: 'router_fallback', analyzerAttempt: {
+          status: ['ok', 'invalid', 'error'].includes(observation.status) ? observation.status : 'error',
+          rawModelChoice: normalizedRoutingChoice(rawSelection),
+          primacy: routingPrimacy(diagnostic.primacy),
+          error: observation.status === 'ok' ? 'analyzer_mapping_invalid'
+            : observation.status === 'invalid' ? 'analyzer_invalid' : 'analyzer_error',
+        },
+      });
     try {
       recordAnalyzerObservationRow({ eventId, question, hints, routing, observation });
     } catch (error) {
@@ -1270,7 +1335,7 @@ export function createTelegramRuntime({
     return { routing, observation, routedByVerdict: Boolean(mapped) };
   }
 
-  async function handleAssistant(eventId, question) {
+  async function handleAssistant(eventId, question, routingContext) {
     const moderation = await assistantModeration(store, config, question, wait);
     if (moderation.status !== 'allowed') {
       return {
@@ -1351,9 +1416,13 @@ export function createTelegramRuntime({
       const dispatched = analyzer?.enabled === true
         && analyzer.mode === ANALYZER_MODES.DISPATCH
         && analyzer.appliesTo(question.chatId)
-        ? await dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState })
+        ? await dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState, routingContext })
         : null;
-      const routing = dispatched ? dispatched.routing : await routeAssistantQuestion(question, hints, dialogue, workingState);
+      const routing = dispatched ? dispatched.routing
+        : await routeAssistantQuestion(question, hints, dialogue, workingState, routingContext);
+      if (routing.error && routingContext.routingDiagnosis?.error == null) {
+        routingContext.routingDiagnosis.error = 'source_resolution_failed';
+      }
       // Наблюдение анализатора идёт ПОСЛЕ маршрутизации и до ответа: в одной
       // строке журнала должны стоять и диагноз, и маршрут, иначе сверять их
       // потом будет не с чем. Режим observe ничего не меняет в ответе — он
@@ -1502,14 +1571,16 @@ export function createTelegramRuntime({
             commandMessageId: assistantMessage.message_id,
           });
         }
+        const routingContext = {};
         const result = classified.kind === 'comment'
           ? await handleModerator(eventId, receiptId, classified.comment)
           : classified.kind === 'question'
-            ? await handleAssistant(eventId, classified.question)
+            ? await handleAssistant(eventId, classified.question, routingContext)
             : classified.kind === 'pin_governance'
               ? await handlePinGovernance(eventId, classified.pin)
             : { kind: 'skipped', reason: classified.reason };
-        const response = { eventId, ...result };
+        const response = { eventId, ...result,
+          ...(routingContext.routingDiagnosis ? { routingDiagnosis: routingContext.routingDiagnosis } : {}) };
         const completed = store.completeInboundDelivery({
           claim: inboundClaim.claim,
           status: result.kind === 'skipped' ? 'skipped' : 'completed',
