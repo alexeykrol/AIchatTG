@@ -51,6 +51,26 @@ test('plan has no labels in model inputs and does not imply authorization or mea
   assert.equal(buildPlan(data).planDigest, plan.planDigest);
 });
 
+test('noncanonical cases are rejected before planning instead of differing from runtime wire inputs', () => {
+  for (const mutate of [
+    (c) => { c.question = ` ${c.question} `; },
+    (c) => { c.dialogue[0].question = ` ${c.dialogue[0].question} `; },
+    (c) => { c.dialogue[0].answer += '\n'; },
+    (c) => { c.dialogue[0].answer = '   '; },
+    (c) => { c.dialogue[0].question = ''; },
+    (c) => { c.dialogue[0].extra = 'must-not-reach-provider'; },
+    (c) => { const t = c.dialogue[0]; c.dialogue[0] = { answer: t.answer, question: t.question }; },
+  ]) {
+    const altered = structuredClone(data);
+    mutate(altered.cases.find((c) => c.id === 'blind-19'));
+    assert.throws(() => buildPlan(altered), /case_noncanonical/);
+  }
+  const invalid = structuredClone(data);
+  invalid.cases.find((c) => c.id === 'blind-19').dialogue[0] = null;
+  assert.throws(() => buildPlan(invalid), /case_invalid/);
+  assert.equal(buildPlan(data).maxModelCalls, 104);
+});
+
 test('empty capture remains not_run instead of scoring missing model outputs as correct refusals', () => {
   const plan = buildPlan(data);
   const report = scoreRecorded(data, capture(plan));
@@ -143,6 +163,29 @@ test('baseline keeps historical profile-internal and permissive topic parsing se
   const duplicate = report.rows.find((row) => row.key === 'blind-03:baseline:dispatch');
   assert.equal(duplicate.rawCorrect, true);
   assert.deepEqual(duplicate.rawTopics, ['content', 'content']);
+});
+
+test('mixed legacy sentinel topics never hide raw domain mistakes in either order', () => {
+  const c = data.cases.find((item) => item.id === 'blind-20');
+  const plan = buildPlan(data);
+  for (const topics of [['out_of_corpus', 'content'], ['content', 'out_of_corpus'],
+    ['out_of_corpus', 'content', 'content']]) {
+    const output = verdict(topics);
+    const report = scoreRecorded(data, capture(plan, { 'blind-20:baseline:dispatch': output }));
+    const row = report.rows.find((item) => item.key === 'blind-20:baseline:dispatch');
+    assert.deepEqual(row.rawTopics, topics);
+    assert.deepEqual(row.rawDomains, topics.filter((topic) => topic !== 'out_of_corpus'));
+    assert.equal(row.rawCorrect, false);
+    assert.equal(report.summary['baseline:dispatch'].heldout.rawExactSetAccuracy, 0);
+    assert.deepEqual(row.finalDomains, topics[0] === 'out_of_corpus' ? [] : ['content']);
+    assert.equal(interpretRecorded(c, 'candidate:dispatch', output).status, 'invalid');
+  }
+  for (const topics of [['out_of_corpus'], ['out_of_corpus', 'out_of_corpus']]) {
+    const row = interpretRecorded(c, 'baseline:dispatch', verdict(topics));
+    assert.deepEqual(row.rawTopics, topics);
+    assert.deepEqual(row.rawDomains, []);
+    assert.deepEqual(row.finalDomains, []);
+  }
 });
 
 test('planned inputs and hashes match real router/analyzer provider-boundary bytes with fake transport', async () => {

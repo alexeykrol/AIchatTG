@@ -12,6 +12,7 @@ import { compileDomainRouterPrompt, composeDomainAnalyzerSpec, diagnosticDomainD
 import { compileAnalyzerSystemPrompt, compileRouterSystemPrompt, buildAnalyzerUserPayload,
   runtimeAnalyzerSpec, parseAnalyzerVerdict } from '../src/analyzer-spec.mjs';
 import { assistantSelfDescriptionReply } from '../src/assistant-policy.mjs';
+import { assistantDialogue } from '../src/assistant-dialogue.mjs';
 import { ROUTE_ARBITER } from '../src/route-arbitration.mjs';
 
 const hash = (value) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
@@ -68,10 +69,14 @@ export function validateCases(data, catalog = DEFAULT_DOMAIN_CATALOG) {
       || typeof c.question !== 'string' || !c.question.trim() || c.question.length > 4000
       || !Array.isArray(c.domains) || c.domains.length > 3 || new Set(c.domains).size !== c.domains.length
       || c.domains.some((d) => !catalog.get(d)) || !Array.isArray(c.dialogue) || c.dialogue.length > 3
-      || c.dialogue.some((t) => typeof t.question !== 'string' || typeof t.answer !== 'string'
+      || c.dialogue.some((t) => typeof t?.question !== 'string' || typeof t?.answer !== 'string'
         || t.question.length > 4000 || t.answer.length > 4000)
       || !Array.isArray(c.riskFlags) || c.riskFlags.some((f) => !['abuse', 'prompt_injection', 'privacy'].includes(f))
       || new Set(c.riskFlags).size !== c.riskFlags.length) fail('case_invalid');
+    // Accept only the exact canonical provider projection. Silently normalizing
+    // a frozen case would conceal a change to the experiment's input identity.
+    if (c.question !== c.question.trim()
+      || JSON.stringify(c.dialogue) !== JSON.stringify(assistantDialogue(c.dialogue))) fail('case_noncanonical');
     if (c.split === 'heldout' && promptExamples.has(canonical(c.question))) fail('heldout_exact_example_leakage');
     seen.add(c.id);
   }
@@ -111,7 +116,7 @@ export function buildPlan(data, catalog = DEFAULT_DOMAIN_CATALOG) {
   }
   const sourceDigests = Object.fromEntries(['../src/assistant-domain-routing.mjs', '../src/route-arbitration.mjs',
     '../src/analyzer-spec.mjs', '../src/analyzer-spec.json', '../src/assistant-policy.mjs', '../src/provider-adapter.mjs',
-    '../src/assistant-domains.mjs', '../src/analyzer-adapter.mjs', './routing-only-eval.mjs',
+    '../src/assistant-domains.mjs', '../src/analyzer-adapter.mjs', '../src/assistant-dialogue.mjs', './routing-only-eval.mjs',
     '../../../packages/telegram-core/src/index.mjs'].map((path) => [path, hash(readFileSync(new URL(path, import.meta.url), 'utf8'))]));
   const identity = { baselineRef: '909fad69daf2bed720de075ca2f2fecf9f19afed', casesDigest: hash(data), registryDigest: catalog.digest, sourceDigests,
     requests: requests.map(({ key, promptDigest, inputDigest, deterministic }) => ({ key, promptDigest, inputDigest, deterministic })) };
@@ -134,7 +139,10 @@ export function interpretRecorded(c, lane, output, catalog = DEFAULT_DOMAIN_CATA
     verdict = variant === 'baseline' ? parseLegacyVerdict(output, spec, c.question)
       : parseAnalyzerVerdict(typeof output === 'string' ? output : JSON.stringify(output), spec, c.question);
     if (verdict.status !== 'ok') return { status: 'invalid', error: 'analyzer_verdict_invalid', rawDomains: null, finalDomains: null };
-    rawDomains = verdict.topics[0] === 'out_of_corpus' ? [] : verdict.topics;
+    // Legacy parsing permits mixed out_of_corpus + domain topics. Remove only
+    // the sentinel from the raw set, never the other model selections. Final
+    // historical arbitration below still depends on the ordered raw topics.
+    rawDomains = verdict.topics.filter((topic) => topic !== 'out_of_corpus');
     if (variant === 'candidate') {
       const decision = diagnosticDomainDecision(verdict, spec.routing.main_topic_primacy.rules, catalog);
       primacy = decision.primacy;
