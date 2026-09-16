@@ -37,6 +37,34 @@ content and the image are not copied into Git. The thread reader returned no
 message bodies, so the owner's wording above is attributed to the worker's
 relay rather than claimed as an independently re-read transcript.
 
+**Read-only follow-up:** the worker reports that the same specimen was visible
+in the already selected Telegram group, and a user-opened author profile showed
+a numeric peer identifier. No stable chat/message IDs or calendar date were
+obtained. The worker stopped navigation after user-changed-app notices; no
+history search, additional occurrences or variants were retrieved. Root did not
+independently repeat that live UI check. Group/person identifiers and screenshots
+remain outside Git; recurrence and automation are still `inconclusive`.
+
+Root source inspection at0a27a9b (`passed`; source unchanged since worker's
+a57a2a9) corroborates these bounded implementation findings:
+
+- The disabled Console-only `detectPromotionReview` is a narrow commercial/
+  repeated-long-text review detector, not a runtime sanction rule. The worker's
+  pure specimen probe reported no pattern IDs; production model classification
+  for this message is `not_run`, not a proven model miss.
+- Runtime currently calls the model before applying its bot/sender-chat/link
+  hard signals. Its atomic decision/enforcement transaction requires an active
+  provider boundary. A zero-model rule needs an honest local-decision path,
+  preserving Guard/admin exemptions, idempotency and accounting; it must not
+  fabricate a provider call.
+- The Moderator comment projection and recovery snapshot omit quote/code/
+  forwarding metadata. A substring-only autoban could punish a quoted report,
+  exercise or translation; provenance and negative cases must be addressed.
+- Existing `ban_purge` enumerates at most100 known same-chat/same-author ledger
+  messages plus the current message (deduplicated); it does not search the full
+  Telegram history. The legacy Console returns an empty comment-text field.
+  Purpose-limited private recovery snapshots were not accessed or repurposed.
+
 **Recommendation / next boundary:** inspect existing authorized Moderator
 evidence and source capabilities with bounded read-only checks, then propose
 an exact-pattern candidate with positive and legitimate-context negative tests.
