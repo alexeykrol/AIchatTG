@@ -93,3 +93,47 @@ then a late Moderator webhook makes a second semantic call for that native
 message. Its local regression reproduces the defect1/1; root independently
 reran it with Node20.20.0 and reproduced1/1. Schema readability is not safe rollback. A controlled
 stop/drain/quarantine mitigation remains `not_run` and a release blocker.
+
+## Repaired timer follow-up
+
+Independent follow-up:68/68 repository tests and4/4 extra synthetic probes
+passed. Delayed-ACK reply/answer reconciliation and indexed native edit proof
+close both initial findings. Additional held-delete races covered expiry-first
+and answer-first; a held judgement cancelled idle while another user's pair
+expired after runtime/store recreation; late reply after uncertain expiry
+answered without retrying deletion. The four probes were not yet checked in.
+Real process-signal shutdown was inspected, not exercised.
+
+Stable follow-up source hashes:
+
+- database.mjs: `66fa9b210b3f7c2fb084acd96e74244c3a560b6ced3b43582ab035dcde5e4fce`
+- runtime.mjs: `7df8ddb2533543fad5434a592f02a64901cd36d02035a00a09281f3b51711d3d`
+- assistant-ask-expiry.mjs: `d1a7277fd8de4bb601e3311fb88c8497f3b41ccd7a54490104de4d8575dda16c`
+
+Runtime/database subsequently change for v4 answer claims and v5 transition;
+the passing checkpoint does not accept those later changes.
+
+## Forward-upgrade counterexamples
+
+Independent exact-a41518f runtime+core to scratch-frozen new-source checks
+found a release-blocking legacy ownership gap:
+
+| Legacy state and ordering | Observed defect |
+| --- | --- |
+| Resolved clean, then late Assistant webhook on new code | Second judge/job/record; prior allow replaced by block and fake ban/delete |
+| safe_retry, new legacy recovery first, then late Assistant | Second judge; same overwrite and fake sanctions |
+| Unknown/manual_review, then late Assistant | Fresh judge bypasses unknown boundary, replaces error by allow/fake answer |
+| safe_retry, new Assistant acceptance first, then legacy recovery | Passed: stale legacy work fenced; new allow preserved |
+
+Four assertions passed as reproductions; three demonstrate compatibility
+failure, not acceptance. Node20.20.0 with socket/fetch-denying guard, synthetic
+databases and fake actions only. Root did not claim a second independent rerun.
+Source hashes: runtime `7df8ddb2533543fad5434a592f02a64901cd36d02035a00a09281f3b51711d3d`,
+judgement-store `564794b0edc14a2bb973fa6823e4ad1f5b8ba1e5786541a5bc98a46b547b0d75`.
+The source was a scratch-frozen uncommitted candidate on b1c19c5.
+Local reproduction/result: `/tmp/aichattg-forward-assurance.Bwfaxp/`.
+
+The [v5 transition proposal](../proposals/2026-09-16-ask-protocol-legacy-transition-v5.md)
+is authorized only as local candidate work. It deliberately quarantines old
+native edits/late deliveries; this limitation and safe rollback remain explicit
+release decisions. No live schema change or migration is authorized.

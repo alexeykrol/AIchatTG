@@ -72,3 +72,8 @@ keeps strict validation and explicitly synthetic safety. The
 [answer-claim clarification](proposals/2026-09-16-ask-protocol-answer-claim-clarification-v4.md)
 permits replacement of wholly-unsent stale work, not repeat visible answers
 after native delivery is calling, partial, uncertain or confirmed.
+Timer follow-up68/68 plus4 probes passed on its earlier snapshot. Independent
+forward-upgrade review found legacy double-judgement/unknown-fence bypasses;
+the [v5 legacy transition](proposals/2026-09-16-ask-protocol-legacy-transition-v5.md)
+is being implemented locally. Quarantined legacy edits/late deliveries and
+the still-unsafe old-binary rollback need explicit release treatment/approval.
