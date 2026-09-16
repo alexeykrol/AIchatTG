@@ -26,8 +26,10 @@ updated: 2026-09-15
       1829573/Console3.3.0 accepted:905passed/5fixture-skips, Console159/159,
       P2 fixes and disabled no-store mount independently checked. Not pushed
       or deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
-      Next LOCAL contract-only work:
-      `docs/proposals/2026-09-15-moderation-bridge-charter-v1.md`.
+      LOCAL bridge proposal получен,54 сценария только специфицированы.
+      До implementation нужны PO решения: приоритет Guard при сбое Review;
+      retained HMAC markers/future-edit suppression после erase. См.
+      `docs/reports/2026-09-15-moderation-bridge-review.md`.
 - [x] CONSOLE-COST-V1 local implementation: integrated into3.2.0/f650fe8;
       production acceptance passed in CONSOLE-V32 above. No guessed usage/zero
       costs; worker backend preserved. Incorporates pushed3.1.1 copy fixes.

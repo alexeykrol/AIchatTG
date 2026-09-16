@@ -22,7 +22,10 @@
   Console159/159, independent review/source guard passed. Shared hook строго
   disabled без store/collector/sender; Help это объясняет. Lease пока нет.
   Следующий LOCAL contract-only bridge charter передан Moderator, frozen
-  worker source сохраняется. `docs/reports/2026-09-15-moderation-review-integration.md`.
+  worker source сохраняется. Предложение bridge получено/сохранено, но не принято:
+  нужны PO решения о приоритете основной защиты при сбое Review и сохранении
+  pseudonymous меток после erase. Code reservations/lease не выданы.
+  `docs/reports/2026-09-15-moderation-bridge-review.md`.
   `docs/RELEASE_QUEUE.md`; никаких SSH/production полномочий не передано.
 - **Новые feature workstreams, local-only:** PO-start Moderation review и
   Analytics last-five costs проверены. База9d326f4; страницы/new modules

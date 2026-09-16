@@ -23,8 +23,11 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   Root905passed/5fixture-skips, Console159/159, independent review and source
   guard passed. [Acceptance](reports/2026-09-15-moderation-review-integration.md).
 - The mounted Review API is disabled without storage/collection/delivery.
-  The next safe step is the [local bridge contract](proposals/2026-09-15-moderation-bridge-charter-v1.md),
-  not deploying the incomplete live workflow. No exact release lease exists.
+  The [local bridge contract](proposals/2026-09-15-moderation-live-bridge-contract-v1.md)
+  is offered but not accepted: the [root review](reports/2026-09-15-moderation-bridge-review.md)
+  identifies PO choices for primary-moderation availability and retained
+  pseudonymous markers after erase. No implementation reservation or exact
+  release lease exists; do not deploy this as a completed live workflow.
 - No Moderator feature from this candidate is deployed. Collection, recipient,
   reviewer identity, source checkpoint, limits and real delivery are still gated.
 - Before mechanical delegation: accepted exact source/tests, verified PO scope,

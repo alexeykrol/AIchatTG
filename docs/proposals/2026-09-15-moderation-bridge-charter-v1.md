@@ -97,3 +97,18 @@ evidence; do not silently change webhook guarantees in this contract.
 Return actual document paths, proposed modules/contracts, read-only evidence,
 risks/open decisions, synthetic acceptance plan and one next safe root action.
 Require a grounded acknowledgement of source1829573 and frozen-worker boundary.
+
+## Root review follow-up — documentation only
+
+The v1 contract/acceptance plan were received and preserved, not accepted for
+implementation. Root identified PO privacy/availability choices plus a false
+receiver-counter replay guarantee and new erase restrictions. Source of truth:
+`/Users/alexeykrolmini/Code/AIchatTG/docs/reports/2026-09-15-moderation-bridge-review.md`.
+
+One additional owned path is allowed in the same frozen worker:
+`docs/proposals/2026-09-16-moderation-live-bridge-review-addendum-v2.md`.
+Correct the replay alternative and deletion-capacity/in-flight boundaries;
+spell out how to preserve primary Guard behavior with explicit Review coverage
+gaps if that priority is approved. Do not choose or implement pending PO policy,
+create a raw-data buffer, edit original v1 files, alter source or use network.
+Return the revised contract options and changed acceptance IDs only.
