@@ -1,6 +1,6 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-15, after local Moderator acceptance. The root integrator owns shared integration
+Checkpoint: 2026-09-16, after local porn-spam policy acceptance. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
@@ -9,7 +9,18 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 `production-verified`. One Console-only recreation; lease consumed/master closed.
 [Deployment receipt](reports/2026-09-15-console-v32-deployment.md).
 
-## Position 1 — private Moderator review
+## Position 1 — semantic suspected porn-spam policy
+
+- Exact runtime source `a41518f4a4fd105cf19e7fc1a64fd35b77233084`, lifecycle
+  `prepared`; not pushed/deployed. Root owns integration and the release lock.
+- PO requested completion/deployment; exact three-current-chat release/risk
+  decision still pending, no production lease.946passed/5fixture-skips;
+  independent review/source guard passed, model recognition not_run.
+- Runtime-only recreation; Console/private Review stay unchanged/off. Prior
+  runtime335a35a and Consolef650fe8 verified healthy/restart0 at04:08:03UTC.
+- [Exact candidate, boundaries and decision](reports/2026-09-16-porn-spam-policy-candidate.md).
+
+## Position 2 — private Moderator review
 
 - Requested mechanical deployment owner: task «Модератор»,
   `019fd023-a949-7961-87cd-693bcb893e2c`.

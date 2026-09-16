@@ -74,6 +74,13 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
+**Prepared, not deployed:** runtime source `a41518f` adds the semantic suspected
+porn-spam policy using the existing immediate ban/cleanup route. Local tests:
+946passed/5fixture-skips; real model recognition not_run. Runtime-only release,
+same three chats and irreversible deletion need the exact release decision.
+The source carries planned Assistant2.4.38/16.09.2026; current production below
+is unchanged. [Candidate and boundaries](docs/reports/2026-09-16-porn-spam-policy-candidate.md).
+
 **Current Assistant version: `2.4.37` — 15.09.2026.** Production image
 `335a35a` started 2026-09-15 21:01:48 UTC. Every delivered Assistant reply now
 ends with `Версия 2.4.37 от 15.09.2026`, once on the final part for long answers.

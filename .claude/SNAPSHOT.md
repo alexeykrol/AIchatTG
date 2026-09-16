@@ -1,9 +1,17 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-15 UTC / local
+**Last Updated:** 2026-09-16 UTC / 2026-09-15 local
 
 ## Текущее состояние
 
+- **Porn-spam, lifecycle `prepared`:** exact runtime candidate `a41518f`,
+  семантическое подозрение на порнографический спам ведёт по существующему
+  ban_purge без предупреждения. Local946passed/5skips, review/source guard passed;
+  реальная модель не проверялась. Версия будущего runtime/Assistant2.4.38,
+  текущий335a35a/2.4.37 и Consolef650fe8 здоровы на04:08:03UTC. Не pushed/deployed.
+  Root запрашивает одно exact-SHA решение для трёх текущих чатов с необратимостью
+  удаления; SSH закрыт, lease нет. Queue1, private Review отдельно queue2.
+  `docs/reports/2026-09-16-porn-spam-policy-candidate.md`.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.
@@ -15,7 +23,7 @@
   остальные config/routes/schema/drafts сохранены. RollbackConsole3.1.0/eb0f7fe.
   Lease consumed, SSH closed23:13:28UTC; одна recreation,0rollback.
   `docs/reports/2026-09-15-console-v32-deployment.md`.
-- **Очередь выпуска:** Moderator position1, PO назначил его механическим
+- **Отдельная очередь private Review:** Moderator position2, PO назначил его механическим
   исполнителем следующего деплоя; root сохраняет integration/lock/acceptance.
   Локальный source1829573/Console3.3.0 принят, lifecycle `prepared`, не pushed
   и не deployed. Два P2 и fingerprint bypass исправлены; root905passed/5skips,

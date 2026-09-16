@@ -1,13 +1,19 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-15
+updated: 2026-09-16
 ---
 
 # Backlog
 
 ## Next
 
+- [ ] PORN-SPAM-1: exact runtime candidatea41518f, lifecycle `prepared`,
+      semantic suspected solicitation under existing spam_or_scam/ban_purge.
+      Root946passed/5skips, sourceguard/review passed; real recognition not_run.
+      One exact runtime/three-current-chat release risk decision pending;
+      no lease/push/deploy. No private Review activation. See
+      `docs/reports/2026-09-16-porn-spam-policy-candidate.md`.
 - [x] CONSOLE-V32: exact source `f650fe8`, lifecycle `production-verified`,
       release23:12:03UTC. Last-five costs, known stages, mean denominator,
       3.1.1 labels and Help live. Root787passed/5skips/0failed, Console41/41;
@@ -21,7 +27,7 @@ updated: 2026-09-15
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts
       throughv5 accepted; recipient/principal unknown,
-      production collection/delivery disabled. Queue position1; requested
+      production collection/delivery disabled. Queue position2; requested
       mechanical owner Moderator, no active lease/SSH handoff. Root local source
       1829573/Console3.3.0 accepted:905passed/5fixture-skips, Console159/159,
       P2 fixes and disabled no-store mount independently checked. Not pushed
