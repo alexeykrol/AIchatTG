@@ -19,6 +19,48 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — A reply to the bare-ask hint receives no answer or cleanup
+
+**Reported:** task «Ассистент» relayed the owner's screenshot: at about
+21:07–21:09 local, a bare `/ask` produced the forceReply hint; the owner replied
+with a substantive course-related assistant-architecture question, but neither
+an answer nor cleanup followed. Requested work in root was read-only diagnosis,
+not a moderation bypass.
+
+**Diagnosis: passed within the bounded trace.** A first query of the presumed
+test chat found no receipts. A content-free lookup of completed bare-ask hints
+in the same seven-minute window across the three already configured AIchatTG
+chats found one unique hint and resolved the actual chat. The final read-only
+trace at2026-09-16T04:17:46UTC took5.88ms:
+
+- Both bot streams received the bare command at04:07:45UTC; Moderator allowed
+  it and Assistant delivered the hint at04:07:47UTC.
+- Both streams also received the substantive reply at04:09:52UTC. The claim
+  that Privacy Mode prevented Moderator delivery is refuted for this incident.
+- At04:09:54UTC Moderator was in `manual_review`, provider boundary `unknown`,
+  code `provider_safety_router_invalid`; the reply's moderation disposition
+  was `error`. The model result failed its safety-router contract; the exact
+  field/validation reason is not retained in the inspected metadata.
+- Assistant returned `skipped / moderator_unavailable` before claiming the
+  question. No request reservation or answer receipt exists. Hint cleanup was
+  never claimed: it runs only after a delivered substantive answer.
+
+**Recommendation / status: proposed fix; diagnosis accepted, no code change.**
+Keep the moderation gate intact. Investigate the rejected router contract and
+retain bounded content-free failure detail before selecting a repair; do not
+blindly retry a potentially billed call or infer permission to answer unjudged
+messages. This is not proof of failed Telegram cleanup or lost delivery.
+The prepared porn-spam candidate does not claim to fix this separate incident.
+
+Last source/image preflight04:08:03UTC confirmed live runtime335a35a/Assistant
+2.4.37, healthy/restart0; no root deployment occurred during the trace. Queries
+were `readonly`/`query_only`, busy timeout1s, fixed04:05–04:12UTC window and
+bounded row count. No text, provider response, recovery snapshot or Docker log
+was read/exported; no data/config/Telegram/provider mutation. Both diagnostic
+masters closed, socket absence verified. Exact private native/event identities
+are retained only in ignored `output/ask-reply-trace-20260916/resolved-result.json`,
+SHA-256 `529885ed4e886f5865c5910e2fdf2e65ebc6649315b349d6b2a10552572904bd`.
+
 ## 2026-09-15 — Immediate sanctions for suspected pornographic spam
 
 **Owner decision:** relayed by «Модератор»: «Это порнуха, которая рассылается

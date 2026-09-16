@@ -8,6 +8,12 @@ updated: 2026-09-16
 
 ## Next
 
+- [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
+      but Moderator rejected router result (`provider_safety_router_invalid`),
+      so Assistant skipped before claim and cleanup never started. Read-only
+      production trace04:17:46UTC passed; Privacy Mode hypothesis refuted for
+      this incident. Exact contract subreason remains unknown; no bypass,
+      replay or paid probe authorized. See newest `docs/OWNER_FEEDBACK_LOG.md`.
 - [ ] PORN-SPAM-1: exact runtime candidatea41518f, lifecycle `prepared`,
       semantic suspected solicitation under existing spam_or_scam/ban_purge.
       Root946passed/5skips, sourceguard/review passed; real recognition not_run.
