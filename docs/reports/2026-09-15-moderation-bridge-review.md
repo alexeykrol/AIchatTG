@@ -65,6 +65,25 @@ behavior tests were run. Worker may write a new documentation-only correction
 addendum; original artifacts/hashes stay immutable. This is not permission for
 the privacy or availability changes themselves.
 
+### V2 correction review
+
+`passed`, documentation only: the complete
+[v2 options addendum](../proposals/2026-09-16-moderation-live-bridge-review-addendum-v2.md)
+was read and retained unchanged, SHA-256
+`13f3463591daf78afa3ed39fc1b63876fb6102fa0dc5143a6b13e65a44ed18b4`.
+It withdraws the receiver-counter replay claim, defines conditional Guard-first
+coverage/unknown behavior without a new raw backlog, reserves logical deletion
+capacity during admission, and removes the proposed calling-state erase refusal.
+Generic-send authorization cutoff and actual disk/journal headroom remain later
+implementation details to reserve/test explicitly; no physical erase guarantee.
+
+The corrections are accepted as consistent options, not as selection of G/R,
+permission to retain pseudonymous markers, source-writing reservations or live
+approval. Both PO questions remain unanswered. The worker is checkpointed; no
+additional implementation or production follow-up should start until a relevant
+decision or explicit new local charter arrives. Every new behavior test remains
+`not_run`.
+
 ## Current disposition
 
 Proposal retained for provenance and decision-making, not accepted for bridge

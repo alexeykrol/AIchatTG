@@ -28,6 +28,8 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   identifies PO choices for primary-moderation availability and retained
   pseudonymous markers after erase. No implementation reservation or exact
   release lease exists; do not deploy this as a completed live workflow.
+  The v2 documentation addendum resolves the reported specification defects
+  conditionally; it selects neither policy. Waiting for the two PO decisions.
 - No Moderator feature from this candidate is deployed. Collection, recipient,
   reviewer identity, source checkpoint, limits and real delivery are still gated.
 - Before mechanical delegation: accepted exact source/tests, verified PO scope,
