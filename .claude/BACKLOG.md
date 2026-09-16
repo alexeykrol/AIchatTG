@@ -17,7 +17,7 @@ updated: 2026-09-16
       and rollback fences. Local implementation chartered to Assistant's
       isolated worktree; root retains acceptance/integration/commits.
       Candidate2c72e01/Assistant2.4.39 is committed/frozen in the isolated
-      branch, lifecycle prepared, not main-integrated/pushed/deployed.
+      branch, lifecycle pushed, not main-integrated/deployed.
       Root1146total/1141passed/0failed/5fixture-skips; migration9/9 and clean
       source guard passed. Includes30-second ask-prompt/no-silence UX.
       `docs/reports/2026-09-16-ask-protocol-root-review.md`.

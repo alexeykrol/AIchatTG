@@ -60,8 +60,12 @@ under [ask-protocol-v1](proposals/2026-09-16-ask-protocol-charter-v1.md), follow
 the relayed owner instruction «Давай - все делай.». Root retains main integration,
 acceptance and commits; no other writer may touch reserved shared paths.
 The work is now frozen and root committed candidate
-`2c72e01cb28452c640c033c91a2060a8eca57201`, Assistant2.4.39, lifecycle `prepared`.
-It remains in the isolated branch, not merged into main, pushed or deployed.
+`2c72e01cb28452c640c033c91a2060a8eca57201`, Assistant2.4.39, lifecycle `pushed`.
+It remains in the isolated branch, not merged into main or deployed.
+The owner's push/deploy request was received; candidate and eight docs commits
+were pushed with direct GitHub ref verification. The explicit legacy-behavior
+and failed-rollback gates remain unresolved; no production lease was issued.
+[Push receipt and decision](reports/2026-09-16-ask-protocol-push.md).
 Root full gates1146total/1141passed/0failed/5fixture-skips, migration9/9 and
 clean source guard passed. The30-second prompt/no-silence UX and invalid-router
 fallback remain separate from deployeda41518f. No active writer or lease.

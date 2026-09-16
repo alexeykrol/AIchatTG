@@ -14,13 +14,13 @@
   Повтор04:34:18UTC; lease consumed, SSH closed04:34:43UTC. Consolef650fe8
   остаётся3.2.0. Rollback335a35a; удалённые сообщения не восстанавливает.
   `docs/reports/2026-09-16-porn-spam-policy-deployment.md`.
-- **Отдельно, lifecycle prepared, не deployed:** `/ask` reply дошёл до обоих ботов, но router
+- **Отдельно, lifecycle pushed, не deployed:** `/ask` reply дошёл до обоих ботов, но router
   rejected→manual_review→Assistant skipped, поэтому нет ответа/уборки.
   PO выбрал Assistant-judges для адресованных ему вопросов и Moderator-enforces;
   ordinary posts остаются Moderator-judges. Read-only review получен; после
   «Давай - все делай.» выдан bounded local charter Assistant в isolated worktree.
   Root сохранил candidate2c72e01/Assistant2.4.39 в isolated branch; source
-  не в main, не pushed/deployed. Root1141passed/5fixture-skips/0failed,
+  запушен в isolated branch, не в main runtime и не deployed. Root1141passed/5fixture-skips/0failed,
   migration9/9 и exact source guard passed. Source freeze; активной lease нет.
  30-second prompt/no-silence UX включён. Это не частьa41518f и не safety bypass.
   `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`.
@@ -29,6 +29,8 @@
   воспроизводит повторного судью: безопасный rollback остаётся release blocker.
   Карантин старых edits/late deliveries и fallback copy требуют PO решения.
   `docs/reports/2026-09-16-ask-protocol-root-review.md`.
+  Все8 локальных docs commits также запушены; live state не менялся.
+  `docs/reports/2026-09-16-ask-protocol-push.md`.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.
