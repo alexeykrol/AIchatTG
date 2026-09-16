@@ -2,6 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
+import { createJudgementStore } from './judgement-store.mjs';
+import { createJudgementAnswerClaims } from './judgement-answer-claims.mjs';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runtime_inbound_events (
@@ -126,6 +128,49 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_question_claims (
   claimed_at INTEGER NOT NULL,
   completed_at INTEGER,
   PRIMARY KEY (chat_id, message_id)
+);
+-- A bare /ask is a short-lived UI interaction, but its expiry must survive a
+-- process restart. This table retains only native identifiers, never message
+-- text. A single fenced cleanup claim owns all external deletes.
+CREATE TABLE IF NOT EXISTS runtime_assistant_ask_prompt_jobs (
+  event_id TEXT PRIMARY KEY REFERENCES runtime_inbound_events(event_id),
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  command_message_id TEXT NOT NULL,
+  prompt_message_id TEXT NOT NULL,
+  expires_at_ms INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending', 'question_received', 'calling', 'finished', 'skipped', 'uncertain')),
+  claim_id TEXT,
+  claim_generation INTEGER NOT NULL DEFAULT 0 CHECK(claim_generation >= 0),
+  result_json TEXT,
+  error_code TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  UNIQUE(chat_id, user_id, prompt_message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_ask_prompt_jobs_due
+  ON runtime_assistant_ask_prompt_jobs(state, expires_at_ms);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_ask_prompt_jobs_command
+  ON runtime_assistant_ask_prompt_jobs(chat_id, user_id, command_message_id);
+-- Native edit evidence is monotonic and indexed, including edits witnessed
+-- before the original or by the other bot stream. No message bodies are kept.
+CREATE TABLE IF NOT EXISTS runtime_assistant_ask_native_observations (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  edited INTEGER NOT NULL CHECK(edited IN (0, 1)),
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY(chat_id, message_id)
+);
+-- A Telegram reply can arrive while sendMessage is still awaiting its ACK.
+-- Keep identifiers only so the later hint job can reconcile that observation.
+CREATE TABLE IF NOT EXISTS runtime_assistant_ask_reply_observations (
+  chat_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  prompt_message_id TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  answer_event_id TEXT,
+  PRIMARY KEY(chat_id, user_id, prompt_message_id)
 );
 -- A reservation starts before model/delivery work and is released only for a
 -- definitely-unsent reply. The uncertain state is intentionally retained: the inbound
@@ -357,6 +402,10 @@ export function ensureRuntimeDatabaseSchema(db) {
   db.pragma('foreign_keys = ON');
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  if (!db.prepare('PRAGMA table_info(runtime_assistant_ask_reply_observations)').all()
+    .some((column) => column.name === 'answer_event_id')) {
+    db.exec('ALTER TABLE runtime_assistant_ask_reply_observations ADD COLUMN answer_event_id TEXT');
+  }
   // SQLite cannot extend a CHECK constraint in place. The immediately prior
   // standalone schema lacked `decision_ready`; rebuild only that private queue
   // while preserving every row and its inbound foreign keys. Its historical
@@ -535,7 +584,12 @@ function usageOf(row, prefix = '') {
   };
 }
 
-export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 1000) } = {}) {
+export function createRuntimeStore(db, {
+  now = () => Math.floor(Date.now() / 1000),
+  nowMs = () => Date.now(),
+} = {}) {
+  const judgementStore = createJudgementStore(db, { now });
+  const answerClaims = createJudgementAnswerClaims(db, { now });
   const claim = db.prepare(`INSERT INTO runtime_inbound_events
     (event_id, bot_role, update_id, status, created_at) VALUES (?, ?, ?, 'processing', ?)
     ON CONFLICT(event_id) DO NOTHING`);
@@ -574,6 +628,9 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   function pendingAskPrompt({ chatId, userId, promptMessageId = null, commandMessageId = null }) {
     const at = now();
     for (const row of recentAskEvents.all()) {
+      // New jobs, including skipped/finished/uncertain ones, never re-enter
+      // the old receipt-only cleanup lane.
+      if (askPromptJob.get(row.event_id)) continue;
       if (row.bot_role !== 'assistant' || row.status !== 'completed'
         || row.created_at < at - 47 * 60 * 60 || row.created_at > at) continue;
       let result;
@@ -621,6 +678,108 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       state: 'skipped', reason: 'command_edited', completedAt: now(),
     } }), found.row.event_id, found.row.result_json).changes === 1;
   });
+  const askPromptJob = db.prepare('SELECT * FROM runtime_assistant_ask_prompt_jobs WHERE event_id = ?');
+  const askPromptJobByPrompt = db.prepare(`SELECT * FROM runtime_assistant_ask_prompt_jobs
+    WHERE chat_id = ? AND user_id = ? AND prompt_message_id = ?`);
+  const askPromptJobByCommand = db.prepare(`SELECT * FROM runtime_assistant_ask_prompt_jobs
+    WHERE chat_id = ? AND user_id = ? AND command_message_id = ?`);
+  const nativeAskObservation = db.prepare(`SELECT * FROM runtime_assistant_ask_native_observations
+    WHERE chat_id = ? AND message_id = ?`);
+  const writeNativeAskObservation = db.prepare(`INSERT INTO runtime_assistant_ask_native_observations
+    (chat_id, message_id, edited, observed_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(chat_id, message_id) DO UPDATE SET edited = MAX(edited, excluded.edited)`);
+  const askReplyObservation = db.prepare(`SELECT * FROM runtime_assistant_ask_reply_observations
+    WHERE chat_id = ? AND user_id = ? AND prompt_message_id = ?`);
+  const writeAskReplyObservation = db.prepare(`INSERT INTO runtime_assistant_ask_reply_observations
+    (chat_id, user_id, prompt_message_id, observed_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(chat_id, user_id, prompt_message_id) DO NOTHING`);
+  const writeAskAnswerObservation = db.prepare(`UPDATE runtime_assistant_ask_reply_observations
+    SET answer_event_id = ? WHERE chat_id = ? AND user_id = ? AND prompt_message_id = ?
+    AND answer_event_id IS NULL`);
+  const issuedAskClaims = new WeakSet();
+  const createAskPromptJob = db.prepare(`INSERT INTO runtime_assistant_ask_prompt_jobs
+    (event_id, chat_id, user_id, command_message_id, prompt_message_id, expires_at_ms, state, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT(event_id) DO NOTHING`);
+  const receiveAskPromptQuestion = db.prepare(`UPDATE runtime_assistant_ask_prompt_jobs
+    SET state = 'question_received', updated_at = ?
+    WHERE event_id = ? AND state = 'pending'`);
+  const nextDueAskPromptJob = db.prepare(`SELECT * FROM runtime_assistant_ask_prompt_jobs
+    WHERE state = 'pending' AND expires_at_ms <= ? ORDER BY expires_at_ms ASC, event_id ASC LIMIT 1`);
+  const nextCompletedAskPromptJob = db.prepare(`SELECT jobs.* FROM runtime_assistant_ask_prompt_jobs jobs
+    JOIN runtime_assistant_ask_reply_observations replies ON replies.chat_id = jobs.chat_id
+      AND replies.user_id = jobs.user_id AND replies.prompt_message_id = jobs.prompt_message_id
+    WHERE jobs.state = 'question_received' AND replies.answer_event_id IS NOT NULL
+    ORDER BY jobs.expires_at_ms ASC, jobs.event_id ASC LIMIT 1`);
+  const claimDueAskPromptJob = db.prepare(`UPDATE runtime_assistant_ask_prompt_jobs
+    SET state = 'calling', claim_id = ?, claim_generation = claim_generation + 1, updated_at = ?
+    WHERE event_id = ? AND state = 'pending' AND expires_at_ms <= ?`);
+  const claimAnsweredAskPromptJob = db.prepare(`UPDATE runtime_assistant_ask_prompt_jobs
+    SET state = 'calling', claim_id = ?, claim_generation = claim_generation + 1, updated_at = ?
+    WHERE event_id = ? AND state = 'question_received'`);
+  const completeAskPromptJob = db.prepare(`UPDATE runtime_assistant_ask_prompt_jobs
+    SET state = ?, result_json = ?, error_code = ?, updated_at = ?, completed_at = ?
+    WHERE event_id = ? AND state = 'calling' AND claim_id = ? AND claim_generation = ?`);
+  const skipAskPromptJob = db.prepare(`UPDATE runtime_assistant_ask_prompt_jobs
+    SET state = 'skipped', error_code = ?, updated_at = ?, completed_at = ?
+    WHERE event_id = ? AND state IN ('pending', 'question_received')`);
+  const promptJobCounts = db.prepare(`SELECT state, COUNT(*) AS count FROM runtime_assistant_ask_prompt_jobs GROUP BY state`);
+  function promptJobClaim(row, claimId, source) {
+    const result = Object.freeze({
+      eventId: row.event_id, chatId: row.chat_id, userId: row.user_id,
+      commandMessageId: row.command_message_id, promptMessageId: row.prompt_message_id,
+      claimId, claimGeneration: Number(row.claim_generation) + 1, source, durable: true,
+    });
+    issuedAskClaims.add(result);
+    return result;
+  }
+  function askCleanupAuthority(row) {
+    const original = inboundReceipt.get(row.event_id);
+    if (!original || original.bot_role !== 'assistant'
+      || original.revision_identity !== `${row.chat_id}:${row.command_message_id}`) return 'original_unproven';
+    const at = nowMs();
+    if (original.received_at * 1000 > at || original.received_at * 1000 < at - 47 * 60 * 60 * 1000) {
+      return 'cleanup_authority_expired';
+    }
+    const native = nativeAskObservation.get(row.chat_id, row.command_message_id);
+    return !native ? 'original_unproven' : native.edited ? 'command_edited' : null;
+  }
+  function validAskClaim(input) {
+    if (!input || !issuedAskClaims.has(input)) return false;
+    const row = askPromptJob.get(input.eventId);
+    return row?.state === 'calling' && row.claim_id === input.claimId
+      && row.claim_generation === input.claimGeneration && row.chat_id === input.chatId
+      && row.user_id === input.userId && row.command_message_id === input.commandMessageId
+      && row.prompt_message_id === input.promptMessageId;
+  }
+  function durableAskCommandUnedited(input) {
+    return validAskClaim(input) && askCleanupAuthority(askPromptJob.get(input.eventId)) == null;
+  }
+  function skipDurableAskPromptJob(row, reason) {
+    const changed = skipAskPromptJob.run(reason, now(), now(), row.event_id).changes === 1;
+    if (!changed) return false;
+    const source = event.get(row.event_id);
+    let result;
+    try { result = JSON.parse(source?.result_json); } catch { return true; }
+    if (result?.askPrompt && result.askPromptCleanup == null) {
+      writeAskResult.run(JSON.stringify({ ...result, askPromptCleanup: {
+        state: 'skipped', reason, completedAt: now(),
+      } }), row.event_id, source.result_json);
+    }
+    return true;
+  }
+  function claimAskPromptJob(row, source) {
+    if (!row) return null;
+    const authorityError = askCleanupAuthority(row);
+    if (authorityError) {
+      skipDurableAskPromptJob(row, authorityError);
+      return null;
+    }
+    const claimId = randomUUID();
+    const changed = source === 'expiry'
+      ? claimDueAskPromptJob.run(claimId, now(), row.event_id, nowMs()).changes === 1
+      : claimAnsweredAskPromptJob.run(claimId, now(), row.event_id).changes === 1;
+    return changed ? promptJobClaim(row, claimId, source) : null;
+  }
   const inboundReceipt = db.prepare('SELECT * FROM runtime_inbound_update_receipts WHERE receipt_id = ?');
   const createInboundReceipt = db.prepare(`INSERT INTO runtime_inbound_update_receipts
     (receipt_id, bot_role, update_id, revision_identity, payload_fingerprint,
@@ -722,12 +881,6 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
      model_id, input_tokens, output_tokens, total_tokens, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(event_id) DO NOTHING`);
-  const questionClaim = db.prepare(`INSERT INTO runtime_assistant_question_claims
-    (chat_id, message_id, status, claimed_at) VALUES (?, ?, 'processing', ?)
-    ON CONFLICT(chat_id, message_id) DO NOTHING`);
-  const question = db.prepare('SELECT * FROM runtime_assistant_question_claims WHERE chat_id = ? AND message_id = ?');
-  const completeQuestion = db.prepare(`UPDATE runtime_assistant_question_claims
-    SET status = 'completed', outcome = ?, completed_at = ? WHERE chat_id = ? AND message_id = ?`);
   const assistantRequest = db.prepare('SELECT * FROM runtime_assistant_request_reservations WHERE event_id = ?');
   const countAssistantRequests = db.prepare(`SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations
     WHERE chat_id = ? AND user_id = ? AND status IN ('reserved', 'completed', 'uncertain') AND created_at > ?`);
@@ -959,6 +1112,8 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
   });
 
   return {
+    ...judgementStore,
+    ...answerClaims,
     currentTime() { return now(); },
     /**
      * Create the only executable claim for a Telegram delivery. The update
@@ -967,9 +1122,14 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
      * receipt collision while avoiding a second raw-message store.
      */
     claimInboundDelivery({ receiptId, role, updateId, revisionIdentity, payloadFingerprint }) {
+      return db.transaction(() => {
       const normalizedReceiptId = String(receiptId);
       const claimId = randomUUID();
       const at = now();
+      const native = /^(-?\d+):(?:(edit):[^:]+:)?(\d+)$/.exec(String(revisionIdentity));
+      if (native && ['assistant', 'moderator'].includes(role)) {
+        writeNativeAskObservation.run(native[1], native[3], native[2] ? 1 : 0, at);
+      }
       const claimed = createInboundReceipt.run(
         normalizedReceiptId, String(role), Number(updateId), String(revisionIdentity),
         String(payloadFingerprint), claimId, at, at,
@@ -992,6 +1152,7 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         existing,
         collision,
       };
+      })();
     },
     completeInboundDelivery({ claim: inboundClaim, status, result }) {
       if (!inboundClaim || !['completed', 'skipped'].includes(status)) return { completed: false, row: null };
@@ -1162,9 +1323,140 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
       finish.run(status, result == null ? null : JSON.stringify(result), error, now(), eventId);
     },
     claimAssistantAskCleanup(input) { return claimAskCleanup(input); },
-    isAssistantAskCommandUnedited(input) { return askCommandUnedited(input); },
+    isAssistantAskCommandUnedited(input) {
+      return input?.durable === true ? durableAskCommandUnedited(input) : askCommandUnedited(input);
+    },
+    validateAssistantAskPromptCleanupClaim(input) { return durableAskCommandUnedited(input); },
     completeAssistantAskCleanup(input) { return { completed: finishAskCleanup(input) }; },
-    invalidateAssistantAskPrompt(input) { return { invalidated: invalidateAskPrompt(input) }; },
+    createAssistantAskPromptJob({ eventId, chatId, userId, commandMessageId, promptMessageId, timeoutMs = 30_000 }) {
+      return db.transaction(() => {
+        const ids = [chatId, userId, commandMessageId, promptMessageId].map(String);
+        const positiveId = (value) => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
+        const duration = Number(timeoutMs);
+        const expiresAt = Math.ceil(nowMs() + duration);
+        if (!/^-?[1-9]\d*$/.test(ids[0]) || !Number.isSafeInteger(Number(ids[0]))
+          || !ids.slice(1).every(positiveId) || ids[2] === ids[3]
+          || !Number.isFinite(duration) || duration <= 0 || duration > 300_000
+          || !Number.isSafeInteger(expiresAt)) return null;
+        const existing = askPromptJob.get(String(eventId));
+        if (existing) return existing.chat_id === ids[0] && existing.user_id === ids[1]
+          && existing.command_message_id === ids[2] && existing.prompt_message_id === ids[3] ? existing : null;
+        const source = event.get(String(eventId));
+        const candidate = { event_id: String(eventId), chat_id: ids[0], command_message_id: ids[2] };
+        if (source?.bot_role !== 'assistant' || source.status !== 'processing' || askCleanupAuthority(candidate) != null
+          || askPromptJobByPrompt.get(ids[0], ids[1], ids[3])) return null;
+        const at = now();
+        createAskPromptJob.run(String(eventId), ...ids, expiresAt, at, at);
+        if (askReplyObservation.get(ids[0], ids[1], ids[3])) receiveAskPromptQuestion.run(at, String(eventId));
+        return askPromptJob.get(String(eventId)) || null;
+      })();
+    },
+    observeAssistantAskPromptReply({ chatId, userId, promptMessageId }) {
+      return db.transaction(() => {
+      // The runtime admits only authenticated, same-actor, nonempty native
+      // replies to this seam; raw question text is deliberately not accepted.
+      if (!/^-?[1-9]\d*$/.test(String(chatId)) || !/^[1-9]\d*$/.test(String(userId))
+        || !/^[1-9]\d*$/.test(String(promptMessageId))) return { matched: false, row: null };
+      writeAskReplyObservation.run(String(chatId), String(userId), String(promptMessageId), now());
+      const row = askPromptJobByPrompt.get(String(chatId), String(userId), String(promptMessageId)) || null;
+      if (!row) return { matched: false, row: null };
+      if (row.state === 'pending') receiveAskPromptQuestion.run(now(), row.event_id);
+      return { matched: true, row: askPromptJob.get(row.event_id) || row };
+      })();
+    },
+    observeAssistantAskPromptAnswer({ chatId, userId, promptMessageId, answerEventId }) {
+      // Called only after a fully confirmed answer/fallback delivery. An
+      // existing authenticated reply observation is required; this never
+      // manufactures a question or persists the answer text.
+      if (answerEventId == null || event.get(String(answerEventId))?.bot_role !== 'assistant') {
+        return { observed: false };
+      }
+      return { observed: writeAskAnswerObservation.run(String(answerEventId), String(chatId),
+        String(userId), String(promptMessageId)).changes === 1 };
+    },
+    getAssistantAskPromptAnswerObservation({ chatId, userId, promptMessageId }) {
+      const observation = askReplyObservation.get(String(chatId), String(userId), String(promptMessageId));
+      return observation?.answer_event_id ? { answerEventId: observation.answer_event_id } : null;
+    },
+    claimNextExpiredAssistantAskPrompt() {
+      return db.transaction(() => {
+        // Bound work, but a skipped/invalid head must not starve later jobs.
+        for (let index = 0; index < 500; index++) {
+          const row = nextDueAskPromptJob.get(nowMs());
+          if (!row) return null;
+          const claim = claimAskPromptJob(row, 'expiry');
+          if (claim) return claim;
+        }
+        return null;
+      })();
+    },
+    claimNextCompletedAssistantAskPrompt() {
+      return db.transaction(() => {
+        for (let index = 0; index < 500; index++) {
+          const row = nextCompletedAskPromptJob.get();
+          if (!row) return null;
+          const claim = claimAskPromptJob(row, 'answer');
+          if (claim) return claim;
+        }
+        return null;
+      })();
+    },
+    claimAnsweredAssistantAskPrompt({ chatId, userId, promptMessageId, answerEventId = null }) {
+      return db.transaction(() => {
+      const row = askPromptJobByPrompt.get(String(chatId), String(userId), String(promptMessageId)) || null;
+      const claim = claimAskPromptJob(row?.state === 'question_received' ? row : null, 'answer');
+      if (!claim) return null;
+      const result = Object.freeze({ ...claim, answerEventId: answerEventId == null ? null : String(answerEventId) });
+      issuedAskClaims.add(result);
+      const eventRow = event.get(result.eventId);
+      let prior = null;
+      try { prior = JSON.parse(eventRow?.result_json); } catch { prior = null; }
+      if (prior?.askPrompt && prior.askPromptCleanup == null) {
+        writeAskResult.run(JSON.stringify({ ...prior, askPromptCleanup: {
+          state: 'calling', claimedAt: now(), ...(result.answerEventId ? { answerEventId: result.answerEventId } : {}),
+        } }), result.eventId, eventRow.result_json);
+      }
+      return result;
+      })();
+    },
+    getAssistantAskPromptJob({ chatId, userId, promptMessageId }) {
+      return askPromptJobByPrompt.get(String(chatId), String(userId), String(promptMessageId)) || null;
+    },
+    completeAssistantAskPromptJob({ claim: promptClaim, prompt, command }) {
+      if (!validAskClaim(promptClaim)) return { completed: false, row: null };
+      const uncertain = prompt?.state === 'uncertain' || command?.state === 'uncertain';
+      const state = uncertain ? 'uncertain' : 'finished';
+      const result = { prompt, command, source: promptClaim.source };
+      const completed = completeAskPromptJob.run(
+        state, JSON.stringify(result), uncertain ? 'delete_transport_unknown' : null, now(), now(),
+        promptClaim.eventId, promptClaim.claimId, promptClaim.claimGeneration,
+      ).changes === 1;
+      if (completed) {
+        const eventRow = event.get(promptClaim.eventId);
+        let prior = null;
+        try { prior = JSON.parse(eventRow?.result_json); } catch { prior = null; }
+        if (prior?.askPrompt && ['calling', undefined].includes(prior.askPromptCleanup?.state)) {
+          writeAskResult.run(JSON.stringify({ ...prior, askPromptCleanup: {
+            ...prior.askPromptCleanup, state: 'finished', completedAt: now(), prompt, command,
+            ...(promptClaim.answerEventId ? { answerEventId: promptClaim.answerEventId } : {}),
+          } }), promptClaim.eventId, eventRow.result_json);
+        }
+      }
+      return { completed, row: askPromptJob.get(promptClaim.eventId) || null };
+    },
+    assistantAskPromptStatus() {
+      return { states: Object.fromEntries(promptJobCounts.all().map((row) => [row.state, row.count])) };
+    },
+    invalidateAssistantAskPrompt(input) {
+      const legacy = invalidateAskPrompt(input);
+      const row = input.promptMessageId != null
+        ? askPromptJobByPrompt.get(String(input.chatId), String(input.userId), String(input.promptMessageId))
+        : input.commandMessageId != null
+          ? askPromptJobByCommand.get(String(input.chatId), String(input.userId), String(input.commandMessageId))
+          : null;
+      const job = row ? skipDurableAskPromptJob(row, 'command_edited') : false;
+      return { invalidated: legacy || job };
+    },
     /**
      * Запись состоявшейся модерации вместе с ценой вызова. Имя модели берётся
      * из самого вердикта (`decision.modelId`), а не из квитанции: вердикт
@@ -1182,14 +1474,6 @@ export function createRuntimeStore(db, { now = () => Math.floor(Date.now() / 100
         cost.inputTokens, cost.outputTokens, cost.totalTokens,
         now(),
       );
-    },
-    claimAssistantQuestion({ chatId, messageId }) {
-      const claimed = questionClaim.run(String(chatId), String(messageId), now()).changes === 1;
-      return { claimed, existing: claimed ? null : question.get(String(chatId), String(messageId)) };
-    },
-    completeAssistantQuestion({ chatId, messageId, outcome }) {
-      const result = completeQuestion.run(String(outcome), now(), String(chatId), String(messageId));
-      return { completed: result.changes === 1 };
     },
     getAssistantDisposition({ chatId, messageId }) {
       return disposition.get(String(chatId), String(messageId));

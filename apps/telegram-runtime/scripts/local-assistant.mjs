@@ -149,8 +149,9 @@ function createLabModeratorGuard() {
  */
 export function createDryProvider({ captured, domainCatalog = DEFAULT_DOMAIN_CATALOG }) {
   return {
-    async moderate() {
-      return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
+    async moderate(input) {
+      const { labSafetyVerdict } = await import('./lib/lab-safety.mjs');
+      return labSafetyVerdict(input);
     },
     async routeAssistant({ domainHints }) {
       if (Array.isArray(domainHints?.domains) && domainHints.domains.length) {
@@ -206,8 +207,9 @@ function createLiveProvider(env) {
   return {
     receipts,
     provider: {
-      async moderate() {
-        return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
+      async moderate(input) {
+        const { labSafetyVerdict } = await import('./lib/lab-safety.mjs');
+        return labSafetyVerdict(input);
       },
       async routeAssistant(payload) {
         const route = await provider.routeAssistant(payload);

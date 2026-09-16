@@ -14,6 +14,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { safetyVerdict } from './safety-fixture.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -103,7 +104,7 @@ function adapters(actions) {
 
 function fakeProvider({ route = { action: 'teach', sourceId: 'course-content-v1' } } = {}) {
   return {
-    async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'fake' }; },
+    async moderate({ text }) { return safetyVerdict({ message: text }); },
     async routeAssistant() { return route; },
     async answer(input) { return { text: `ответ на «${input.text}» (${input.route.action})`, modelId: 'answer-fake' }; },
   };

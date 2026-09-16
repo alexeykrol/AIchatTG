@@ -18,6 +18,7 @@ import { createTelegramRuntimeHttpServer } from '../src/http-server.mjs';
 import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
 import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from '../src/assistant-release.mjs';
 import { classifySafetyV3 } from '../src/safety-v3.mjs';
+import { safetyVerdict } from './safety-fixture.mjs';
 
 function config(overrides = {}) {
   return {
@@ -104,8 +105,9 @@ function adapters(actions) {
 
 function fakeLlm({ safetyRoute = 'clean', abuseLevel = null } = {}) {
   return {
-    async moderate() {
-      return { safetyRoute, abuseLevel, confidence: 0.98, reason: 'offline-fixture', modelId: 'fake' };
+    async moderate({ text, currentWeakStrikes = 0, warningStage = 'none' }) {
+      return safetyVerdict({ message: text, safetyRoute, abuseLevel,
+        context: { currentWeakStrikes, warningStage } });
     },
     async routeAssistant({ domainHints }) {
       return domainHints?.domains.includes('operations')
@@ -494,7 +496,6 @@ test('the Assistant answers every address to it and stays out of every other con
     const empty = await ask(620, '/ask');
     assert.equal(empty.command, 'ask_empty');
     assert.equal(lastSent(), ASSISTANT_EMPTY_ASK_TEXT);
-    assert.equal(lastSent(), '✍️ Теперь напишите вопрос в ответ на это сообщение и отправьте его. /ask повторно писать не нужно.');
     assert.equal(lastSentInput().forceReply, true);
     // Один тег без текста — тот же случай.
     assert.equal((await ask(630, '@assistant_bot')).command, 'ask_empty');
@@ -519,10 +520,13 @@ test('the Assistant answers every address to it and stays out of every other con
     ]);
     assert.equal(lastSentInput().replyToMessageId, '660');
 
-    // Ответ на сообщение ЧУЖОГO бота — не наше обращение, даже с тем же текстом.
+    // A reply to another bot is never an Assistant answer. The authenticated
+    // stream may still schedule the ordinary Moderator-owned judgement, but
+    // it must not create an Assistant delivery.
     const otherBotReply = { reply_to_message: { message_id: 91, from: { id: assistantBotId + 1, is_bot: true } } };
     const notOurs = await runtime.handleUpdate('assistant', update(671, 670, 'сколько стоит курс?', undefined, otherBotReply));
-    assert.equal(notOurs.reason, 'not_assistant_command');
+    assert.equal(notOurs.kind, 'moderated');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, replySendsBefore + 1);
 
     // Снятая команда отвечает детерминированно и не доходит до модели.
     const callsBeforeRetired = answerCalls;
@@ -531,31 +535,34 @@ test('the Assistant answers every address to it and stays out of every other con
     assert.equal(lastSent(), 'Команда /ai больше не поддерживается. Используйте /ask ваш вопрос.');
     assert.equal(answerCalls, callsBeforeRetired);
 
-    // К боту не обратились — он не лезет в чужой разговор.
+    // К Ассистенту не обратились — ответа нет. The authenticated Assistant
+    // stream may nonetheless schedule the one Moderator-owned judgement for
+    // the ordinary post; it must never send an Assistant reply.
     const sendsBefore = actions.filter(([kind]) => kind === 'send').length;
     const ignored = await runtime.handleUpdate('assistant', update(650, 650, 'ребята, кто прошёл третий модуль?'));
-    assert.equal(ignored.reason, 'not_assistant_command');
+    assert.equal(ignored.kind, 'moderated');
     assert.equal(actions.filter(([kind]) => kind === 'send').length, sendsBefore);
-    // Чужой бот — тоже не наше обращение.
-    assert.equal((await runtime.handleUpdate('assistant', update(651, 651, '@other_bot привет'))).reason, 'not_assistant_command');
+    // Чужой бот — тоже не наше обращение and remains a Moderator-owned post.
+    assert.equal((await runtime.handleUpdate('assistant', update(651, 651, '@other_bot привет'))).kind, 'moderated');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, sendsBefore);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
-test('Assistant fails closed before the claim, model and delivery boundary without a matching moderator result', async () => {
+test('an Assistant-only address owns one clean judgement before its answer', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
-  let routeCalls = 0;
+  let moderationCalls = 0;
   const provider = fakeLlm();
-  provider.routeAssistant = async () => { routeCalls++; return { action: 'teach', sourceId: 'course-content-v1' }; };
+  const moderate = provider.moderate;
+  provider.moderate = async (input) => { moderationCalls++; return moderate(input); };
   const runtime = createTelegramRuntime({ config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions) });
   try {
     const result = await runtime.handleUpdate('assistant', update(4, 51, '/ask hello'));
-    assert.equal(result.kind, 'skipped');
-    assert.equal(result.reason, 'moderator_unavailable');
-    assert.equal(routeCalls, 0);
-    assert.equal(actions.length, 0);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_question_claims').get().count, 0);
+    assert.equal(result.kind, 'answered');
+    assert.equal(moderationCalls, 1);
+    assert.deepEqual(actions.map(([kind]) => kind), ['send']);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_question_claims').get().count, 1);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
@@ -578,8 +585,8 @@ test('blocked and edited-revision dispositions never unlock an Assistant answer'
     });
     await cleanRuntime.handleUpdate('moderator', update(7, 53, '/ask original'));
     const edited = await cleanRuntime.handleUpdate('assistant', editedUpdate(8, 53, '/ask changed'));
-    assert.equal(edited.reason, 'moderator_unavailable');
-    assert.equal(actions.filter(([kind]) => kind === 'send').length, 0);
+    assert.equal(edited.kind, 'answered');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, 1);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
@@ -1066,7 +1073,7 @@ test('a poisoned dialogue turn does not break the next answer', async () => {
   // вход ответа, поэтому только так тест доказывает сборку запроса, а не
   // милосердие фикстуры.
   const sentRequests = [];
-  const provider = createProviderAdapter(enabledProviderConfig(), {
+  const providerAdapter = createProviderAdapter(enabledProviderConfig(), {
     async fetchFn(_url, init) {
       const body = JSON.parse(init.body);
       sentRequests.push(body);
@@ -1086,6 +1093,13 @@ test('a poisoned dialogue turn does not break the next answer', async () => {
       };
     },
   });
+  const provider = {
+    moderate: async ({ text, currentWeakStrikes, warningStage }) => safetyVerdict({
+      message: text, safetyRoute: 'clean', context: { currentWeakStrikes, warningStage },
+    }),
+    routeAssistant: (input) => providerAdapter.routeAssistant(input),
+    answer: (input) => providerAdapter.answer(input),
+  };
   const runtime = createTelegramRuntime({
     config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
     store, provider, knowledge: availableKnowledge(), ...adapters(actions),
@@ -1100,12 +1114,8 @@ test('a poisoned dialogue turn does not break the next answer', async () => {
     }, { maxTurns: 3, ttlSeconds: 604_800 });
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM runtime_assistant_turns').get().count, 1);
 
-    // Модератор здесь не предмет теста: вердикт кладётся напрямую, чтобы
-    // настоящий провайдер обслуживал только маршрут и ответ.
-    store.upsertAssistantDisposition({
-      chatId: '-100', messageId: '750', status: 'allowed', verdict: 'clean', reason: 'fixture',
-      moderationMessageId: '-100:750', moderationEventId: 'moderator:750',
-    });
+    // The Assistant-only stream owns its valid clean judgement, while the
+    // real adapter below remains responsible for routing and answering.
     const answered = await runtime.handleUpdate('assistant', update(751, 750, '/ask что такое агент'));
     assert.equal(answered.kind, 'answered');
     // Отравленный ход отфильтрован при сборке запроса, а не «протащен» к модели
@@ -1226,9 +1236,10 @@ test('a terminal webhook receipt is persisted once and replayed deterministicall
   const actions = [];
   let moderationCalls = 0;
   const provider = fakeLlm();
-  provider.moderate = async () => {
+  provider.moderate = async ({ text, currentWeakStrikes, warningStage }) => {
     moderationCalls++;
-    return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' };
+    return safetyVerdict({ message: text, safetyRoute: 'clean', confidence: 1,
+      context: { currentWeakStrikes, warningStage } });
   };
   const loaded = config({ ingressEnabled: true, moderationMode: 'shadow' });
   const runtime = createTelegramRuntime({
@@ -1293,7 +1304,7 @@ test('concurrent redelivery observes the active fenced claim and never runs it t
     });
     assert.equal(moderationCalls, 1);
 
-    releaseModeration({ safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' });
+    releaseModeration(await safetyVerdict({ message: delivery.message.text, safetyRoute: 'clean', confidence: 1 }));
     const completed = await first;
     const replay = await runtime.handleUpdate('moderator', delivery);
     assert.deepEqual(replay, completed);
@@ -1307,9 +1318,10 @@ test('original and edited revisions remain separate inbound receipts', async () 
   const actions = [];
   let moderationCalls = 0;
   const provider = fakeLlm();
-  provider.moderate = async () => {
+  provider.moderate = async ({ text, currentWeakStrikes, warningStage }) => {
     moderationCalls++;
-    return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'fixture', modelId: 'fake' };
+    return safetyVerdict({ message: text, safetyRoute: 'clean', confidence: 1,
+      context: { currentWeakStrikes, warningStage } });
   };
   const runtime = createTelegramRuntime({
     config: config(), store: createRuntimeStore(db), provider, knowledge: availableKnowledge(), ...adapters(actions),
@@ -1419,7 +1431,7 @@ test('unproven Guard rights fail closed before a destructive safety plan reaches
     knowledge: availableKnowledge(), ...guarded,
   });
   try {
-    const moderated = await runtime.handleUpdate('moderator', update(501, 101, 'unsafe'));
+    const moderated = await runtime.handleUpdate('moderator', update(501, 101, '/ask unsafe'));
     assert.deepEqual({ verdict: moderated.verdict, action: moderated.action }, { verdict: 'ban', action: 'guard_unproven' });
     assert.equal(actions.length, 0);
     assert.deepEqual(db.prepare(`SELECT status, error_code FROM runtime_moderation_enforcement_receipts

@@ -14,6 +14,7 @@ import { botIdFromToken } from '@aichattg/telegram-core';
 import { createTelegramRuntime } from './runtime.mjs';
 import { createTelegramRuntimeHttpServer } from './http-server.mjs';
 import { createModeratorRecoveryWorker } from './moderator-recovery.mjs';
+import { createAssistantAskExpiryWorker } from './assistant-ask-expiry.mjs';
 import { loadDomainCatalog } from './assistant-domains.mjs';
 
 const config = loadRuntimeConfig();
@@ -105,14 +106,17 @@ const recoveryWorker = createModeratorRecoveryWorker({
   intervalSec: config.moderatorRecoveryIntervalSec,
   batchSize: config.moderatorRecoveryBatchSize,
 });
+const askExpiryWorker = createAssistantAskExpiryWorker({ runtime });
 
 server.listen(config.port, () => {
   console.log(`[telegram-runtime] listening on ${config.port}; ingress=${config.ingressEnabled}; poll=false; webhook-registration=false; commands=false`);
   recoveryWorker.start();
+  askExpiryWorker.start();
 });
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
     recoveryWorker.stop();
+    askExpiryWorker.stop();
     server.close(() => { database.close(); process.exit(0); });
   });
 }

@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { safetyVerdict } from './safety-fixture.mjs';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -81,6 +82,8 @@ function adapters(actions) {
     guard: {
       async verifyEnforcement() { return { proven: true, status: 'administrator' }; },
       async senderDisposition() { return { proven: true, exempt: false, reason: null }; },
+      async deleteMessage() { actions.push(['delete']); return { ok: true }; },
+      async banAuthor() { actions.push(['ban']); return { ok: true }; },
     },
     assistantTelegram: {
       async sendMessage(input) { actions.push(['send', input]); return { ok: true, data: { message_id: 90 } }; },
@@ -91,7 +94,7 @@ function adapters(actions) {
 
 function fakeProvider() {
   return {
-    async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'fake' }; },
+    async moderate({ text }) { return safetyVerdict({ message: text }); },
     async routeAssistant({ domainHints }) {
       return domainHints?.domains.includes('operations')
         ? { action: 'support', sourceId: 'course-operations-v1' }
@@ -800,15 +803,21 @@ withRuntime('a synthetic sender is answered without a moderation verdict that ca
 });
 
 // Живой человек под обход не попадает ни при какой конфигурации: он не бот.
-withRuntime('a human still waits for the moderator even with synthetic testing on', async ({ store }) => {
+withRuntime('a human still requires a semantic judgement with synthetic testing on', async ({ store }) => {
   const actions = [];
+  let judgements = 0;
+  const provider = { ...fakeProvider(), async moderate({ text }) {
+    judgements += 1;
+    return safetyVerdict({ message: text });
+  } };
   const runtime = createTelegramRuntime({
     config: config({ syntheticTestingEnabled: true, assistantModerationWaitMs: 0 }),
-    store, provider: fakeProvider(), knowledge: availableKnowledge(), ...adapters(actions),
+    store, provider, knowledge: availableKnowledge(), ...adapters(actions),
   });
   const result = await runtime.handleUpdate('assistant', update(501, 501, '/ask что такое агент?'));
-  assert.equal(result.kind, 'skipped');
-  assert.equal(result.reason, 'moderator_unavailable');
+  assert.equal(result.kind, 'answered');
+  assert.equal(judgements, 1);
+  assert.notEqual(result.moderation.reason, 'synthetic_sender_unmoderated');
 });
 
 // Выключенный режим не оставляет лазейки: конфиг не даёт списку синтетиков пережить
@@ -828,8 +837,10 @@ withRuntime('with synthetic testing off the bypass does not exist', async ({ sto
       text: '/ask что такое агент?',
     },
   });
-  assert.equal(result.kind, 'skipped');
-  assert.equal(result.reason, 'bot_sender');
+  assert.equal(result.kind, 'moderated');
+  assert.equal(actions.some(([kind]) => kind === 'send'), false);
+  assert.equal(actions.some(([kind]) => kind === 'ban'), true,
+    'without the explicit synthetic exemption the existing Moderator bot policy still applies');
 });
 
 // Замер 2026-08-16 (ритуал Р для Ф3): из 30 вопросов синтетика ответ получили 4,

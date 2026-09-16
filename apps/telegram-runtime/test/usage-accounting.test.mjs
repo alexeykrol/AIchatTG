@@ -36,6 +36,7 @@ import {
 } from '../src/database.mjs';
 import { providerCallUsage } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { safetyVerdict } from './safety-fixture.mjs';
 
 const RUNTIME_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const JOURNAL_READER = join(RUNTIME_DIR, '..', '..', 'scripts', 'aichattg', 'analyzer-journal.cjs');
@@ -126,10 +127,11 @@ function safetyUsage(inputTokens, outputTokens, calls = 2) {
 /** Провайдер, называющий расход каждого вызова — как настоящий. */
 function billedProvider() {
   return {
-    async moderate() {
+    async moderate(input) {
+      const verdict = await safetyVerdict({ message: input.text, confidence: 0.98 });
       return {
-        safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'safety-model',
-        safetyTrace: { usage: safetyUsage(640, 44) },
+        ...verdict, modelId: 'safety-model',
+        safetyTrace: { ...verdict.safetyTrace, usage: safetyUsage(640, 44) },
       };
     },
     async routeAssistant() {
@@ -147,7 +149,7 @@ function billedProvider() {
 /** Провайдер, не назвавший расход ни разу: тело ответа пришло без usage. */
 function silentProvider() {
   return {
-    async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'safety-model' }; },
+    async moderate(input) { return { ...await safetyVerdict({ message: input.text, confidence: 0.98 }), modelId: 'safety-model' }; },
     async routeAssistant() { return { action: 'teach', sourceId: 'course-content-v1' }; },
     async answer(input) { return { text: `ответ на «${input.text}»`, modelId: 'answer-model' }; },
   };
@@ -268,7 +270,7 @@ withRuntime('the moderation call every message pays for is recorded with its tok
 withRuntime('an exempt sender is judged without a call, so nothing is billed to it', async ({ db, store }) => {
   const actions = [];
   let calls = 0;
-  const provider = { ...billedProvider(), async moderate() { calls++; return { safetyRoute: 'clean', confidence: 1, reason: 'fixture' }; } };
+  const provider = { ...billedProvider(), async moderate(input) { calls++; return safetyVerdict({ message: input.text, confidence: 1 }); } };
   const exempt = adapters(actions);
   exempt.guard = { ...exempt.guard, async senderDisposition() { return { proven: true, exempt: true, reason: 'exempt_admin' }; } };
   const runtime = createTelegramRuntime({
@@ -338,11 +340,12 @@ withRuntime('a moderation call paid before a crash keeps its cost in the recover
   const actions = [];
   let calls = 0;
   const paid = {
-    async moderate() {
+    async moderate(input) {
       calls++;
+      const verdict = await safetyVerdict({ message: input.text, confidence: 0.99 });
       return {
-        safetyRoute: 'clean', abuseLevel: null, confidence: 0.99, reason: 'fixture', modelId: 'safety-model',
-        safetyTrace: { usage: safetyUsage(512, 33, 1) },
+        ...verdict, modelId: 'safety-model',
+        safetyTrace: { ...verdict.safetyTrace, usage: safetyUsage(512, 33, 1) },
       };
     },
   };
