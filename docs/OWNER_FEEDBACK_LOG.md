@@ -19,6 +19,27 @@ Newest entries first.
 
 ---
 
+## 2026-09-16 — Partial-knowledge reply exposes an internal field name
+
+**Owner feedback relayed by task «Ассистент»:** a live answer about course
+coverage of agent orchestration shows a «Покрытие знания» heading, claims the
+content source is unavailable, falls back to a general course description,
+and exposes `missingDomains: content`. The reported footer is2.4.38.
+The owner asks whether this means missing materials and what grounds the answer.
+
+**Local source evidence:** root confirmed that the current answer prompt asks
+the model to describe uncovered portions using `domainCoverage` and
+`missingDomains`; those fields are also passed in the answer payload. This
+supports the worker's partial-domain-answer hypothesis, but does not identify
+the actual production event, selected entries or missing-source reason.
+
+**Status: inconclusive, read-only diagnosis in progress.** Exact live source
+admission versus retrieval abstention versus retrieval fault is not verified.
+No fresh paid call, Telegram replay, production query or code change was made
+by root for this feedback. Candidate2c72e01 stays frozen and does not claim to
+fix this separate answer-quality symptom. Preserve the distinction between a
+human-readable coverage explanation and leaking internal field names.
+
 ## 2026-09-16 — Preserve regression cases and explicit30-second hint wording
 
 **Owner instruction relayed by task «Ассистент»**
