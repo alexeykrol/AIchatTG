@@ -44,3 +44,14 @@ Revalidated inspected source SHA-256:
 
 All subsequent repairs need a new frozen-diff review. The production release
 remainsa41518f/Assistant2.4.38; its lease was closed before this local work.
+
+## Root scope finding after the timer checkpoint
+
+Root found new Assistant-self routing changes in the evolving worker diff:
+generic «ИИ-ассистент» plus architecture/training/upload/custom-task wording
+was being classified as internal details. This is outside the ask-protocol
+reservation and risks suppressing legitimate course questions. Root rejected
+that addition and its new self-routing assertion pending separate explicit
+owner scope; baseline public/course routing must remain intact. New timer
+Help/hint sentences are visible-copy candidates, not automatically approved
+wording, and must not imply that a late question will be rejected.
