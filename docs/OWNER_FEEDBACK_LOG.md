@@ -19,6 +19,40 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Find repeated profile-bait spam and prepare immediate sanctions
+
+**Reported / requested:** relayed from «Модератор», task
+`019fd023-a949-7961-87cd-693bcb893e2c`: the owner first reported a repeated
+suspected-bot pattern and then clarified: «Ты должен их найти, чтобы потом
+модератор умел находить такие паттерны и тут же блокировать, удаляя всё сразу.»
+The later request is for blocking plus message cleanup, not only private review.
+
+**Evidence / diagnosis:** root visually inspected the supplied screenshot.
+It shows one profile-visit solicitation with adult-themed emoji. This supplies
+an exemplar and partly supersedes the earlier missing-example/action ambiguity.
+The crop does not identify a stable chat, sender or message ID, or a calendar
+date; a display name is not an account identifier. Repetition, additional
+accounts, automation and a common operator remain unconfirmed. Private message
+content and the image are not copied into Git. The thread reader returned no
+message bodies, so the owner's wording above is attributed to the worker's
+relay rather than claimed as an independently re-read transcript.
+
+**Recommendation / next boundary:** inspect existing authorized Moderator
+evidence and source capabilities with bounded read-only checks, then propose
+an exact-pattern candidate with positive and legitimate-context negative tests.
+Determine stable targets and whether cleanup covers matching messages, a bounded
+sender history, or another explicitly approved scope before live sanctions.
+Do not infer new Telegram history access, collect unrelated chats, inspect News,
+or broaden this request to banning by display name, emoji or language alone.
+
+**Status: proposed.** No new detector, library entry, active sanction, data
+collection, push or deployment follows from this record. The worker's local
+capability inspection is read-only; a production lookup has not been run by
+root for this report. A source-writing charter and an exact production
+scope/lease remain separate. This feedback answers neither pending bridge
+availability nor post-erasure marker decision. Existing Review3.3.0 stays
+disabled/local; the frozen bridge files are unchanged.
+
 ## 2026-09-15 — Deploy the prepared cost-analytics Console
 
 **Requested:** «Деплой.» in «Админка», actual message
