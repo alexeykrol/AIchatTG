@@ -129,23 +129,23 @@ export function createGuardAdapter({
     return { proven: true, exempt: false, reason: null };
   }
 
-  async function callWithProof(chatId, invoke, fallback, beforeInvoke = null) {
+  async function callWithProof(chatId, invoke, fallback, beforeInvoke = null, preconditionFailure = 'action_precondition_unproven') {
     const proof = await verifyEnforcement({ chatId });
     if (!proof.proven) return { ok: false, skipped: proof.reason, uncertain: false };
     if (beforeInvoke != null) {
       try {
         // A synchronous literal-true predicate closes the local edit race at
         // the final boundary. Never await it: false, a Promise or a throw is
-        // not permission to mutate a message after the live rights lookup.
+        // not permission to execute an action after the live rights lookup.
         const decision = typeof beforeInvoke === 'function' ? beforeInvoke() : null;
         if (decision !== true) {
           // Refuse accidental async predicates without leaving a rejected
           // Promise unhandled. This does not await or authorize the decision.
           if (decision && typeof decision.then === 'function') Promise.resolve(decision).catch(() => {});
-          return { ok: false, skipped: 'delete_precondition_unproven', uncertain: false };
+          return { ok: false, skipped: preconditionFailure, uncertain: false };
         }
       } catch {
-        return { ok: false, skipped: 'delete_precondition_unproven', uncertain: false };
+        return { ok: false, skipped: preconditionFailure, uncertain: false };
       }
     }
     try {
@@ -170,26 +170,26 @@ export function createGuardAdapter({
     verifyPinGovernance,
     senderDisposition,
     deleteMessage({ chatId, messageId, beforeDelete = null }) {
-      return callWithProof(chatId, () => telegram.deleteMessage({ chatId: String(chatId), messageId: String(messageId) }), 'delete_failed', beforeDelete);
+      return callWithProof(chatId, () => telegram.deleteMessage({ chatId: String(chatId), messageId: String(messageId) }), 'delete_failed', beforeDelete, 'delete_precondition_unproven');
     },
-    sendWarning({ chatId, messageId, text }) {
+    sendWarning({ chatId, messageId, text, beforeAction = null }) {
       return callWithProof(chatId, () => telegram.sendMessage({
         chatId: String(chatId), text: String(text), replyToMessageId: String(messageId),
-      }), 'warning_failed');
+      }), 'warning_failed', beforeAction);
     },
-    banAuthor({ chatId, userId = null, senderChatId = null }) {
+    banAuthor({ chatId, userId = null, senderChatId = null, beforeAction = null }) {
       if (senderChatId != null && String(senderChatId)) {
         if (typeof telegram.banSenderChat !== 'function') {
           return Promise.resolve({ ok: false, skipped: 'ban_sender_chat_unsupported', uncertain: false });
         }
         return callWithProof(chatId, () => telegram.banSenderChat({
           chatId: String(chatId), senderChatId: String(senderChatId),
-        }), 'ban_sender_chat_failed');
+        }), 'ban_sender_chat_failed', beforeAction);
       }
       if (userId == null || String(userId) === '') {
         return Promise.resolve({ ok: false, skipped: 'author_identity_missing', uncertain: false });
       }
-      return callWithProof(chatId, () => telegram.banMember({ chatId: String(chatId), userId: String(userId) }), 'ban_failed');
+      return callWithProof(chatId, () => telegram.banMember({ chatId: String(chatId), userId: String(userId) }), 'ban_failed', beforeAction);
     },
     unpinMessage({ chatId, messageId }) {
       if (typeof telegram.unpinMessage !== 'function') {

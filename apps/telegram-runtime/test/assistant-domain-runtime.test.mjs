@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { safetyVerdict } from './safety-fixture.mjs';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,7 +78,7 @@ function createRig(t, { catalog, route, knowledge, sourceRetrievals, safetyRoute
     config: config(), store, domainCatalog: catalog, sourceRetrievals,
     durableAnswerReceipts: true, knowledge: knowledgeAdapter,
     provider: {
-      async moderate() { return { safetyRoute, abuseLevel: null, confidence: 0.99, modelId: 'offline-safety' }; },
+      async moderate({ text }) { return safetyVerdict({ message: text, safetyRoute, confidence: 0.99 }); },
       async routeAssistant(input) {
         calls.route.push(input);
         if (routerError) throw routerError;

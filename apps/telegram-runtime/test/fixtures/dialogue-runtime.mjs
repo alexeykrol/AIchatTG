@@ -48,8 +48,9 @@ export function dialogueRuntime(databasePath, { mode = 'dispatch', turnLimit = 3
   };
   const runtime = createTelegramRuntime({
     config, store,
-    provider: { ...wire, async moderate() {
-      return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.98, reason: 'fixture', modelId: 'fake' };
+    provider: { ...wire, async moderate({ text }) {
+      const { safetyVerdict } = await import('../safety-fixture.mjs');
+      return safetyVerdict({ message: text });
     } },
     analyzer: createAnalyzerAdapter({ config: { mode, chatIds: ['-100', '-200'] }, provider: wire, spec: runtimeAnalyzerSpec().spec }),
     contentRetrieval: { available: true, async forQuestion(input) {

@@ -64,7 +64,7 @@ export const ASSISTANT_HELP_TEXT = [
  * `detectAssistantQuestion` принимает ответ на него без `/ask`.
  */
 export const ASSISTANT_EMPTY_ASK_TEXT = '✍️ Теперь напишите вопрос в ответ на это сообщение и отправьте его.'
-  + ' /ask повторно писать не нужно.';
+  + ' У вас 30 секунд, чтобы послать вопрос. /ask повторно писать не нужно.';
 
 /**
  * `/ai` вызовом ассистента больше не является. Молча игнорировать её нельзя:
@@ -77,6 +77,12 @@ export const ASSISTANT_UNAVAILABLE_TEXT = [
   'Подключённые учебные материалы сейчас проходят отдельную проверку, поэтому я не буду угадывать ответ или ссылку.',
   'Пока могу помочь со способом обращения ко мне: используйте /ask ваш вопрос или /help.',
 ].join(' ');
+
+// This operational fallback is deliberately not the materials-unavailable
+// message: a rejected safety-router contract says nothing about the course
+// corpus. It is code-owned, does not blame the user, and contains no provider
+// or safety implementation detail. Visible copy remains release-reviewable.
+export const ASSISTANT_ROUTER_FAILURE_TEXT = 'Сейчас не удалось обработать вопрос. Попробуйте, пожалуйста, позже.';
 
 /**
  * The honest abstention. It is deliberately a delivered message rather than

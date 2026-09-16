@@ -258,6 +258,39 @@ function reasonFor(route, router, abuse) {
   return 'safety:clean';
 }
 
+/** Revalidate the provider-neutral result at the private submission boundary.
+ * Platform actions, targets, counters and public warning copy are forbidden.
+ * The required v3 trace's verbatim spans and severity basis are checked
+ * against the persisted raw source and warning context a second time. */
+export function validateJudgementSemantic(value, message, context = {}) {
+  const allowed = new Set(['safetyRoute', 'abuseLevel', 'confidence', 'reason', 'quote',
+    'modelId', 'policyVersion', 'safetyTrace', 'receipt']);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !allowed.has(key))
+    || !['clean', 'abuse', 'threat'].includes(value.safetyRoute)
+    || typeof value.confidence !== 'number' || !Number.isFinite(value.confidence)
+    || value.confidence < 0 || value.confidence > 1
+    || (value.modelId != null && (typeof value.modelId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,119}$/.test(value.modelId)))
+    || (value.safetyRoute === 'abuse' ? !['weak', 'strong'].includes(value.abuseLevel) : value.abuseLevel != null)
+    || (value.quote && (typeof value.quote !== 'string' || !message.includes(value.quote)))) return false;
+  if (!value.safetyTrace) return false;
+  const trace = value.safetyTrace;
+  const router = parseSafetyRouterVerdict(JSON.stringify(trace.router), message);
+  if (!router || router.context_used !== router.abuse.types.includes('warning_dispute')
+    || (router.context_used && !warningContextAvailable(normalizeSafetyContext(context)))) return false;
+  const route = safetyRoute(router);
+  if (route !== value.safetyRoute) return false;
+  if (route !== 'abuse') return trace.abuseClassifier == null && value.abuseLevel == null
+    && value.confidence === (route === 'threat' ? router.threat.confidence
+      : Math.min(router.threat.confidence, router.abuse.confidence));
+  const abuse = parseAbuseSeverityVerdict(JSON.stringify(trace.abuseClassifier));
+  return Boolean(abuse && abuse.severity === value.abuseLevel
+    && value.confidence === Math.min(router.abuse.confidence, abuse.confidence)
+    && ABUSE_BASIS_TYPES[abuse.basis]?.size
+    && router.abuse.types.some((type) => ABUSE_BASIS_TYPES[abuse.basis].has(type))
+    && (abuse.basis !== 'warning_dispute' || warningContextAvailable(normalizeSafetyContext(context))));
+}
+
 /**
  * Execute the two-stage deployed Moderator contract through one injected,
  * non-retrying transport. `invoke` receives prebuilt code-owned payloads and

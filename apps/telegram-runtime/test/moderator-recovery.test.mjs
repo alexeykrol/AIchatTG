@@ -9,6 +9,7 @@ import { ProviderRequestError, ProviderUnavailableError } from '../src/provider-
 import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createModeratorRecoveryWorker } from '../src/moderator-recovery.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { safetyVerdict } from './safety-fixture.mjs';
 
 function config(overrides = {}) {
   return {
@@ -68,6 +69,14 @@ function weakDecision() {
   return { safetyRoute: 'abuse', abuseLevel: 'weak', confidence: 1, reason: 'fixture', modelId: 'fixture' };
 }
 
+async function providerDecision(input, decision) {
+  return { ...await safetyVerdict({
+    message: input.text, safetyRoute: decision.safetyRoute, abuseLevel: decision.abuseLevel,
+    confidence: decision.confidence,
+    context: { currentWeakStrikes: input.currentWeakStrikes, warningStage: input.warningStage },
+  }), modelId: decision.modelId };
+}
+
 function assertFirstWeakPolicy(policy) {
   assert.deepEqual({
     safetyRoute: policy.safetyRoute, abuseLevel: policy.abuseLevel,
@@ -98,10 +107,10 @@ function withRuntime({ provider, now = 100, runtimeConfig = {}, actions = [], te
 test('only a pre-request unavailable provider judgement is safely recovered once from its minimal private snapshot', async () => {
   let calls = 0;
   const context = withRuntime({
-    provider: { async moderate() {
+    provider: { async moderate(input) {
       calls++;
       if (calls === 1) throw new ProviderUnavailableError('provider_disabled');
-      return { ...cleanDecision(), reason: 'provider rationale', quote: 'recoverable private text' };
+      return providerDecision(input, cleanDecision());
     } },
   });
   try {
@@ -154,8 +163,30 @@ test('a stale calling judgement becomes manual review and is never automatically
       WHERE event_id = 'moderator:2'`).get(), {
       state: 'manual_review', provider_boundary: 'unknown', error_code: 'provider_outcome_unknown',
     });
-    release(cleanDecision());
+    release(await providerDecision({ text: 'calling text' }, cleanDecision()));
     await first;
+  } finally { context.close(); }
+});
+
+test('an extra provider quote is rejected without leaking it into receipts or retrying judgement', async () => {
+  let calls = 0;
+  const providerOnlyQuote = 'provider-only private quote';
+  const context = withRuntime({ provider: { async moderate(input) {
+    calls++;
+    return { ...await providerDecision(input, cleanDecision()), quote: providerOnlyQuote };
+  } } });
+  try {
+    const result = await context.runtime.handleUpdate('moderator', update(3, 13, 'ordinary private input'));
+    assert.equal(result.kind, 'moderation_manual_review');
+    assert.equal(result.reason, 'invalid_judgement_submission');
+    const job = context.store.getModeratorJudgement('moderator:3');
+    assert.equal(job.state, 'manual_review');
+    assert.equal(job.decision_json, null);
+    assert.equal(JSON.stringify(context.store.getInboundDelivery('moderator:3')).includes(providerOnlyQuote), false);
+    assert.equal(context.store.getModerationEnforcement('moderator:3'), null);
+    assert.equal((await context.runtime.recoverModeratorJudgements({ limit: 2 })).recovered, 0);
+    assert.equal(calls, 1);
+    assert.deepEqual(context.actions, []);
   } finally { context.close(); }
 });
 
@@ -183,7 +214,7 @@ test('transport, HTTP-shaped provider errors and invalid verdicts all require ma
 
 test('resolved judgement is never reconsidered, and expiring a bounded snapshot turns pending safe retry into manual review', async () => {
   let calls = 0;
-  const context = withRuntime({ provider: { async moderate() { calls++; return cleanDecision(); } } });
+  const context = withRuntime({ provider: { async moderate(input) { calls++; return providerDecision(input, cleanDecision()); } } });
   try {
     await context.runtime.handleUpdate('moderator', update(30, 40, 'resolved exactly once'));
     assert.equal(calls, 1);
@@ -210,7 +241,7 @@ test('a persisted decision before enforcement recovers its fixed Guard plan with
   let providerCalls = 0;
   const context = withRuntime({
     runtimeConfig: { moderationMode: 'live' },
-    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+    provider: { async moderate(input) { providerCalls++; return providerDecision(input, threatDecision()); } },
     testHooks: { async afterDecisionReady() { throw new Error('crash_after_decision_ready'); } },
   });
   try {
@@ -238,7 +269,7 @@ test('a persisted decision before enforcement recovers its fixed Guard plan with
     assert.equal(context.db.prepare(`SELECT COUNT(*) AS count FROM runtime_moderation_records
       WHERE event_id = 'moderator:40'`).get().count, 1);
     assert.deepEqual(context.store.getAssistantDisposition({ chatId: '-100', messageId: '50' }), {
-      chat_id: '-100', message_id: '50', status: 'blocked', moderation_message_id: '-100:50', verdict: 'ban',
+      chat_id: '-100', message_id: '50', status: 'blocked', moderation_message_id: '-100:50:original', verdict: 'ban',
       reason: 'moderator_decision_recovered', moderation_event_id: 'moderator:40', created_at: 100, updated_at: 100,
     });
   } finally { context.close(); }
@@ -248,7 +279,7 @@ test('a planned receipt resumes exactly once after a crash before the first Guar
   let providerCalls = 0;
   const context = withRuntime({
     runtimeConfig: { moderationMode: 'live' },
-    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+    provider: { async moderate(input) { providerCalls++; return providerDecision(input, threatDecision()); } },
     testHooks: { async afterEnforcementPlanned() { throw new Error('crash_after_enforcement_planned'); } },
   });
   try {
@@ -283,7 +314,7 @@ test('a weak decision keeps its atomically reserved first-warning policy after a
   let providerCalls = 0;
   const context = withRuntime({
     runtimeConfig: { moderationMode: 'live' },
-    provider: { async moderate() { providerCalls++; return weakDecision(); } },
+    provider: { async moderate(input) { providerCalls++; return providerDecision(input, weakDecision()); } },
     testHooks: { async afterDecisionReady() { throw new Error('crash_after_atomic_weak_decision'); } },
   });
   try {
@@ -322,7 +353,7 @@ test('a legacy decision-ready weak plan without its receipt and reservation is q
   let providerCalls = 0;
   const context = withRuntime({
     runtimeConfig: { moderationMode: 'live' },
-    provider: { async moderate() { providerCalls++; return weakDecision(); } },
+    provider: { async moderate(input) { providerCalls++; return providerDecision(input, weakDecision()); } },
     testHooks: { async afterDecisionReady() { throw new Error('simulate_d71_decision_ready'); } },
   });
   try {
@@ -411,7 +442,7 @@ test('calling and uncertain Guard receipts are terminal recovery boundaries and 
   const pendingBan = new Promise((resolve) => { releaseBan = resolve; });
   const context = withRuntime({
     runtimeConfig: { moderationMode: 'live' },
-    provider: { async moderate() { providerCalls++; return threatDecision(); } },
+    provider: { async moderate(input) { providerCalls++; return providerDecision(input, threatDecision()); } },
   });
   try {
     const service = adapters(context.actions);
@@ -421,7 +452,7 @@ test('calling and uncertain Guard receipts are terminal recovery boundaries and 
     };
     context.runtime = createTelegramRuntime({
       config: config({ moderationMode: 'live' }), store: context.store,
-      provider: { async moderate() { providerCalls++; return threatDecision(); } }, ...service,
+      provider: { async moderate(input) { providerCalls++; return providerDecision(input, threatDecision()); } }, ...service,
     });
     const running = context.runtime.handleUpdate('moderator', update(42, 52, 'calling guard boundary'));
     await new Promise((resolve) => setImmediate(resolve));
@@ -459,7 +490,7 @@ test('calling and uncertain Guard receipts are terminal recovery boundaries and 
 });
 
 test('a stale safe-retry lease cannot cross the provider boundary after a newer worker claim', () => {
-  const context = withRuntime({ provider: { async moderate() { return cleanDecision(); } } });
+  const context = withRuntime({ provider: { async moderate(input) { return providerDecision(input, cleanDecision()); } } });
   try {
     context.store.claimInboundDelivery({
       receiptId: 'moderator:99', role: 'moderator', updateId: 99, revisionIdentity: '-100:99', payloadFingerprint: 'f'.repeat(64),

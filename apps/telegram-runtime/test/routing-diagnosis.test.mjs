@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { safetyVerdict } from './safety-fixture.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +26,7 @@ function rig(t, { route = { domains: ['operations'] }, observation = null, mode 
       assistantKnowledgeEnabled: true, assistantCooldownSec: 0, moderator: bot, assistant: bot },
     store, domainCatalog: catalog,
     provider: {
-      async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 0.99, modelId: 'offline-safety' }; },
+      async moderate({ text }) { return safetyVerdict({ message: text, confidence: 0.99 }); },
       async routeAssistant(input) {
         calls.route++;
         if (routeError) throw routeError;

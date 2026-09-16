@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { labSafetyVerdict } from './lab-safety.mjs';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -102,9 +103,7 @@ export async function runManagedDialogue({ storageRoot, runId, identity, plan, p
     if (checkpoint.provider_pins && canonical(checkpoint.provider_pins) !== canonical(providerPins)) throw new Error('managed_provider_configuration_mismatch');
     checkpoint.provider_pins = providerPins; save();
     const updater = createWorkingStateUpdater(adapters.stateProvider);
-    const provider = { async moderate() {
-      return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' };
-    } };
+    const provider = { moderate: labSafetyVerdict };
     for (const stage of ['routeAssistant', 'answer', 'analyze']) {
       if (typeof adapters.provider?.[stage] !== 'function') continue;
       provider[stage] = async (input) => {

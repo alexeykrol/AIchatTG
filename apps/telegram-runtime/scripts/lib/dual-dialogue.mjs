@@ -18,6 +18,7 @@
  * доверенный проверенный код внутри каталога методологии, не песочница.
  */
 import Database from 'better-sqlite3';
+import { labSafetyVerdict } from './lab-safety.mjs';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -515,7 +516,7 @@ export async function runDualDialogue({ storageRoot, runId, conversationId = run
       if (Object.values(pins).some((value) => typeof value !== 'string' || !FINGERPRINT_RE.test(value))) fail('dual_provider_configuration_required');
       providerPins[pid] = pins;
       updaters[pid] = createWorkingStateUpdater(adapters.stateProvider);
-      const provider = { async moderate() { return { safetyRoute: 'clean', abuseLevel: null, confidence: 1, reason: 'lab_local_judge', modelId: 'lab' }; } };
+      const provider = { moderate: labSafetyVerdict };
       for (const stage of ['routeAssistant', 'answer', 'analyze']) {
         if (typeof adapters.provider?.[stage] !== 'function') continue;
         provider[stage] = async (input) => {

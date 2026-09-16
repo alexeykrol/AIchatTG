@@ -17,6 +17,7 @@ import {
   WARNING_FIRST,
 } from '@aichattg/telegram-core';
 import { createHash } from 'node:crypto';
+import { buildJudgementEnvelope, judgementDigest, judgementPolicy } from './judgement-envelope.mjs';
 import {
   createProviderAdapter,
   isProvenNoCallRequestError,
@@ -32,6 +33,7 @@ import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
   ASSISTANT_RETIRED_COMMAND_TEXT,
+  ASSISTANT_ROUTER_FAILURE_TEXT,
   ASSISTANT_UNAVAILABLE_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
@@ -382,6 +384,23 @@ export function createTelegramRuntime({
     retrievals.set(ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, contentRetrieval);
   }
   const guardAdapter = guard;
+  const activeJudgements = new Map();
+  function judgementIsCurrent(eventId) {
+    if (!store.isCurrentJudgement(eventId)) return false;
+    const envelope = store.getJudgementEnvelope(eventId);
+    return !envelope || envelope.policy_hash === judgementDigest(judgementPolicy(config));
+  }
+
+  async function scheduleJudgement(envelope) {
+    if (activeJudgements.has(envelope.event_id)) return activeJudgements.get(envelope.event_id);
+    const run = (async () => {
+      const claim = store.claimModeratorJudgement({ eventId: envelope.event_id, leaseSec: moderatorLeaseSeconds() });
+      if (claim.claimed) return runModeratorJudgement(claim.claim);
+      return jobResult(envelope.event_id, claim.row);
+    })();
+    activeJudgements.set(envelope.event_id, run);
+    try { return await run; } finally { activeJudgements.delete(envelope.event_id); }
+  }
 
   // Routing receipts contain only bounded contract fields. Never retain raw
   // provider text, diagnostic evidence, questions, dialogue or knowledge here.
@@ -436,16 +455,13 @@ export function createTelegramRuntime({
    * receipt proves ownership. Claim before any external call: a crash or an
    * ambiguous Telegram result must never cause another deletion attempt.
    */
-  async function cleanupAssistantAskPrompt(eventId, question) {
-    if (!question.replyToMessageId || !question.text?.trim()) return;
+  async function executeAssistantAskCleanup(eventId, claim) {
     try {
-      const claim = store.claimAssistantAskCleanup({
-        chatId: question.chatId, userId: question.userId,
-        promptMessageId: question.replyToMessageId, questionMessageId: question.messageId,
-        answerEventId: eventId,
-      });
       if (!claim) return;
       async function remove(messageId, target, adapter, actor) {
+        if (claim.durable && !store.validateAssistantAskPromptCleanupClaim(claim)) {
+          return { state: 'skipped', reason: 'delete_precondition_unproven', actor };
+        }
         if (typeof adapter?.deleteMessage !== 'function') {
           return { state: 'skipped', reason: `${actor}_delete_unavailable`, actor };
         }
@@ -455,7 +471,8 @@ export function createTelegramRuntime({
             ...(target === 'command' ? {
               // Guard runs this synchronously AFTER its asynchronous live
               // rights check, immediately before invoking raw deleteMessage.
-              beforeDelete: () => store.isAssistantAskCommandUnedited(claim),
+              beforeDelete: () => claim.durable
+                ? store.validateAssistantAskPromptCleanupClaim(claim) : store.isAssistantAskCommandUnedited(claim),
             } : {}),
           });
           if (result?.ok === true) return { state: 'deleted', actor };
@@ -475,11 +492,46 @@ export function createTelegramRuntime({
       // second-token fallback or permission mutation after any attempted call.
       const prompt = await remove(claim.promptMessageId, 'prompt', assistantTelegram, 'assistant');
       const command = await remove(claim.commandMessageId, 'command', guardAdapter, 'guard');
-      store.completeAssistantAskCleanup({ claim, prompt, command });
+      if (claim.durable === true) store.completeAssistantAskPromptJob({ claim, prompt, command });
+      else store.completeAssistantAskCleanup({ claim, prompt, command });
     } catch (error) {
       // Cleanup is secondary to an already delivered and recorded answer.
       console.error(`[runtime] ask cleanup failed event=${eventId} ${runtimeErrorSummary(error)}`);
     }
+  }
+
+  async function cleanupAssistantAskPrompt(eventId, question, { confirmedAnswer = true } = {}) {
+    if (!question.replyToMessageId || !question.text?.trim()) return;
+    if (confirmedAnswer && question.replyToAssistant) store.observeAssistantAskPromptAnswer({
+      chatId: question.chatId, userId: question.userId, promptMessageId: question.replyToMessageId, answerEventId: eventId,
+    });
+    // Durable jobs are the only authority minted by a newly delivered hint.
+    // The legacy scan is retained solely for pre-upgrade service pairs that
+    // have no honest 30-second deadline and therefore are never timer-cleaned.
+    const durable = store.claimAnsweredAssistantAskPrompt({
+      chatId: question.chatId, userId: question.userId, promptMessageId: question.replyToMessageId, answerEventId: eventId,
+    });
+    const durableJob = durable ? null : store.getAssistantAskPromptJob({
+      chatId: question.chatId, userId: question.userId, promptMessageId: question.replyToMessageId,
+    });
+    const legacy = durable || durableJob ? null : store.claimAssistantAskCleanup({
+      chatId: question.chatId, userId: question.userId,
+      promptMessageId: question.replyToMessageId, questionMessageId: question.messageId,
+      answerEventId: eventId,
+    });
+    await executeAssistantAskCleanup(eventId, durable || legacy);
+  }
+
+  async function expireAssistantAskPrompts({ limit = 10 } = {}) {
+    const outcomes = [];
+    const maximum = Math.max(1, Math.min(50, Number(limit) || 10));
+    for (let index = 0; index < maximum; index++) {
+      const claim = store.claimNextCompletedAssistantAskPrompt() || store.claimNextExpiredAssistantAskPrompt();
+      if (!claim) break;
+      await executeAssistantAskCleanup(`ask-expiry:${claim.eventId}`, claim);
+      outcomes.push({ eventId: claim.eventId, source: claim.source });
+    }
+    return { expired: outcomes.length, outcomes };
   }
 
   /**
@@ -561,6 +613,7 @@ export function createTelegramRuntime({
   }
 
   async function enforceSafetyPlan(eventId, comment, plan, { initialClaim = null } = {}) {
+    if (!judgementIsCurrent(eventId)) return { action: 'stale_judgement', actions: [] };
     const existing = store.getModerationEnforcement(eventId);
     if (!existing) return { action: 'enforcement_receipt_missing', actions: [], pending: true };
     let persistedPlan;
@@ -635,6 +688,7 @@ export function createTelegramRuntime({
     if (plan.action === 'delete_warn_1' || plan.action === 'delete_warn_2') {
       const deleted = await callStep('delete', () => guardAdapter.deleteMessage({
         chatId: comment.chatId, messageId: comment.messageId,
+        beforeDelete: () => judgementIsCurrent(eventId),
       }));
       if (!deleted.ok) {
         receipt.status = deleted.uncertain ? 'uncertain' : 'guard_unproven';
@@ -646,6 +700,7 @@ export function createTelegramRuntime({
         chatId: comment.chatId,
         messageId: comment.messageId,
         text: plan.action === 'delete_warn_1' ? WARNING_FIRST : WARNING_FINAL,
+        beforeAction: () => judgementIsCurrent(eventId),
       }));
       if (!warned.ok) {
         receipt.status = warned.uncertain ? 'uncertain' : 'guard_unproven';
@@ -663,6 +718,7 @@ export function createTelegramRuntime({
 
     const banned = await callStep('ban', () => guardAdapter.banAuthor({
       chatId: comment.chatId, userId: comment.userId, senderChatId: comment.senderChatId,
+      beforeAction: () => judgementIsCurrent(eventId),
     }));
     if (!banned.ok && banned.uncertain) {
       receipt.status = 'uncertain';
@@ -679,7 +735,9 @@ export function createTelegramRuntime({
       store.recordModerationDeletion({
         chatId: target.chatId, messageId: target.messageId, state: 'calling',
       });
-      const deleted = await callStep(`delete:${target.messageId}`, () => guardAdapter.deleteMessage(target));
+      const deleted = await callStep(`delete:${target.messageId}`, () => guardAdapter.deleteMessage({
+        ...target, beforeDelete: () => judgementIsCurrent(eventId),
+      }));
       Object.assign(item, redactedActionResult(deleted, 'delete_failed'), {
         status: deleted.ok ? 'completed' : deleted.uncertain ? 'uncertain' : 'skipped',
       });
@@ -740,6 +798,11 @@ export function createTelegramRuntime({
    */
   async function runModeratorJudgement(claim) {
     const eventId = claim.eventId;
+    if (!judgementIsCurrent(eventId)) {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'stale_judgement', providerBoundary: 'not_started' });
+      return { kind: 'moderation_manual_review', eventId, reason: 'stale_judgement' };
+    }
+    const envelope = store.getJudgementEnvelope(eventId);
     const job = store.getModeratorJudgement(claim.eventId);
     let snapshot;
     try { snapshot = JSON.parse(job?.snapshot_json || ''); } catch { snapshot = null; }
@@ -761,7 +824,9 @@ export function createTelegramRuntime({
       reason: 'moderator_judging',
       moderationEventId: eventId,
     });
-    if (!guardAdapter || typeof guardAdapter.senderDisposition !== 'function') {
+    const syntheticExempt = envelope?.owner === 'assistant' && config.syntheticTestingEnabled === true
+      && comment.isBot === true && (config.assistant?.syntheticBotIds || []).map(String).includes(String(comment.userId));
+    if (!syntheticExempt && (!guardAdapter || typeof guardAdapter.senderDisposition !== 'function')) {
       store.manualReviewModeratorJudgement({ claim, errorCode: 'guard_adapter_missing', providerBoundary: 'not_started' });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',
@@ -771,7 +836,8 @@ export function createTelegramRuntime({
     }
     let sender;
     try {
-      sender = await guardAdapter.senderDisposition({
+      sender = syntheticExempt ? { proven: true, exempt: true, reason: 'synthetic_sender_unmoderated' }
+        : await guardAdapter.senderDisposition({
         chatId: comment.chatId,
         userId: comment.userId,
         isBot: comment.isBot,
@@ -779,6 +845,10 @@ export function createTelegramRuntime({
       });
     } catch {
       sender = { proven: false, reason: 'telegram_membership_unavailable' };
+    }
+    if (!judgementIsCurrent(eventId)) {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'stale_judgement', providerBoundary: 'not_started' });
+      return { kind: 'moderation_manual_review', eventId, reason: 'stale_judgement' };
     }
     if (!sender?.proven) {
       const reason = sender?.reason || 'sender_exemption_unproven';
@@ -799,17 +869,8 @@ export function createTelegramRuntime({
       return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), reason);
     }
     if (sender.exempt) {
-      const resolved = store.resolveModeratorJudgement({
-        claim,
-        decision: { verdict: 'clean', reason: sender.reason || 'sender_exempt', source: 'guard_preflight' },
-        result: { verdict: 'clean', action: 'exempt' },
-        providerBoundary: 'not_started',
-      });
+      const resolved = store.resolveJudgementExemption({ claim, comment, reason: sender.reason || 'sender_exempt' });
       if (!resolved.resolved) return jobResult(claim.eventId, resolved.row, 'judgement_claim_fenced');
-      store.upsertAssistantDisposition({
-        chatId: comment.chatId, messageId: comment.messageId, status: 'allowed', verdict: 'exempt',
-        moderationMessageId: comment.platformMessageId, reason: sender.reason, moderationEventId: eventId,
-      });
       store.recordModeration({
         eventId, ...comment, verdict: 'clean', confidence: 1, reason: sender.reason,
         mode: config.moderationMode, actions: [],
@@ -830,20 +891,29 @@ export function createTelegramRuntime({
     // required to recognise a dispute about an earlier warning. Read it before
     // the non-retrying provider boundary, then use the same snapshot to plan
     // the resulting safety action.
-    const strikeState = store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
+    const strikeState = store.judgementContext(eventId)
+      || store.getWeakStrikeState({ chatId: comment.chatId, userId: comment.userId });
     if (!store.markModeratorProviderCalling({ claim, leaseSec: moderatorLeaseSeconds() }).marked) {
       return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId), 'judgement_claim_fenced');
     }
+    const submissionClaim = envelope ? store.issueJudgementSubmissionClaim(claim) : null;
+    let semantic;
     try {
       const classified = await modelProvider.moderate({
         text: comment.text, chatId: comment.chatId, userId: comment.userId,
         messageId: comment.messageId, platformMessageId: comment.platformMessageId,
         currentWeakStrikes: strikeState.weakStrikes,
         warningStage: strikeState.warningStage,
+        judgeOwner: envelope?.owner || 'moderator',
       });
+      semantic = classified;
       decision = normalizeSafetyClassification(classified);
       moderationUsage = providerCallUsage(classified?.safetyTrace?.usage);
     } catch (error) {
+      if (!judgementIsCurrent(eventId)) {
+        store.manualReviewModeratorJudgement({ claim, errorCode: 'stale_judgement', providerBoundary: 'unknown' });
+        return { kind: 'moderation_manual_review', eventId, reason: 'stale_judgement' };
+      }
       if (isProviderUnavailableError(error)) {
         if (job.safe_retry_count < moderatorRetryLimit()) {
           const deferred = store.deferModeratorJudgement({
@@ -871,6 +941,10 @@ export function createTelegramRuntime({
       });
       return jobResult(claim.eventId, store.getModeratorJudgement(claim.eventId));
     }
+    if (!judgementIsCurrent(eventId)) {
+      store.manualReviewModeratorJudgement({ claim, errorCode: 'stale_judgement', providerBoundary: 'returned' });
+      return { kind: 'moderation_manual_review', eventId, reason: 'stale_judgement' };
+    }
     if (!decision) {
       store.manualReviewModeratorJudgement({ claim, errorCode: 'invalid_safety_verdict', providerBoundary: 'unknown' });
       store.upsertAssistantDisposition({
@@ -885,7 +959,8 @@ export function createTelegramRuntime({
     // No later recovery path may derive this policy from a live counter.
     const reserveWeakStrike = config.moderationMode === 'live'
       && decision.safetyRoute === 'abuse' && decision.abuseLevel === 'weak';
-    const ready = store.persistModeratorDecisionAndEnforcement({
+    const ready = envelope ? store.submitJudgementVerdict(submissionClaim, semantic)
+      : store.persistModeratorDecisionAndEnforcement({
       claim,
       // This operator-visible durable decision intentionally excludes the
       // model's reason/quote/receipt. The private comment snapshot is the only
@@ -914,9 +989,11 @@ export function createTelegramRuntime({
         decision, reserveWeakStrike ? reservedStrikeBefore : strikeState.weakStrikes,
       ),
     });
-    if (!ready.ready) return jobResult(claim.eventId, ready.row, 'judgement_claim_fenced');
+    if (!ready.ready) return jobResult(claim.eventId, ready.row || store.getModeratorJudgement(eventId), ready.reason || 'judgement_claim_fenced');
+    if (envelope) decision = { ...ready.decision, reason: 'judgement_accepted', quote: '' };
     const plan = ready.enforcement.policy;
     await testHooks?.afterDecisionReady?.({ eventId, plan });
+    if (!judgementIsCurrent(eventId)) return { kind: 'moderation_manual_review', eventId, reason: 'stale_judgement' };
     const assistantDisposition = assistantDispositionForSafety(plan);
     store.upsertAssistantDisposition({
       chatId: comment.chatId, messageId: comment.messageId, ...assistantDisposition,
@@ -972,6 +1049,10 @@ export function createTelegramRuntime({
    * and are terminalized without a second Telegram call.
    */
   async function recoverDecisionReadyModeratorJob(job) {
+    if (!judgementIsCurrent(job.event_id)) {
+      store.manualReviewDecisionReadyModeratorJudgement({ eventId: job.event_id, errorCode: 'stale_judgement' });
+      return { kind: 'moderation_manual_review', eventId: job.event_id, reason: 'stale_judgement' };
+    }
     const durable = readDurableModeratorDecision(job);
     if (!durable) {
       const reviewed = store.manualReviewDecisionReadyModeratorJudgement({
@@ -1115,14 +1196,28 @@ export function createTelegramRuntime({
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
+    if (question.judgementEventId && !judgementIsCurrent(question.judgementEventId)) {
+      return { kind: 'skipped', reason: 'stale_judgement', deliveryUncertain: true };
+    }
     // Разметка включается только там, где текст ПИСАЛА модель: её промпты
     // требуют структуры, и без разбора читатель видел `**жирный**` буквально.
     // Служебные и детерминированные ответы — код-owned плоский текст, им
     // рендер не нужен и добавил бы класс ошибок на ровном месте.
-    const transport = await assistantTelegram.sendMessage({
-      chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
-      markup, forceReply, footer: ASSISTANT_RELEASE_LINE,
-    });
+    const beforeSend = () => (!question.judgementEventId || judgementIsCurrent(question.judgementEventId))
+      && (!question.answerClaim || store.markAssistantAnswerCalling(question.answerClaim));
+    if (!beforeSend()) return { kind: 'skipped', reason: 'stale_answer_claim', deliveryUncertain: true };
+    let transport;
+    try {
+      transport = await assistantTelegram.sendMessage({
+        chatId: question.chatId, text: answer.text.trim(), replyToMessageId: question.messageId,
+        markup, forceReply, footer: ASSISTANT_RELEASE_LINE, beforeSend,
+      });
+    } catch (error) {
+      if (question.answerClaim) store.completeAssistantAnswerDelivery({ claim: question.answerClaim, state: 'uncertain' });
+      throw error;
+    }
+    if (question.answerClaim) store.completeAssistantAnswerDelivery({ claim: question.answerClaim,
+      state: transport?.ok === true && !transport?.partial && !transport?.uncertain ? 'confirmed' : 'uncertain' });
     // Деградация доставки не отменяет квитанцию: ответ дошёл, просто не целиком
     // или без оформления, а повтор целого ответа задвоил бы уже доставленное.
     // Но она обязана быть видна в журнале — иначе усечённый ответ выглядит
@@ -1157,13 +1252,23 @@ export function createTelegramRuntime({
         await cleanupAssistantAskPrompt(eventId, question);
       }
     }
+    const askPrompt = route === 'command:ask_empty' && forceReply && question.bareAskCommand === true
+      && !transport?.partial && !transport?.uncertain && receipt.messageId
+      ? store.createAssistantAskPromptJob({
+        eventId, chatId: question.chatId, userId: question.userId,
+        commandMessageId: question.messageId, promptMessageId: receipt.messageId,
+      })
+      : null;
+    if (askPrompt) {
+      const binding = { chatId: question.chatId, userId: question.userId, promptMessageId: receipt.messageId };
+      const completed = store.getAssistantAskPromptAnswerObservation(binding);
+      if (completed) await executeAssistantAskCleanup(completed.answerEventId,
+        store.claimAnsweredAssistantAskPrompt({ ...binding, ...completed }));
+    }
     return {
       kind: 'answered', receipt, route,
-      ...(route === 'command:ask_empty' && forceReply && question.bareAskCommand === true
-        && !transport?.partial && !transport?.uncertain && receipt.messageId
-        && store.isAssistantAskCommandUnedited({
-          eventId, chatId: question.chatId, commandMessageId: question.messageId,
-        }) ? {
+      deliveryUncertain: transport?.partial === true || transport?.uncertain === true,
+      ...(askPrompt ? {
           askPrompt: {
             chatId: String(question.chatId), userId: String(question.userId),
             commandMessageId: String(question.messageId), promptMessageId: receipt.messageId,
@@ -1337,27 +1442,54 @@ export function createTelegramRuntime({
   }
 
   async function handleAssistant(eventId, question, routingContext) {
+    // A correctly bound non-command reply ends only the *idle* 30-second
+    // timer before the moderation/provider boundary. It never changes reply
+    // detection itself, so a reply that arrives after expiry stays routable.
+    if (question.replyToAssistant && question.command === 'ask' && question.replyToMessageId && question.text?.trim()) {
+      store.observeAssistantAskPromptReply({
+        chatId: question.chatId, userId: question.userId, promptMessageId: question.replyToMessageId,
+      });
+    }
     const moderation = await assistantModeration(store, config, question, wait);
+    if (question.judgementEventId && !judgementIsCurrent(question.judgementEventId)) {
+      return { kind: 'skipped', reason: 'stale_judgement' };
+    }
+    if (moderation.status === 'allowed' || moderation.status === 'error') {
+      const questionClaim = store.claimAssistantQuestion({ chatId: question.chatId, messageId: question.messageId,
+        eventId, judgementEventId: question.judgementEventId,
+        purpose: moderation.status === 'error' ? 'fallback' : 'answer' });
+      if (!questionClaim.claimed) return { kind: 'duplicate_question', status: questionClaim.existing?.status || 'unknown' };
+      question.answerClaim = questionClaim.claim;
+    }
     if (moderation.status !== 'allowed') {
+      if (moderation.status === 'error') {
+        const delivered = await sendAssistantServiceReply(
+          eventId, question, ASSISTANT_ROUTER_FAILURE_TEXT, 'boundary:judgement_unavailable',
+        );
+        if (delivered.deliveryUncertain !== true) {
+          await cleanupAssistantAskPrompt(eventId, question);
+        }
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'operational_fallback' });
+        return { ...delivered, degraded: true, reason: 'judgement_unavailable', moderation };
+      }
+      await cleanupAssistantAskPrompt(eventId, question, { confirmedAnswer: false });
       return {
         kind: 'skipped',
         reason: moderation.status === 'blocked' ? 'moderator_blocked' : 'moderator_unavailable',
         moderation,
       };
     }
-    const questionClaim = store.claimAssistantQuestion({ chatId: question.chatId, messageId: question.messageId });
-    if (!questionClaim.claimed) return { kind: 'duplicate_question', status: questionClaim.existing?.status || 'unknown' };
     try {
       if (question.command === 'help') {
         const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_HELP_TEXT, 'command:help');
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
         return { ...result, command: 'help' };
       }
       // `/ai` снята с вооружения. Ответ детерминированный и до резервирования
       // квоты: команда не доходит ни до модели, ни до платного пути.
       if (question.command === 'retired') {
         const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_RETIRED_COMMAND_TEXT, 'command:retired');
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
         return { ...result, command: 'retired' };
       }
       // Одинокая `/ask` (клик по меню Telegram) — самый массовый служебный ход и
@@ -1372,7 +1504,7 @@ export function createTelegramRuntime({
         const result = await sendAssistantServiceReply(
           eventId, question, ASSISTANT_EMPTY_ASK_TEXT, 'command:ask_empty', { forceReply: true },
         );
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
         return { ...result, command: 'ask_empty' };
       }
       const request = store.reserveAssistantRequest({
@@ -1388,7 +1520,7 @@ export function createTelegramRuntime({
           : config.assistantDailyPerUser,
       });
       if (!request.allowed) {
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: request.reason });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: request.reason });
         return { kind: 'skipped', reason: request.reason };
       }
       // During extraction no course/index source package is admitted. Public
@@ -1398,7 +1530,7 @@ export function createTelegramRuntime({
         const deterministic = assistantDeterministicReply(question.text);
         const result = await sendAssistantTurn(eventId, question, { text: deterministic.text }, deterministic.route);
         store.completeAssistantRequest(eventId);
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
         return result;
       }
       // Read once before asynchronous routing: later stages must not observe
@@ -1439,7 +1571,7 @@ export function createTelegramRuntime({
         if (isDefinitiveAssistantRoutingExit(routing.error)
           && !analyzerCallAmbiguous(dispatched?.observation)) store.releaseAssistantRequest(eventId);
         else store.markAssistantRequestUncertain(eventId);
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'skipped' });
         return { kind: 'skipped', reason: routing.error };
       }
       // The corpus cannot ground this question. The user is told so — the reply
@@ -1460,11 +1592,15 @@ export function createTelegramRuntime({
         }
         const delivered = await sendAssistantTurn(eventId, question, { text: abstention.text }, abstention.route);
         store.completeAssistantRequest(eventId);
-        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
         return { ...delivered, abstained: true, reason: routing.reason };
       }
       let answer;
       try {
+        if (question.answerClaim && (!judgementIsCurrent(question.judgementEventId)
+          || !store.markAssistantAnswerProviderCalling(question.answerClaim).marked)) {
+          return { kind: 'skipped', reason: 'stale_answer_claim' };
+        }
         answer = await modelProvider.answer({
           text: question.text,
           chatId: question.chatId,
@@ -1479,13 +1615,17 @@ export function createTelegramRuntime({
           riskFlags: routing.riskFlags,
           registryDigest: routing.registryDigest,
         });
+        if (question.answerClaim) store.completeAssistantAnswerProviderAttempt({ claim: question.answerClaim,
+          status: 'returned', usage: answer?.receipt });
       } catch (error) {
+        if (question.answerClaim) store.completeAssistantAnswerProviderAttempt({ claim: question.answerClaim,
+          status: 'unknown', usage: error?.receipt });
         if (isProviderUnavailableError(error)) {
           // The answer transport may have reached a paid provider before it
           // reported failure. Keep the reservation fenced rather than treating
           // this as a proven zero-call rejection.
           store.markAssistantRequestUncertain(eventId);
-          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'skipped' });
+          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'skipped' });
           return { kind: 'skipped', reason: error.code };
         }
         // Наш собственный дефект сборки запроса: отвергла ЛОКАЛЬНАЯ проверка до
@@ -1503,7 +1643,7 @@ export function createTelegramRuntime({
           const delivered = await sendAssistantServiceReply(
             eventId, question, ASSISTANT_UNAVAILABLE_TEXT, 'boundary:request_invalid',
           );
-          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
           return { ...delivered, degraded: true, reason: error.code };
         }
         throw error;
@@ -1516,14 +1656,14 @@ export function createTelegramRuntime({
         markup: true, knowledge: routing.knowledge,
       });
       store.completeAssistantRequest(eventId);
-      store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'answered' });
+      store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
       // Обойдённая модерация обязана быть видна в квитанции хода, а не
       // подразумеваться из конфигурации: иначе журнал не отличает ответ
       // человеку от ответа синтетику.
       return moderation.reason ? { ...result, moderation: { reason: moderation.reason } } : result;
     } catch (error) {
       store.markAssistantRequestUncertain(eventId);
-      store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, outcome: 'error' });
+      store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'error' });
       throw error;
     }
   }
@@ -1573,13 +1713,37 @@ export function createTelegramRuntime({
           });
         }
         const routingContext = {};
-        const result = classified.kind === 'comment'
-          ? await handleModerator(eventId, receiptId, classified.comment)
-          : classified.kind === 'question'
-            ? await handleAssistant(eventId, classified.question, routingContext)
-            : classified.kind === 'pin_governance'
-              ? await handlePinGovernance(eventId, classified.pin)
+        let result;
+        const scopedMessage = update.message || update.edited_message;
+        const projection = (role === BOT_ROLES.ASSISTANT || role === BOT_ROLES.MODERATOR)
+          && adapterConfig.chatIds.map(String).includes(String(scopedMessage?.chat?.id))
+          ? buildJudgementEnvelope(config, update) : null;
+        if (projection || classified.kind === 'comment' || classified.kind === 'question') {
+          const observation = projection ? store.observeJudgementEnvelope({ envelope: projection, eventId, receiptId,
+            snapshotTtlSec: config.moderatorRecoverySnapshotTtlSec }) : null;
+          if (!observation?.current) {
+            result = { kind: 'skipped', reason: observation?.reason || (observation?.row?.state === 'conflict'
+              ? 'judgement_conflict' : 'stale_judgement') };
+          } else if (projection.judgeEligible === false) {
+            result = { kind: 'skipped', reason: classified.reason || 'revision_tombstone' };
+          } else {
+            // Reply observation precedes the judge. A slow judge must not turn
+            // a received question into an idle timeout.
+            const question = projection.question;
+            if (question?.command === 'ask' && question.replyToAssistant && question.replyToMessageId && question.text?.trim()) {
+              store.observeAssistantAskPromptReply({ chatId: question.chatId, userId: question.userId,
+                promptMessageId: question.replyToMessageId });
+            }
+            const judged = await scheduleJudgement(observation.row);
+            result = role === BOT_ROLES.ASSISTANT && question
+              ? await handleAssistant(eventId, { ...question, judgementEventId: observation.row.event_id }, routingContext)
+              : judged;
+          }
+        } else {
+          result = classified.kind === 'pin_governance'
+            ? await handlePinGovernance(eventId, classified.pin)
             : { kind: 'skipped', reason: classified.reason };
+        }
         const response = { eventId, ...result,
           ...(routingContext.routingDiagnosis ? { routingDiagnosis: routingContext.routingDiagnosis } : {}) };
         const completed = store.completeInboundDelivery({
@@ -1644,5 +1808,8 @@ export function createTelegramRuntime({
       const status = store.moderatorRecoveryStatus();
       return { states: status.states, jobs: store.listModeratorJudgements({ limit }) };
     },
+    /** Durable, bounded UI expiry. It is separate from provider recovery so a
+     * stalled safety/model call can never delay an already-due bare /ask. */
+    expireAssistantAskPrompts,
   };
 }

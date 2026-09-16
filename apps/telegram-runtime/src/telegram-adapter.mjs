@@ -32,13 +32,28 @@ export function createTelegramAdapter({
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
     throw new Error('Telegram adapter requestTimeoutMs must be an integer between 100 and 120000');
   }
-  async function call(method, body) {
-    const response = await fetchFn(`https://api.telegram.org/bot${botToken}/${method}`, {
+  async function call(method, body, beforeSend = null) {
+    const request = {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       // A timed-out Telegram mutation is deliberately ambiguous: the adapter
       // never retries it, and the runtime keeps the delivery fence in place.
       signal: AbortSignal.timeout(timeoutMs),
-    });
+    };
+    if (beforeSend != null) {
+      try {
+        // The exact-revision fence belongs at EVERY transport invocation,
+        // including rendered chunks and the markup-only fallback. No await
+        // may separate a literal-true decision from the fetch invocation.
+        const decision = typeof beforeSend === 'function' ? beforeSend() : null;
+        if (decision !== true) {
+          if (decision && typeof decision.then === 'function') Promise.resolve(decision).catch(() => {});
+          return { ok: false, skipped: 'send_precondition_unproven', uncertain: false };
+        }
+      } catch {
+        return { ok: false, skipped: 'send_precondition_unproven', uncertain: false };
+      }
+    }
+    const response = await fetchFn(`https://api.telegram.org/bot${botToken}/${method}`, request);
     // Headers alone do not prove a Telegram mutation receipt. In particular,
     // the deadline may fire while the response body is still being read. A
     // missing/malformed body is therefore an ambiguous transport failure, not
@@ -62,7 +77,7 @@ export function createTelegramAdapter({
    *    сообщениями: цепочка реплаев на собственные сообщения читается как спам.
    * Квитанция берётся у ПЕРВОЙ части: именно её id — ответ на вопрос.
    */
-  async function sendRendered({ chatId, text, replyToMessageId, markup = true, forceReply = false, footer = '' }) {
+  async function sendRendered({ chatId, text, replyToMessageId, markup = true, forceReply = false, footer = '', beforeSend = null }) {
     if (typeof footer !== 'string' || footer.length > 256 || /[\r\n]/u.test(footer)) {
       throw new Error('Telegram footer must be one line of at most 256 characters');
     }
@@ -90,19 +105,22 @@ export function createTelegramAdapter({
         ...(markup ? { parse_mode: 'HTML', link_preview_options: { is_disabled: true } } : {}),
         reply_to_message_id: replyTo,
         ...(!markup && forceReply && index === 0 ? { reply_markup: { force_reply: true, selective: true } } : {}),
-      });
+      }, beforeSend);
       if (markup && !result.ok && isMarkupParseError(result.error)) {
         result = await call('sendMessage', {
           chat_id: chatId,
           text: plainTextFromMarkdown(part) + tail,
           reply_to_message_id: replyTo,
           link_preview_options: { is_disabled: true },
-        });
+        }, beforeSend);
         if (result.ok) result = { ...result, degraded: 'markup_stripped' };
       }
       // Часть не ушла — дальше не шлём: рваный ответ хуже короткого, а первая
       // неудача уже говорит вызывающему всё, что ему нужно знать.
-      if (!result.ok) return index === 0 ? result : { ...first, partial: true, error: result.error };
+      if (!result.ok) return index === 0 ? result : {
+        ...first, partial: true, error: result.error || result.skipped,
+        ...(result.skipped ? { skipped: result.skipped } : {}),
+      };
       if (index === 0) first = result;
       if (result.degraded) first = { ...first, degraded: result.degraded };
     }
@@ -116,13 +134,13 @@ export function createTelegramAdapter({
     // recognises. `selective: true` shows the prompt only to the user being
     // replied to, not the whole chat. Used only on the plain (non-markup)
     // path: a rendered model answer never needs it.
-    sendMessage: ({ chatId, text, replyToMessageId, markup = false, forceReply = false, footer = '' }) => (
+    sendMessage: ({ chatId, text, replyToMessageId, markup = false, forceReply = false, footer = '', beforeSend = null }) => (
       markup === true || footer !== ''
-        ? sendRendered({ chatId, text, replyToMessageId, markup, forceReply, footer })
+        ? sendRendered({ chatId, text, replyToMessageId, markup, forceReply, footer, beforeSend })
         : call('sendMessage', {
           chat_id: chatId, text, reply_to_message_id: replyToMessageId,
           ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : {}),
-        })
+        }, beforeSend)
     ),
     banMember: ({ chatId, userId }) => call('banChatMember', { chat_id: chatId, user_id: userId }),
     banSenderChat: ({ chatId, senderChatId }) => call('banChatSenderChat', { chat_id: chatId, sender_chat_id: senderChatId }),

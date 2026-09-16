@@ -4,10 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { messageIdentity } from '@aichattg/telegram-core';
-import { ASSISTANT_EMPTY_ASK_TEXT } from '../src/assistant-policy.mjs';
+import { ASSISTANT_EMPTY_ASK_TEXT, ASSISTANT_ROUTER_FAILURE_TEXT } from '../src/assistant-policy.mjs';
 import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
 import { createGuardAdapter } from '../src/guard-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
+import { createAssistantAskExpiryWorker } from '../src/assistant-ask-expiry.mjs';
+import { safetyVerdict } from './safety-fixture.mjs';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function harness(t, options = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-ask-cleanup-'));
@@ -21,6 +29,7 @@ function harness(t, options = {}) {
   const actions = [];
   const botId = 555444;
   const config = {
+    moderationMode: 'live',
     assistantModerationWaitMs: 0, assistantCooldownSec: 0, assistantDailyPerUser: 100,
     assistantDialogueTurnLimit: 10, assistantDialogueTtlSec: 604800,
     assistant: {
@@ -31,9 +40,10 @@ function harness(t, options = {}) {
   const telegram = {
     async getChatMember(input) {
       actions.push({ kind: 'guard_rights', ...input });
-      await options.beforeGuardProof?.(input);
+      const isGuard = Number(input.userId) === 111;
+      if (isGuard) await options.beforeGuardProof?.(input);
       return { ok: true, data: {
-        user: { id: 111 }, status: 'administrator',
+        user: { id: Number(input.userId) }, status: isGuard ? 'administrator' : options.senderStatus || 'administrator',
         can_delete_messages: options.guardRights !== false, can_restrict_members: true,
       } };
     },
@@ -61,9 +71,9 @@ function harness(t, options = {}) {
   function restart() {
     db?.close();
     db = openRuntimeDatabase(path);
-    store = createRuntimeStore(db, { now: () => now });
+    store = createRuntimeStore(db, { now: () => Math.floor(now), nowMs: () => Math.round(now * 1_000) });
     runtime = createTelegramRuntime({
-      config, store, assistantTelegram: assistant,
+      config, store, assistantTelegram: assistant, provider: options.provider || null,
       guard: options.noGuard ? null : createGuardAdapter({
         telegram, guardBotId: 111, guardChatIds: config.moderator.chatIds,
       }),
@@ -92,6 +102,24 @@ function harness(t, options = {}) {
   }
   return {
     actions, update, receive, restart,
+    receiveWithoutDisposition(input) { return runtime.handleUpdate('assistant', input); },
+    expire() { return runtime.expireAssistantAskPrompts({ limit: 10 }); },
+    async drainRestartedExpiryWorker() {
+      // Reopen persisted state for an independent expiry worker while an
+      // unrelated provider callback still holds the first runtime connection.
+      const recoveryDb = openRuntimeDatabase(path);
+      try {
+        const recoveryStore = createRuntimeStore(recoveryDb, {
+          now: () => Math.floor(now), nowMs: () => Math.round(now * 1_000),
+        });
+        const recoveryRuntime = createTelegramRuntime({ config, store: recoveryStore,
+          assistantTelegram: assistant, guard: createGuardAdapter({
+            telegram, guardBotId: 111, guardChatIds: config.moderator.chatIds,
+          }),
+        });
+        return await createAssistantAskExpiryWorker({ runtime: recoveryRuntime }).drain({ startup: true });
+      } finally { recoveryDb.close(); }
+    },
     get db() { return db; }, get store() { return store; },
     advance(seconds) { now += seconds; },
     deletions() { return actions.filter((action) => action.kind.endsWith('_delete')); },
@@ -110,7 +138,7 @@ function harness(t, options = {}) {
 test('menu → reply → full answer removes only linked command and hint, keeping real Q/A', async (t) => {
   const h = harness(t);
   const menu = await h.menu();
-  assert.equal(h.actions[0].forceReply, true);
+  assert.equal(h.actions.find((action) => action.kind === 'send').forceReply, true);
   assert.deepEqual(h.deletions(), []);
   assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 0);
   assert.deepEqual(h.result(menu.eventId).askPrompt, {
@@ -142,6 +170,149 @@ test('prompt linkage survives a real database/runtime restart', async (t) => {
   h.restart();
   assert.equal((await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }))).kind, 'answered');
   assert.equal(h.deletions().length, 2);
+});
+
+test('idle bare /ask expires at 30 seconds, survives restart, and never retries deletes', async (t) => {
+  const h = harness(t);
+  const menu = await h.menu('/ask');
+  h.advance(29.999);
+  assert.equal((await h.expire()).expired, 0);
+  assert.deepEqual(h.deletions(), []);
+  h.restart();
+  h.advance(0.001);
+  assert.equal((await h.expire()).expired, 1);
+  assert.deepEqual(h.deletions(), [
+    { kind: 'assistant_delete', chatId: '-100', messageId: '1000' },
+    { kind: 'guard_delete', chatId: '-100', messageId: '10' },
+  ]);
+  h.restart();
+  assert.equal((await h.expire()).expired, 0);
+  assert.equal(h.deletions().length, 2);
+  assert.equal(h.store.getAssistantAskPromptJob({
+    chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId,
+  }).state, 'finished');
+});
+
+test('late reply after expired service-pair cleanup still receives and retains an answer', async (t) => {
+  const h = harness(t);
+  const menu = await h.menu('/ask');
+  h.advance(30);
+  await h.expire();
+  const answer = await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
+  assert.equal(answer.kind, 'answered');
+  assert.equal(h.deletions().length, 2);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
+});
+
+test('invalid safety judgement for the reported exact question returns a visible fallback, not silence or a domain shortcut', async (t) => {
+  let judgements = 0;
+  const options = { provider: { async moderate() { judgements++; return { unexpected: 'invalid' }; } } };
+  const h = harness(t, options);
+  const menu = await h.menu('/ask@assistant_bot');
+  options.senderStatus = 'member';
+  const update = h.update(11,
+    'расскажи подробнее про ИИ-ассистента: архитектура, как обучается, что подгрузить и как под свою задачу и свою область применения',
+    { replyTo: menu.receipt.messageId });
+  const answer = await h.receive(update);
+  assert.equal(answer.kind, 'answered');
+  assert.equal(answer.reason, 'judgement_unavailable');
+  const sends = h.actions.filter((item) => item.kind === 'send');
+  assert.equal(sends.length, 2);
+  assert.equal(sends[1].text, ASSISTANT_ROUTER_FAILURE_TEXT);
+  assert.match(sends[1].footer, /^Версия /u);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 0);
+  assert.equal(h.deletions().length, 2);
+  assert.equal(judgements, 1);
+  await h.receive(update);
+  assert.equal(h.actions.filter((item) => item.kind === 'send').length, 2);
+  assert.equal(judgements, 1);
+});
+
+test('reply before deadline cancels idle expiry and answer cleanup owns the pair once', async (t) => {
+  const h = harness(t);
+  const menu = await h.menu('/ask');
+  h.advance(29.999);
+  const answer = await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
+  assert.equal(answer.kind, 'answered');
+  h.advance(1);
+  assert.equal((await h.expire()).expired, 0);
+  assert.equal(h.deletions().length, 2);
+});
+
+test('reply while hint ACK is suspended cancels expiry even while its answer delivery remains in flight', async (t) => {
+  let releaseHint;
+  let releaseAnswer;
+  let signalHint;
+  let signalAnswer;
+  const hintGate = new Promise((resolve) => { releaseHint = resolve; });
+  const answerGate = new Promise((resolve) => { releaseAnswer = resolve; });
+  const hintStarted = new Promise((resolve) => { signalHint = resolve; });
+  const answerStarted = new Promise((resolve) => { signalAnswer = resolve; });
+  const h = harness(t, { beforeHintSendReturn: async (input) => {
+    if (input.forceReply) { signalHint(); await hintGate; }
+    else { signalAnswer(); await answerGate; }
+  } });
+  const pendingMenu = h.menu('/ask');
+  await hintStarted;
+  const pendingAnswer = h.receive(h.update(11, 'Кто ты?', { replyTo: '1000' }));
+  await answerStarted;
+  releaseHint();
+  const menu = await pendingMenu;
+  assert.equal(h.store.getAssistantAskPromptJob({ chatId: '-100', userId: '7',
+    promptMessageId: menu.receipt.messageId }).state, 'question_received');
+  h.advance(31);
+  assert.equal((await h.expire()).expired, 0);
+  assert.deepEqual(h.deletions(), []);
+  releaseAnswer();
+  assert.equal((await pendingAnswer).kind, 'answered');
+  assert.deepEqual(h.deletions().map((row) => row.messageId), ['1000', '10']);
+});
+
+test('fully confirmed answer before hint ACK is reconciled and deletes only its service pair once', async (t) => {
+  let releaseHint;
+  let signalHint;
+  const hintGate = new Promise((resolve) => { releaseHint = resolve; });
+  const hintStarted = new Promise((resolve) => { signalHint = resolve; });
+  const h = harness(t, { beforeHintSendReturn: async (input) => {
+    if (input.forceReply) { signalHint(); await hintGate; }
+  } });
+  const pendingMenu = h.menu('/ask');
+  await hintStarted;
+  const answer = await h.receive(h.update(11, 'Кто ты?', { replyTo: '1000' }));
+  assert.equal(answer.kind, 'answered');
+  assert.deepEqual(h.deletions(), []);
+  assert.deepEqual(h.store.getAssistantAskPromptAnswerObservation({
+    chatId: '-100', userId: '7', promptMessageId: '1000',
+  }), { answerEventId: answer.eventId });
+  releaseHint();
+  const menu = await pendingMenu;
+  assert.equal(h.store.getAssistantAskPromptJob({ chatId: '-100', userId: '7',
+    promptMessageId: menu.receipt.messageId }).state, 'finished');
+  assert.deepEqual(h.deletions().map((row) => row.messageId), ['1000', '10']);
+  h.restart();
+  h.advance(31);
+  assert.equal((await h.expire()).expired, 0);
+  assert.equal(h.deletions().length, 2);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
+});
+
+test('unavailable Assistant judgement sends one operational fallback without a model turn', async (t) => {
+  let judgements = 0;
+  const h = harness(t, { senderStatus: 'member', provider: {
+    async moderate() { judgements++; throw new Error('fixture unknown provider result'); },
+  } });
+  const input = h.update(12, '/ask Что такое RAG?');
+  const result = await h.receiveWithoutDisposition(input);
+  assert.equal(result.kind, 'answered');
+  assert.equal(result.reason, 'judgement_unavailable');
+  const sent = h.actions.filter((item) => item.kind === 'send');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, ASSISTANT_ROUTER_FAILURE_TEXT);
+  assert.match(sent[0].footer, /^Версия /u);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 0);
+  await h.receiveWithoutDisposition(input);
+  assert.equal(h.actions.filter((item) => item.kind === 'send').length, 1);
+  assert.equal(judgements, 1);
 });
 
 test('another user, another chat, and a historical real-answer reply never match the pair', async (t) => {
@@ -245,9 +416,9 @@ for (const [name, options] of [
 test('crash after cleanup claim leaves a permanent no-retry fence', async (t) => {
   const h = harness(t);
   const menu = await h.menu();
-  assert.ok(h.store.claimAssistantAskCleanup({
-    chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId,
-    questionMessageId: '11', answerEventId: 'interrupted-answer',
+  h.store.observeAssistantAskPromptReply({ chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId });
+  assert.ok(h.store.claimAnsweredAssistantAskPrompt({
+    chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId, answerEventId: 'interrupted-answer',
   }));
   h.restart();
   await h.receive(h.update(12, 'Кто ты?', { replyTo: menu.receipt.messageId }));
@@ -264,12 +435,15 @@ test('an observed edit of the old bare command invalidates cleanup even if it is
   assert.deepEqual(h.deletions(), []);
 });
 
-test('cleanup lookup expires at 47 hours and never scans beyond its recent-row budget', async (t) => {
+test('durable jobs respect 47-hour authority expiry without depending on a bounded receipt scan', async (t) => {
   const expired = harness(t);
-  const menu = await expired.menu();
+  const oldMenu = await expired.menu();
   expired.advance(47 * 60 * 60 + 1);
-  await expired.receive(expired.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
-  assert.deepEqual(expired.deletions(), []);
+  assert.equal((await expired.expire()).expired, 0);
+  assert.equal(expired.deletions().length, 0);
+  assert.equal(expired.store.getAssistantAskPromptJob({ chatId: '-100', userId: '7',
+    promptMessageId: oldMenu.receipt.messageId }).state, 'skipped');
+  assert.equal(expired.result(oldMenu.eventId).askPromptCleanup.reason, 'cleanup_authority_expired');
 
   const busy = harness(t);
   const recent = await busy.menu();
@@ -277,7 +451,7 @@ test('cleanup lookup expires at 47 hours and never scans beyond its recent-row b
     busy.store.claimEvent({ eventId: `unrelated:${index}`, role: 'moderator', updateId: 2000 + index });
   }
   await busy.receive(busy.update(11, 'Кто ты?', { replyTo: recent.receipt.messageId }));
-  assert.deepEqual(busy.deletions(), []);
+  assert.equal(busy.deletions().length, 2);
 });
 
 test('an edit while the force-reply send is in flight prevents minting cleanup authority', async (t) => {
@@ -291,7 +465,12 @@ test('an edit while the force-reply send is in flight prevents minting cleanup a
   const pendingMenu = h.menu();
   await started;
   const edit = h.update(10, 'Теперь это настоящий вопрос без команды', { edited: true });
-  assert.equal((await h.receive(edit)).kind, 'skipped');
+  // Either authenticated stream now schedules the ordinary post's Moderator
+  // owner. The admin fixture is exempt, but the native edit still revokes the
+  // original service-command deletion authority before dispatch completes.
+  const editResult = await h.receive(edit);
+  assert.equal(editResult.kind, 'moderated');
+  assert.equal(editResult.action, 'exempt');
   assert.equal(h.store.getInboundDelivery(`assistant:${edit.update_id}`).revision_identity,
     `-100:edit:${edit.update_id}:10`);
   releaseHint();
@@ -373,7 +552,7 @@ for (const [role, state] of [
   });
 }
 
-test('receipt budget exhaustion refuses cleanup even while the original event mapping remains', async (t) => {
+test('durable service-pair cleanup is not disabled by unrelated receipt volume', async (t) => {
   const h = harness(t);
   const menu = await h.menu();
   for (let id = 100; id < 2148; id++) {
@@ -384,7 +563,7 @@ test('receipt budget exhaustion refuses cleanup even while the original event ma
   }
   assert.ok(h.result(menu.eventId).askPrompt);
   await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
-  assert.deepEqual(h.deletions(), []);
+  assert.equal(h.deletions().length, 2);
 });
 
 test('an out-of-order original older than the retained Assistant boundary cannot mint authority', async (t) => {
@@ -403,4 +582,111 @@ test('an out-of-order original older than the retained Assistant boundary cannot
   assert.equal(menu.askPrompt, undefined);
   await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
   assert.deepEqual(h.deletions(), []);
+});
+
+test('expiry owns cleanup first while a bound reply answers during the in-flight prompt delete', async (t) => {
+  const started = deferred();
+  const release = deferred();
+  const h = harness(t, { beforePromptDelete: async () => {
+    started.resolve();
+    await release.promise;
+  } });
+  const menu = await h.menu('/ask');
+  h.advance(30);
+  const expiry = h.expire();
+  await started.promise;
+  const pair = { chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId };
+  assert.equal(h.store.getAssistantAskPromptJob(pair).state, 'calling');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), ['1000']);
+  const answer = await h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
+  assert.equal(answer.kind, 'answered');
+  assert.equal(h.store.getAssistantAskPromptJob(pair).state, 'calling');
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
+  release.resolve();
+  assert.equal((await expiry).expired, 1);
+  assert.equal(h.store.getAssistantAskPromptJob(pair).state, 'finished');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), ['1000', '10']);
+  assert.equal(h.actions.filter((item) => item.kind === 'send' && !item.forceReply).length, 1);
+  assert.equal((await h.expire()).expired, 0);
+});
+
+test('answer owns cleanup first while concurrent expiry cannot reclaim its suspended prompt delete', async (t) => {
+  const started = deferred();
+  const release = deferred();
+  const h = harness(t, { beforePromptDelete: async () => {
+    started.resolve();
+    await release.promise;
+  } });
+  const menu = await h.menu('/ask');
+  const answer = h.receive(h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId }));
+  await started.promise;
+  h.advance(30);
+  assert.equal(h.store.getAssistantAskPromptJob({
+    chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId,
+  }).state, 'calling');
+  assert.equal(h.actions.filter((item) => item.kind === 'send' && !item.forceReply).length, 1);
+  assert.equal((await h.expire()).expired, 0);
+  assert.deepEqual(h.deletions().map((item) => item.messageId), ['1000']);
+  release.resolve();
+  assert.equal((await answer).kind, 'answered');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), ['1000', '10']);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
+  assert.equal(h.store.getAssistantAskPromptJob({
+    chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId,
+  }).state, 'finished');
+});
+
+test('a suspended strict judge preserves its bound hint while a restarted independent worker expires another idle hint', async (t) => {
+  const judgeStarted = deferred();
+  const releaseJudge = deferred();
+  let judgements = 0;
+  const options = { provider: { async moderate(input) {
+    judgements++;
+    judgeStarted.resolve();
+    await releaseJudge.promise;
+    return safetyVerdict({ message: input.text });
+  } } };
+  const h = harness(t, options);
+  const first = await h.menu('/ask');
+  const idle = await h.receive(h.update(20, '/ask', { userId: 8 }));
+  assert.equal(idle.command, 'ask_empty');
+  options.senderStatus = 'member';
+  const answer = h.receive(h.update(11, 'Кто ты?', { replyTo: first.receipt.messageId }));
+  await judgeStarted.promise;
+  const firstPair = { chatId: '-100', userId: '7', promptMessageId: first.receipt.messageId };
+  const idlePair = { chatId: '-100', userId: '8', promptMessageId: idle.receipt.messageId };
+  assert.equal(h.store.getAssistantAskPromptJob(firstPair).state, 'question_received');
+  assert.equal(h.store.getAssistantAskPromptJob(idlePair).state, 'pending');
+  h.advance(30);
+  assert.equal((await h.drainRestartedExpiryWorker()).expired, 1);
+  assert.equal(h.store.getAssistantAskPromptJob(firstPair).state, 'question_received');
+  assert.equal(h.store.getAssistantAskPromptJob(idlePair).state, 'finished');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), [idle.receipt.messageId, '20']);
+  assert.equal(h.actions.filter((item) => item.kind === 'send' && !item.forceReply).length, 0);
+  releaseJudge.resolve();
+  assert.equal((await answer).kind, 'answered');
+  assert.equal(judgements, 1);
+  assert.equal(h.store.getAssistantAskPromptJob(firstPair).state, 'finished');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), [idle.receipt.messageId, '20', first.receipt.messageId, '10']);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
+  assert.equal((await h.drainRestartedExpiryWorker()).expired, 0);
+});
+
+test('uncertain expiry remains terminal after restart while a late bound reply still answers once', async (t) => {
+  const h = harness(t, { promptThrows: true });
+  const menu = await h.menu('/ask');
+  const pair = { chatId: '-100', userId: '7', promptMessageId: menu.receipt.messageId };
+  h.advance(30);
+  assert.equal((await h.expire()).expired, 1);
+  assert.equal(h.store.getAssistantAskPromptJob(pair).state, 'uncertain');
+  assert.deepEqual(h.deletions().map((item) => item.messageId), ['1000', '10']);
+  h.restart();
+  const question = h.update(11, 'Кто ты?', { replyTo: menu.receipt.messageId });
+  assert.equal((await h.receive(question)).kind, 'answered');
+  assert.equal(h.store.getAssistantAskPromptJob(pair).state, 'uncertain');
+  assert.equal((await h.expire()).expired, 0);
+  await h.receive(question);
+  assert.equal(h.deletions().length, 2);
+  assert.equal(h.actions.filter((item) => item.kind === 'send' && !item.forceReply).length, 1);
+  assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM runtime_assistant_turns').get().n, 1);
 });
