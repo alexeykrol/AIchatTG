@@ -3,6 +3,28 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.39 / runtime 2c72e01] — 2026-09-16 — Single-judge ask protocol
+
+Lifecycle `production-verified`; started06:57:40UTC. Source integrated and
+pushed. [Release receipt](docs/reports/2026-09-16-assistant-2.4.39-deployment.md).
+
+- Assign one durable native-revision judge: Assistant for addressed questions,
+  Moderator for ordinary posts; strict verdict, generation and enforcement fences.
+- Fence first/multipart/fallback answer delivery and edited revisions; preserve
+  unknown-delivery and provider-usage accounting rather than replaying work.
+- Expire idle bare-ask command/hint pairs after30seconds independently of the
+  model; handle early/delayed-ACK/late replies and restart without deleting Q/A.
+- Deliver one neutral operational fallback for invalid judgement, not an
+  unjudged substantive answer; include footer2.4.39/16.09.2026.
+- Add10tables/3named indexes; preserve all53old schema objects. Quarantine
+  historical native messages including late edits; unknown work is not replayed.
+- Root1141passed/5fixture-skips, migration9/9,22helper tests,64deployed-file
+  hashes, footer, schema invariants and repeated health/config/HTTPS checks passed.
+- One runtime recreation; Console3.2.0 and configuration unchanged. No old-image
+  rollback permitted on the new DB; stop/preserve/forward-repair procedure tested.
+  Paid/live Telegram acceptance and separate knowledge-quality/private Review
+  changes are not included. Lease/master closed06:59:32UTC.
+
 ## [Assistant 2.4.38 / runtime a41518f] — 2026-09-16 — Suspected porn-spam policy
 
 Lifecycle `production-verified`; runtime started04:32:23UTC. Console3.2.0

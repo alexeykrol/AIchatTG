@@ -74,33 +74,25 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current runtime: `a41518f`, production-verified.** The semantic suspected
-porn-spam policy uses the existing immediate ban/cleanup route in the same
-three chats. Local946passed/5fixture-skips; real model recognition not_run.
-One runtime recreation, no config/schema/Console changes; lease/master closed.
-[Release and boundaries](docs/reports/2026-09-16-porn-spam-policy-deployment.md).
+**Current runtime: `2c72e01`, production-verified. Assistant2.4.39 — 16.09.2026.**
+Started2026-09-16 06:57:40UTC; healthy/restart0. Every delivered Assistant
+reply ends with `Версия 2.4.39 от 16.09.2026`, once on its final part.
+One native-revision judge owner, fenced answer delivery and30-second idle
+`/ask` command/hint cleanup are live; substantive and late questions are retained.
+The preceding suspected porn-spam policy remains included.
 
-**Current Assistant version: `2.4.38` — 16.09.2026.** Production image
-`a41518f` started 2026-09-16 04:32:23 UTC. Every delivered Assistant reply
-ends with `Версия 2.4.38 от 16.09.2026`, once on the final part for long answers.
-Approved body copy and body-only dialogue memory are preserved. Public component
-metadata and a pre-release version-bump guard are shared by Codex and Claude Code.
-Root tests946passed/5fixture-skips and migration checks9/9 passed; all58
-deployed runtime/core package files match the exact archive.
-Config, schema, routes, knowledge mount and Console are unchanged. Rollback `335a35a`
-is retained; new live Telegram acceptance was not run. See the
-[current release receipt](docs/reports/2026-09-16-porn-spam-policy-deployment.md)
-for lifecycle and production verification evidence.
+Root1141passed/5unchanged fixture skips, migration9/9 and source guard passed;
+64deployed-file hashes, rendered footer, repeated health/config/Console and
+HTTPS checks passed. Additive schema:53old objects unchanged,25added; integrity
+and legacy-seeding gates passed. Source integrated into main and pushed.
+Config/models/quotas/routes/knowledge/Console are unchanged; lease/master closed.
 
-**Pushed, not deployed: Assistant2.4.39 (`2c72e01`).**
-The isolated ask-protocol candidate passes1141 tests with5 existing fixture
-skips, migration9/9 and the exact-source guard. It adds one-judge ownership,
-30-second idle service-pair cleanup and fenced late/edit handling. Main's
-Assistant runtime still uses the production source; legacy-message quarantine, fallback copy and a
-tested safe rollback remain release gates. See the
-[root candidate review](docs/reports/2026-09-16-ask-protocol-root-review.md).
-The candidate branch and documentation have been published to GitHub;
-[deployment decisions remain open](docs/reports/2026-09-16-ask-protocol-push.md).
+Legacy native messages, including their late edits, are quarantined against
+rejudgement. **No old-binary rollback:** a41518f on this database is unsafe;
+use identity-verified stop/preserved data/tested forward repair under a fresh
+lease. New paid or live Telegram acceptance was not run. See the
+[current release receipt](docs/reports/2026-09-16-assistant-2.4.39-deployment.md).
+The separate partial-knowledge answer-quality issue and private Review remain open.
 
 **Current operator panel: Russian Console 3.2.0**, image `f650fe8`, released
 2026-09-15 23:12:03UTC. Seven pages share Russian navigation, an exact

@@ -8,30 +8,29 @@ updated: 2026-09-16
 
 ## Next
 
-- [ ] CROSS-ROLE-JUDGEMENT-1: PO chose Assistant judgement for questions
-      addressed to it, Moderator judgement for ordinary posts, Moderator
-      enforcement under a validated protocol. Read-only review received;
-      current runtime cannot safely accept Assistant verdicts by simple reroute.
-      Design durable native-message/revision arbiter, one provider owner,
-      strict code-bound verdict and server-derived sanctions with recovery
-      and rollback fences. Local implementation chartered to Assistant's
-      isolated worktree; root retains acceptance/integration/commits.
-      Candidate2c72e01/Assistant2.4.39 is committed/frozen in the isolated
-      branch, lifecycle pushed, not main-integrated/deployed.
-      Root1146total/1141passed/0failed/5fixture-skips; migration9/9 and clean
-      source guard passed. Includes30-second ask-prompt/no-silence UX.
-      `docs/reports/2026-09-16-ask-protocol-root-review.md`.
-      Exact old-a41518f rollback counterexample independently reproduced1/1:
-      late Moderator stream rejudges accepted Assistant question. Tested safe
-      transition/rollback remains required before release; no binary-only downgrade.
-      Forward quarantine passed independent10/10 but old native edits/late
-      deliveries are blocked; that limitation and new fallback copy need approval.
+- [x] CROSS-ROLE-JUDGEMENT-1: Assistant2.4.39/exact2c72e01,
+      lifecycle `production-verified`; main integration762c251 pushed.
+      Native-revision judge owner, strict verdict/enforcement/answer fences,
+     30-second idle ask cleanup and neutral invalid-judgement fallback live.
+      Root1141passed/5fixture-skips, migration9/9,22helper checks;64deployed-file
+      matches/footer, exact additive schema, health/restart0/config/Console passed.
+      PO delegated remaining technical decisions; legacy natives/late edits
+      quarantined. No a415 old-binary downgrade: tested STOP/preserve/forward
+      repair. One recreation,0stop/rollback; lease/master closed06:59:32UTC.
+      New paid/live Telegram acceptance remains not_run, not a claim of answer
+      quality. `docs/reports/2026-09-16-assistant-2.4.39-deployment.md`.
 - [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
       but Moderator rejected router result (`provider_safety_router_invalid`),
       so Assistant skipped before claim and cleanup never started. Read-only
       production trace04:17:46UTC passed; Privacy Mode hypothesis refuted for
-      this incident. Exact contract subreason remains unknown; no bypass,
-      replay or paid probe authorized. See newest `docs/OWNER_FEEDBACK_LOG.md`.
+      this incident. Partial mitigation deployed in2.4.39: one-owner protocol,
+      operational fallback and cleanup; exact old contract subreason remains
+      unknown and real-model validity/answer-quality acceptance not_run.
+      No bypass/replay. See newest `docs/OWNER_FEEDBACK_LOG.md`.
+- [ ] KNOWLEDGE-COVERAGE-COPY-1: reported2.4.38 answer exposes
+      `missingDomains: content` and substitutes general course information.
+      Read-only source diagnosis exists; actual live event/admission/retrieval
+      cause not proven. Separate from2.4.39 deployment; no bundled body rewrite.
 - [x] PORN-SPAM-1: exact runtimea41518f, lifecycle `production-verified`,
       semantic suspected solicitation under existing spam_or_scam/ban_purge.
       Root946passed/5skips, sourceguard/review passed; real recognition not_run.

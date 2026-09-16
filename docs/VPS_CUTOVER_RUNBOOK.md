@@ -250,6 +250,18 @@ write smoke tests require their own exact target and retained-artifact scope.
 
 ## Rollback boundary
 
+**Current protocol boundary (Assistant2.4.39, source2c72e01):** the new runtime
+adds durable judgement/answer ownership and quarantines legacy native messages,
+including late edits. Exacta41518f old runtime/core can rejudge an accepted new
+message on this database; binary downgrade is proven unsafe. Historical image
+rollback references below or in older receipts do not authorize that downgrade.
+Use only a fresh exact lease for identity-verified runtime STOP, preserved data,
+and a separately tested forward repair. Never restore a database blindly.
+The2.4.39 helper tests cover one-shot STOP, unknown outcomes and full bounded
+command budgets; activation requires20minutes remaining so verification and
+STOP fit before lease expiry. An expired/closed lease cannot be reused.
+See [production receipt](reports/2026-09-16-assistant-2.4.39-deployment.md).
+
 Before any approved build, record the untouched current production service
 receipt and create a verified rollback image/source reference for **AIchatTG
 only**. If a new AIchatTG service fails before a webhook or data migration is

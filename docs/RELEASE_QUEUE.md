@@ -1,9 +1,20 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-16 04:34:43UTC, after verified porn-spam deployment. The root integrator owns shared integration
+Checkpoint: 2026-09-16 06:59:32UTC, after verified Assistant2.4.39 deployment. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
+
+Assistant2.4.39, exact runtime `2c72e01cb28452c640c033c91a2060a8eca57201`,
+lifecycle `production-verified`; source main-integrated/pushed, one runtime-only
+recreation06:57:40UTC. PO delegated remaining technical decisions; conservative
+legacy quarantine and tested emergency stop/preserve/forward-repair selected.
+No old-binary downgrade.1141passed/5fixture-skips, migration9/9,22helper tests,
+64source files/footer, exact additive schema/legacy invariants and repeated
+health/restart0/config/Console/HTTPS passed. Lease/master closed06:59:32UTC.
+[Deployment receipt](reports/2026-09-16-assistant-2.4.39-deployment.md).
+Paid/live Telegram acceptance and the separate knowledge-quality issue remain
+not_run/open. The private Review below was not part of this release.
 
 Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 `production-verified`. One Console-only recreation; lease consumed/master closed.
@@ -50,7 +61,7 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 No claim of free storage, new spending, synthetic-collector activation, secret
 change or guessed notification destination follows from queue placement.
 
-## Separate source work — Assistant safety ownership and ask UX
+## Assistant safety ownership and ask UX — completed release
 
 Owner decision relayed by Assistant: Assistant-addressed questions are judged
 by Assistant; ordinary posts by Moderator; Moderator performs sanctions from
@@ -59,23 +70,25 @@ Local implementation was reserved to Assistant in its isolated worktree
 under [ask-protocol-v1](proposals/2026-09-16-ask-protocol-charter-v1.md), following
 the relayed owner instruction «Давай - все делай.». Root retains main integration,
 acceptance and commits; no other writer may touch reserved shared paths.
-The work is now frozen and root committed candidate
-`2c72e01cb28452c640c033c91a2060a8eca57201`, Assistant2.4.39, lifecycle `pushed`.
-It remains in the isolated branch, not merged into main or deployed.
-The owner's push/deploy request was received; candidate and eight docs commits
-were pushed with direct GitHub ref verification. The explicit legacy-behavior
-and failed-rollback gates remain unresolved; no production lease was issued.
-[Push receipt and decision](reports/2026-09-16-ask-protocol-push.md).
+The work is frozen and root committed candidate
+`2c72e01cb28452c640c033c91a2060a8eca57201`, Assistant2.4.39,
+lifecycle `production-verified`; integrated by762c251, pushed and deployed.
+After the dated [initial push/gates](reports/2026-09-16-ask-protocol-push.md),
+PO instructed root to decide remaining technical matters and deploy. Root
+accepted conservative legacy-native quarantine and the neutral fallback,
+repaired/tested the STOP procedure, then issued and consumed the exact lease.
+No active writer/master remains. [Final receipt](reports/2026-09-16-assistant-2.4.39-deployment.md).
 Root full gates1146total/1141passed/0failed/5fixture-skips, migration9/9 and
 clean source guard passed. The30-second prompt/no-silence UX and invalid-router
-fallback remain separate from deployeda41518f. No active writer or lease.
-[Root verification and release gates](reports/2026-09-16-ask-protocol-root-review.md).
+fallback are deployed in2c72e01; real-model acceptance remains not_run.
+[Historical prepared review](reports/2026-09-16-ask-protocol-root-review.md).
 
 Earlier local review checkpoint: three pure-contract defects repaired and
 independently reverified81/81. The later full-suite result is recorded above.
 The exact old-a41518f rollback test reproduces a second judge for a late
-Moderator webhook after new-source acceptance. Root reproduced1/1; safe
-transition/rollback mitigation is not_run and blocks release.
+Moderator webhook after new-source acceptance. Root reproduced1/1; old-binary
+rollback remains prohibited. The alternative stop/preserve/forward-repair was
+tested22/22, including the repaired complete command-budget reserve.
 The bounded [local runner extension](proposals/2026-09-16-ask-protocol-local-runner-extension-v3.md)
 keeps strict validation and explicitly synthetic safety. The
 [answer-claim clarification](proposals/2026-09-16-ask-protocol-answer-claim-clarification-v4.md)
@@ -84,5 +97,6 @@ after native delivery is calling, partial, uncertain or confirmed.
 Timer follow-up68/68 plus4 probes passed on its earlier snapshot. Independent
 forward-upgrade review found legacy double-judgement/unknown-fence bypasses;
 the [v5 legacy transition](proposals/2026-09-16-ask-protocol-legacy-transition-v5.md)
-passed independent10/10 synthetic checks. Quarantined legacy edits/late deliveries and
-the still-unsafe old-binary rollback need explicit release treatment/approval.
+passed independent10/10 synthetic checks. Quarantined legacy edits/late deliveries
+are the accepted conservative transition, not restored moderation of old edits.
+Any further production action now needs a fresh exact lease; do not reuse closure.

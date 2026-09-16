@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-16 — Deploy2.4.39 and resolve remaining technical decisions
+
+**Owner instruction:** root received «Ну так задеплой и запуш». After root
+presented legacy-message quarantine and the failed old-binary rollback test,
+task «Ассистент» relayed: «Какие воросы? О чем ты? Просто деплой. Зачем все это?
+Все вопросы решай сам.» No native message ID was exposed or invented.
+
+**Action:** root chose conservative identifier-only legacy quarantine,
+including late edits; retained the candidate's neutral operational fallback;
+designed and independently tested an exact-candidate emergency STOP with data
+preservation and subsequent tested forward repair. A review found the original
+five-minute command-budget reserve insufficient; it was repaired to20minutes
+before activation.22/22 offline tests passed. No a41518f downgrade/DB restore.
+
+**Status: deployed.** Exact2c72e01/Assistant2.4.39, started06:57:40UTC,
+main-integrated and pushed;1141passed/5fixture-skips, migration9/9,64file/footer
+and production additive-schema/config/health/Console/HTTPS checks passed.
+Lease closed06:59:11UTC, SSH/socket closure verified06:59:32UTC.
+No new paid/live Telegram acceptance; no private Review or knowledge-quality
+bundle. Old native edits remain quarantined, not silently moderated by old code.
+[Release receipt](reports/2026-09-16-assistant-2.4.39-deployment.md).
+
 ## 2026-09-16 — Partial-knowledge reply exposes an internal field name
 
 **Owner feedback relayed by task «Ассистент»:** a live answer about course
@@ -67,6 +89,11 @@ rollback is proven unsafe and needs a tested alternative. New neutral failure
 copy is a separate candidate for approval. See
 [root review](reports/2026-09-16-ask-protocol-root-review.md).
 
+**Later outcome:** the owner's explicit technical delegation above supersedes
+those prepared-state gates.2.4.39 is now main-integrated, pushed and
+production-verified with a tested STOP alternative. The original provider
+rejection field and live answer-quality acceptance remain unverified.
+
 ## 2026-09-15 — Assistant judges addressed questions; Moderator enforces
 
 **Decision relayed by task «Ассистент»:** questions addressed to Assistant
@@ -97,6 +124,9 @@ until a verified repair, not a routing bypass.
 **Later local checkpoint:** candidate2c72e01 is frozen and committed in the
 isolated branch with root gates passed; the newer entry above records current
 prepared state and unresolved release decisions. Production is unchanged.
+
+**Final release outcome:** this local checkpoint is historical; the new top
+entry and2.4.39 receipt record the subsequent approved/verified deployment.
 
 ## 2026-09-15 — A reply to the bare-ask hint receives no answer or cleanup
 

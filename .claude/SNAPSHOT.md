@@ -4,7 +4,22 @@
 
 ## Текущее состояние
 
-- **Porn-spam, lifecycle `production-verified`:** exact runtime `a41518f`,
+- **Assistant2.4.39, lifecycle `production-verified`:** exact runtime `2c72e01`,
+  image7fc9a7e6, StartedAt2026-09-16T06:57:40.921400883Z, healthy/restart0.
+  Main integration762c251 и candidate branch запушены и проверены на GitHub.
+  Single native-revision judge, answer fences,30-second idle ask cleanup и
+  operational fallback выложены. Root1141passed/5fixture-skips, migration9/9,
+ 22helper tests;64source hashes/footer/config/HTTPS passed.
+  Production schema53old objects unchanged+25additions; восемь integrity/legacy
+  invariant counts0. Legacy363natives/426jobs quarantined, включая старые edits;
+  новый protocol head наблюдался, но semantic/live Telegram acceptance not_run.
+  PO передал технические решения root и потребовал деплой. Один runtime recreate,
+ 0stop/rollback/restore. Config/models/quotas/routes/knowledge и Console3.2.0
+  сохранены. Lease closed06:59:11UTC, SSH/socket closure verified06:59:32UTC.
+  **Нельзя откатывать наa41518f/335a35a с новой DB**: stop/preserve/forward-repair
+  требует новой exact lease. Partial-knowledge answer и private Review не включены.
+  `docs/reports/2026-09-16-assistant-2.4.39-deployment.md`.
+- **Предыдущий porn-spam release, lifecycle `production-verified`:** exact runtime `a41518f`,
   семантическое подозрение на порнографический спам ведёт по существующему
   ban_purge без предупреждения. Local946passed/5skips, review/source guard passed;
   реальная модель не проверялась. Source pushed; Assistant2.4.38/16.09.2026,
@@ -14,23 +29,12 @@
   Повтор04:34:18UTC; lease consumed, SSH closed04:34:43UTC. Consolef650fe8
   остаётся3.2.0. Rollback335a35a; удалённые сообщения не восстанавливает.
   `docs/reports/2026-09-16-porn-spam-policy-deployment.md`.
-- **Отдельно, lifecycle pushed, не deployed:** `/ask` reply дошёл до обоих ботов, но router
-  rejected→manual_review→Assistant skipped, поэтому нет ответа/уборки.
-  PO выбрал Assistant-judges для адресованных ему вопросов и Moderator-enforces;
-  ordinary posts остаются Moderator-judges. Read-only review получен; после
-  «Давай - все делай.» выдан bounded local charter Assistant в isolated worktree.
-  Root сохранил candidate2c72e01/Assistant2.4.39 в isolated branch; source
-  запушен в isolated branch, не в main runtime и не deployed. Root1141passed/5fixture-skips/0failed,
-  migration9/9 и exact source guard passed. Source freeze; активной lease нет.
- 30-second prompt/no-silence UX включён. Это не частьa41518f и не safety bypass.
-  `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`.
-  Contract81/81, timer68/68+4 probes, v4 claims55/55+5 probes и conservative
-  forward transition10/10 независимо passed. Exact old-a41518f rollback
-  воспроизводит повторного судью: безопасный rollback остаётся release blocker.
-  Карантин старых edits/late deliveries и fallback copy требуют PO решения.
-  `docs/reports/2026-09-16-ask-protocol-root-review.md`.
-  Все8 локальных docs commits также запушены; live state не менялся.
-  `docs/reports/2026-09-16-ask-protocol-push.md`.
+- **Residual ASK-ROUTER-INVALID, partial:** исторический reply дошёл до обоих
+  ботов, но router rejected→manual_review→Assistant skipped.2.4.39 заменяет
+  ownership protocol и добавляет non-silent fallback/cleanup без safety bypass.
+  Точный rejected field старого результата неизвестен; новая платная проверка
+  и live Telegram acceptance не выполнены. Не объявлять качество всех ответов
+  доказанным на основании health/деплоя.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.
@@ -65,7 +69,7 @@
   Recipient/principal/production
   limits ещё не утверждены; реальные сбор/уведомления выключены.
   Standalone3.1.1 включён в production3.2.0.
-  На текущем checkpoint production3.2.0/f650fe8 + runtimea41518f;
+  На текущем checkpoint production3.2.0/f650fe8 + runtime2c72e01;
   активной lease/SSH нет.
 - **Cost diagnosis, read-only passed22:33:50UTC:** из последних5 записей все
   имеют answer/analyzer tokens,4 имеют exact event-level no-router proof,1 нет.
