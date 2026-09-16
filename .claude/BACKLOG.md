@@ -18,6 +18,10 @@ updated: 2026-09-16
       isolated worktree; root retains acceptance/integration/commits.
       `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`; no candidate/lease yet.
       Includes 30-second ask-prompt/no-silence UX; not deployed.
+      Pure contract repairs independently81/81; final acceptance pending.
+      Exact old-a41518f rollback counterexample independently reproduced1/1:
+      late Moderator stream rejudges accepted Assistant question. Tested safe
+      transition/rollback remains required before release; no binary-only downgrade.
 - [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
       but Moderator rejected router result (`provider_safety_router_invalid`),
       so Assistant skipped before claim and cleanup never started. Read-only

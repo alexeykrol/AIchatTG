@@ -55,3 +55,41 @@ that addition and its new self-routing assertion pending separate explicit
 owner scope; baseline public/course routing must remain intact. New timer
 Help/hint sentences are visible-copy candidates, not automatically approved
 wording, and must not imply that a late question will be rejected.
+
+## Pure submission-contract review and repair checkpoint
+
+Independent strict-trace synthetic reproductions found three additional
+defects: a stale opaque claim could mutate a newer generation through the
+conflict path; equivalent semantic objects with different JSON key order could
+conflict; arbitrary usage metadata could persist private text in decision JSON.
+Root forwarded all three before acceptance. Original reproduced hashes:
+
+- judgement-envelope.mjs: `e4dedde62101d514c53e0c88e377cfd5b743ef0f2cfecec30efbd0168d69678a`
+- judgement-store.mjs: `c3612bda38fdcdead38334828c00d2d581a05de4d3901604583fab369928f1ab`
+- safety-v3.mjs: `57f1709fc508bbf1445ce4732645a786c03f32d61f4ba18fc5875ce34e04a5c2`
+
+After repair, independent reproductions and contract/Guard suites passed81/81:
+
+- Stale generations cannot affect current jobs/dispositions/actions before or
+  after generation2 accepts; identical/different/invalid old results are fenced.
+- Top-level and recursively reordered keys replay the original receipt.
+- Arbitrary/nested private usage fields are omitted from durable records;
+  only the bounded accounting projection remains.
+
+Stable hashes before/after this follow-up review:
+
+- judgement-envelope.mjs: `b1c17f4a73bb9dfe2902b6884bb6c6d16006ffe2c360c46708b26d991603955d`
+- judgement-store.mjs: `564794b0edc14a2bb973fa6823e4ad1f5b8ba1e5786541a5bc98a46b547b0d75`
+- safety-v3.mjs: `10990981efe1d72882fa9ee0c82915d223061b50a04a2853cab9591860b23f5b`
+
+This is `passed` for those findings on that snapshot, not full candidate
+acceptance. Runtime, timer and local runner integration were still changing.
+
+## Rollback limitation reported by implementation
+
+The worker reports a synthetic exact-a41518f rollback counterexample: new
+source accepts an Assistant-owned question, old code opens the additive DB,
+then a late Moderator webhook makes a second semantic call for that native
+message. Its local regression reproduces the defect1/1; root independently
+reran it with Node20.20.0 and reproduced1/1. Schema readability is not safe rollback. A controlled
+stop/drain/quarantine mitigation remains `not_run` and a release blocker.

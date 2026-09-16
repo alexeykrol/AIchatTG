@@ -14,7 +14,7 @@
   Повтор04:34:18UTC; lease consumed, SSH closed04:34:43UTC. Consolef650fe8
   остаётся3.2.0. Rollback335a35a; удалённые сообщения не восстанавливает.
   `docs/reports/2026-09-16-porn-spam-policy-deployment.md`.
-- **Отдельно, не реализовано:** `/ask` reply дошёл до обоих ботов, но router
+- **Отдельно, local implementation in progress, не deployed:** `/ask` reply дошёл до обоих ботов, но router
   rejected→manual_review→Assistant skipped, поэтому нет ответа/уборки.
   PO выбрал Assistant-judges для адресованных ему вопросов и Moderator-enforces;
   ordinary posts остаются Moderator-judges. Read-only review получен; после
@@ -22,6 +22,10 @@
   Root сохраняет acceptance/integration/commits; готового кандидата/lease нет.
  30-second prompt/no-silence UX включён. Это не частьa41518f и не safety bypass.
   `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`.
+  Три contract finding исправлены/независимо81/81; final timer/runtime/full suite
+  ещё не приняты. Exact old-a41518f rollback воспроизводит повторного судью,
+  root1/1: безопасный rollback/transition пока release blocker. Локальным
+  runner-правкам выдан v3 addendum; v4 сохраняет native-once delivery при edit.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.

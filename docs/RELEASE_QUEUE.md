@@ -61,3 +61,14 @@ the relayed owner instruction «Давай - все делай.». Root retains 
 acceptance and commits; no other writer may touch reserved shared paths.
 No accepted candidate or deployment lease yet. The 30-second prompt/no-silence
 UX and invalid-router repair remain separate from deployeda41518f.
+
+Local review checkpoint: three pure-contract defects repaired and independently
+reverified81/81; final timer/runtime/full-suite acceptance remains pending.
+The exact old-a41518f rollback test reproduces a second judge for a late
+Moderator webhook after new-source acceptance. Root reproduced1/1; safe
+transition/rollback mitigation is not_run and blocks release.
+The bounded [local runner extension](proposals/2026-09-16-ask-protocol-local-runner-extension-v3.md)
+keeps strict validation and explicitly synthetic safety. The
+[answer-claim clarification](proposals/2026-09-16-ask-protocol-answer-claim-clarification-v4.md)
+permits replacement of wholly-unsent stale work, not repeat visible answers
+after native delivery is calling, partial, uncertain or confirmed.
