@@ -17,9 +17,11 @@
 - **Отдельно, не реализовано:** `/ask` reply дошёл до обоих ботов, но router
   rejected→manual_review→Assistant skipped, поэтому нет ответа/уборки.
   PO выбрал Assistant-judges для адресованных ему вопросов и Moderator-enforces;
-  ordinary posts остаются Moderator-judges. Read-only protocol review получен,
-  shared implementation reservation/lease нет.30-second prompt/no-silence UX
-  proposal отдельно. Это не частьa41518f и не обход safety gate.
+  ordinary posts остаются Moderator-judges. Read-only review получен; после
+  «Давай - все делай.» выдан bounded local charter Assistant в isolated worktree.
+  Root сохраняет acceptance/integration/commits; готового кандидата/lease нет.
+ 30-second prompt/no-silence UX включён. Это не частьa41518f и не safety bypass.
+  `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.

@@ -14,8 +14,10 @@ updated: 2026-09-16
       current runtime cannot safely accept Assistant verdicts by simple reroute.
       Design durable native-message/revision arbiter, one provider owner,
       strict code-bound verdict and server-derived sanctions with recovery
-      and rollback fences. Root-owned shared scope; no implementation yet.
-      30-second ask-prompt/no-silence UX proposal remains separate.
+      and rollback fences. Local implementation chartered to Assistant's
+      isolated worktree; root retains acceptance/integration/commits.
+      `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`; no candidate/lease yet.
+      Includes 30-second ask-prompt/no-silence UX; not deployed.
 - [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
       but Moderator rejected router result (`provider_safety_router_invalid`),
       so Assistant skipped before claim and cleanup never started. Read-only

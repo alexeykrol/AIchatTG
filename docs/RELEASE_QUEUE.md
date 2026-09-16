@@ -55,6 +55,9 @@ change or guessed notification destination follows from queue placement.
 Owner decision relayed by Assistant: Assistant-addressed questions are judged
 by Assistant; ordinary posts by Moderator; Moderator performs sanctions from
 the accepted protocol. Root received the read-only cross-role arbiter review.
-No accepted implementation candidate, shared-write delegation or deployment
-lease exists. The 30-second prompt/no-silence UX proposal and the diagnosed
-`provider_safety_router_invalid` incident are separate from deployeda41518f.
+Local implementation is now reserved to Assistant in its isolated worktree
+under [ask-protocol-v1](proposals/2026-09-16-ask-protocol-charter-v1.md), following
+the relayed owner instruction «Давай - все делай.». Root retains main integration,
+acceptance and commits; no other writer may touch reserved shared paths.
+No accepted candidate or deployment lease yet. The 30-second prompt/no-silence
+UX and invalid-router repair remain separate from deployeda41518f.

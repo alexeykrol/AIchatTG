@@ -37,11 +37,14 @@ a shared revision key; timeout fallback to a second judge risks duplicate calls
 and sanctions. Assistant may answer only after exact-revision durable allow.
 Rollback compatibility needs a deliberate plan before any schema/ownership change.
 
-**Status: proposed implementation; product direction accepted.** Root owns
-shared core/runtime/database/Guard integration; no worker write reservation,
-implementation candidate or production lease has been issued. No change is
-included ina41518f. The existing `/ask` invalid-router diagnosis below remains
-open, not fixed by a routing bypass.
+**Status: proposed implementation; local work chartered.** The Assistant task
+then relayed the owner's «Давай - все делай.». Root issued the bounded
+[ask-protocol charter](proposals/2026-09-16-ask-protocol-charter-v1.md): one
+temporary exclusive writer in an isolated worktree; root retains integration,
+release metadata, acceptance and commits. Tests and a compatibility/rollback
+plan are required. No implementation candidate or production lease yet; no
+change is included ina41518f. The diagnosed invalid-router incident stays open
+until a verified repair, not a routing bypass.
 
 ## 2026-09-15 — A reply to the bare-ask hint receives no answer or cleanup
 
