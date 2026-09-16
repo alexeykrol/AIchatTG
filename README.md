@@ -92,6 +92,14 @@ is retained; new live Telegram acceptance was not run. See the
 [current release receipt](docs/reports/2026-09-16-porn-spam-policy-deployment.md)
 for lifecycle and production verification evidence.
 
+**Prepared locally, not pushed or deployed: Assistant2.4.39 (`2c72e01`).**
+The isolated ask-protocol candidate passes1141 tests with5 existing fixture
+skips, migration9/9 and the exact-source guard. It adds one-judge ownership,
+30-second idle service-pair cleanup and fenced late/edit handling. Main's
+Assistant runtime still uses the production source; legacy-message quarantine, fallback copy and a
+tested safe rollback remain release gates. See the
+[root candidate review](docs/reports/2026-09-16-ask-protocol-root-review.md).
+
 **Current operator panel: Russian Console 3.2.0**, image `f650fe8`, released
 2026-09-15 23:12:03UTC. Seven pages share Russian navigation, an exact
 version/date/time header and detailed Help. Settings and Markdown editors

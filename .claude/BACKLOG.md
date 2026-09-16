@@ -16,12 +16,16 @@ updated: 2026-09-16
       strict code-bound verdict and server-derived sanctions with recovery
       and rollback fences. Local implementation chartered to Assistant's
       isolated worktree; root retains acceptance/integration/commits.
-      `docs/proposals/2026-09-16-ask-protocol-charter-v1.md`; no candidate/lease yet.
-      Includes 30-second ask-prompt/no-silence UX; not deployed.
-      Pure contract repairs independently81/81; final acceptance pending.
+      Candidate2c72e01/Assistant2.4.39 is committed/frozen in the isolated
+      branch, lifecycle prepared, not main-integrated/pushed/deployed.
+      Root1146total/1141passed/0failed/5fixture-skips; migration9/9 and clean
+      source guard passed. Includes30-second ask-prompt/no-silence UX.
+      `docs/reports/2026-09-16-ask-protocol-root-review.md`.
       Exact old-a41518f rollback counterexample independently reproduced1/1:
       late Moderator stream rejudges accepted Assistant question. Tested safe
       transition/rollback remains required before release; no binary-only downgrade.
+      Forward quarantine passed independent10/10 but old native edits/late
+      deliveries are blocked; that limitation and new fallback copy need approval.
 - [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
       but Moderator rejected router result (`provider_safety_router_invalid`),
       so Assistant skipped before claim and cleanup never started. Read-only

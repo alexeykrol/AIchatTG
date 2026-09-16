@@ -19,6 +19,33 @@ Newest entries first.
 
 ---
 
+## 2026-09-16 — Preserve regression cases and explicit30-second hint wording
+
+**Owner instruction relayed by task «Ассистент»**
+(`019fd023-a940-7cf2-864a-75b20fd842ef`): «Не забывай учитывать все кейсы,
+а то мы уже ходили по кругу. по несколько раз исправляя одни и те же ошибки.»
+The task did not expose a native message ID; none is invented here.
+
+The same task relayed the explicit hint addition «у вас 30 секунд, чтобы
+послать вопрос» and the requirement to answer a late reply anyway. Only
+sentence-initial capitalization and punctuation were added. The deadline
+governs idle service-message cleanup, not permission to ask a late question.
+
+**Implementation/evidence:** root candidate2c72e01/Assistant2.4.39 freezes
+cross-stream ownership, strict verdicts, delayed-ACK cancellation, independent
+expiry/restart, both cleanup race orders, late replies and native-once edited
+answer claims. Independent counterexamples became regressions; a broad
+Assistant-self routing change was rejected and removed rather than rewriting
+historical course gold. Root1141passed/0failed/5fixture-skips, migration9/9
+and source guard passed after the planned version bump.
+
+**Status: prepared, not deployed or main-integrated.** The exact original
+provider rejection field and real-model answer adequacy were not newly tested.
+Old-native edit quarantine needs explicit acceptance; automatic old-binary
+rollback is proven unsafe and needs a tested alternative. New neutral failure
+copy is a separate candidate for approval. See
+[root review](reports/2026-09-16-ask-protocol-root-review.md).
+
 ## 2026-09-15 — Assistant judges addressed questions; Moderator enforces
 
 **Decision relayed by task «Ассистент»:** questions addressed to Assistant
@@ -45,6 +72,10 @@ release metadata, acceptance and commits. Tests and a compatibility/rollback
 plan are required. No implementation candidate or production lease yet; no
 change is included ina41518f. The diagnosed invalid-router incident stays open
 until a verified repair, not a routing bypass.
+
+**Later local checkpoint:** candidate2c72e01 is frozen and committed in the
+isolated branch with root gates passed; the newer entry above records current
+prepared state and unresolved release decisions. Production is unchanged.
 
 ## 2026-09-15 — A reply to the bare-ask hint receives no answer or cleanup
 

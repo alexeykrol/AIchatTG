@@ -55,15 +55,20 @@ change or guessed notification destination follows from queue placement.
 Owner decision relayed by Assistant: Assistant-addressed questions are judged
 by Assistant; ordinary posts by Moderator; Moderator performs sanctions from
 the accepted protocol. Root received the read-only cross-role arbiter review.
-Local implementation is now reserved to Assistant in its isolated worktree
+Local implementation was reserved to Assistant in its isolated worktree
 under [ask-protocol-v1](proposals/2026-09-16-ask-protocol-charter-v1.md), following
 the relayed owner instruction «Давай - все делай.». Root retains main integration,
 acceptance and commits; no other writer may touch reserved shared paths.
-No accepted candidate or deployment lease yet. The 30-second prompt/no-silence
-UX and invalid-router repair remain separate from deployeda41518f.
+The work is now frozen and root committed candidate
+`2c72e01cb28452c640c033c91a2060a8eca57201`, Assistant2.4.39, lifecycle `prepared`.
+It remains in the isolated branch, not merged into main, pushed or deployed.
+Root full gates1146total/1141passed/0failed/5fixture-skips, migration9/9 and
+clean source guard passed. The30-second prompt/no-silence UX and invalid-router
+fallback remain separate from deployeda41518f. No active writer or lease.
+[Root verification and release gates](reports/2026-09-16-ask-protocol-root-review.md).
 
-Local review checkpoint: three pure-contract defects repaired and independently
-reverified81/81; final timer/runtime/full-suite acceptance remains pending.
+Earlier local review checkpoint: three pure-contract defects repaired and
+independently reverified81/81. The later full-suite result is recorded above.
 The exact old-a41518f rollback test reproduces a second judge for a late
 Moderator webhook after new-source acceptance. Root reproduced1/1; safe
 transition/rollback mitigation is not_run and blocks release.
@@ -75,5 +80,5 @@ after native delivery is calling, partial, uncertain or confirmed.
 Timer follow-up68/68 plus4 probes passed on its earlier snapshot. Independent
 forward-upgrade review found legacy double-judgement/unknown-fence bypasses;
 the [v5 legacy transition](proposals/2026-09-16-ask-protocol-legacy-transition-v5.md)
-is being implemented locally. Quarantined legacy edits/late deliveries and
+passed independent10/10 synthetic checks. Quarantined legacy edits/late deliveries and
 the still-unsafe old-binary rollback need explicit release treatment/approval.
