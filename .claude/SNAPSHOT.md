@@ -4,14 +4,22 @@
 
 ## Текущее состояние
 
-- **Porn-spam, lifecycle `prepared`:** exact runtime candidate `a41518f`,
+- **Porn-spam, lifecycle `production-verified`:** exact runtime `a41518f`,
   семантическое подозрение на порнографический спам ведёт по существующему
   ban_purge без предупреждения. Local946passed/5skips, review/source guard passed;
-  реальная модель не проверялась. Версия будущего runtime/Assistant2.4.38,
-  текущий335a35a/2.4.37 и Consolef650fe8 здоровы на04:08:03UTC. Не pushed/deployed.
-  Root запрашивает одно exact-SHA решение для трёх текущих чатов с необратимостью
-  удаления; SSH закрыт, lease нет. Queue1, private Review отдельно queue2.
-  `docs/reports/2026-09-16-porn-spam-policy-candidate.md`.
+  реальная модель не проверялась. Source pushed; Assistant2.4.38/16.09.2026,
+  старт04:32:23.874617151UTC, image dd64eee0, healthy/restart0.
+  Exact PO approval принят; одна recreation,0rollback.58-file match, footer,
+  config/schema/mounts/routes/logging/Console preservation и HTTPS/auth passed.
+  Повтор04:34:18UTC; lease consumed, SSH closed04:34:43UTC. Consolef650fe8
+  остаётся3.2.0. Rollback335a35a; удалённые сообщения не восстанавливает.
+  `docs/reports/2026-09-16-porn-spam-policy-deployment.md`.
+- **Отдельно, не реализовано:** `/ask` reply дошёл до обоих ботов, но router
+  rejected→manual_review→Assistant skipped, поэтому нет ответа/уборки.
+  PO выбрал Assistant-judges для адресованных ему вопросов и Moderator-enforces;
+  ordinary posts остаются Moderator-judges. Read-only protocol review получен,
+  shared implementation reservation/lease нет.30-second prompt/no-silence UX
+  proposal отдельно. Это не частьa41518f и не обход safety gate.
 - **Console3.2.0, lifecycle `production-verified`:** source `f650fe8`,
   релиз2026-09-15T23:12:03Z, StartedAt23:12:04.671980044Z, image6f768088.
   Проверенная история pushed; exact Git archive без локальных Moderator-файлов.
@@ -23,10 +31,10 @@
   остальные config/routes/schema/drafts сохранены. RollbackConsole3.1.0/eb0f7fe.
   Lease consumed, SSH closed23:13:28UTC; одна recreation,0rollback.
   `docs/reports/2026-09-15-console-v32-deployment.md`.
-- **Отдельная очередь private Review:** Moderator position2, PO назначил его механическим
+- **Отдельная очередь private Review:** Moderator position1, PO назначил его механическим
   исполнителем следующего деплоя; root сохраняет integration/lock/acceptance.
-  Локальный source1829573/Console3.3.0 принят, lifecycle `prepared`, не pushed
-  и не deployed. Два P2 и fingerprint bypass исправлены; root905passed/5skips,
+  Source1829573/Console3.3.0 принят, lifecycle `pushed`, не deployed.
+  Два P2 и fingerprint bypass исправлены; root905passed/5skips,
   Console159/159, independent review/source guard passed. Shared hook строго
   disabled без store/collector/sender; Help это объясняет. Lease пока нет.
   Следующий LOCAL contract-only bridge charter передан Moderator, frozen
@@ -46,7 +54,8 @@
   Recipient/principal/production
   limits ещё не утверждены; реальные сбор/уведомления выключены.
   Standalone3.1.1 включён в production3.2.0.
-  Текущее production3.2.0/f650fe8 + runtime335a35a; активной lease/SSH нет.
+  На текущем checkpoint production3.2.0/f650fe8 + runtimea41518f;
+  активной lease/SSH нет.
 - **Cost diagnosis, read-only passed22:33:50UTC:** из последних5 записей все
   имеют answer/analyzer tokens,4 имеют exact event-level no-router proof,1 нет.
   Это ещё не4 подтверждённых цены: rate/eligibility/stage checks впереди.
@@ -87,7 +96,7 @@
   три страницы проверены по HTTP/source, визуально в этом проходе not_run.
   Точная квитанция и визуальная проверка:
   `docs/reports/2026-09-15-console-v3-deployment.md`.
-- **Production, lifecycle `production-verified`:** Assistant **2.4.37 от 15.09.2026**, image `335a35a`, запуск
+- **Предыдущий production, lifecycle `production-verified`:** Assistant **2.4.37 от 15.09.2026**, image `335a35a`, запуск
   21:01:48 UTC. Восстановлен footer в каждом фактически отправленном ответе,
   один раз внизу последней части. Body-only память и утверждённый текст сохранены.
   Единая metadata и release guard закреплены для Codex/Claude; 758 root tests,

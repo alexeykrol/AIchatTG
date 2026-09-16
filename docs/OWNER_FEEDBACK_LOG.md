@@ -19,6 +19,30 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Assistant judges addressed questions; Moderator enforces
+
+**Decision relayed by task «Ассистент»:** questions addressed to Assistant
+should be judged by Assistant; Moderator applies sanctions using that protocol.
+Ordinary posts remain Moderator judgement plus enforcement. This is separate
+from the active porn-spam release, not permission to bypass safety checks.
+The related30-second ask-prompt expiry/no-silence UX is retained as proposed
+source work, not a shipped behavior or newly invented approved response copy.
+
+**Diagnosis / recommendation:** the read-only Moderator review, pinned toa41518f,
+found no supported submission path for an Assistant-issued verdict. A shared
+durable arbiter must choose one judge using native message/revision identity,
+bind trusted raw evidence, validate the result strictly, derive sanctions in
+code, and persist judgement/enforcement/recovery fences. Bot update IDs are not
+a shared revision key; timeout fallback to a second judge risks duplicate calls
+and sanctions. Assistant may answer only after exact-revision durable allow.
+Rollback compatibility needs a deliberate plan before any schema/ownership change.
+
+**Status: proposed implementation; product direction accepted.** Root owns
+shared core/runtime/database/Guard integration; no worker write reservation,
+implementation candidate or production lease has been issued. No change is
+included ina41518f. The existing `/ask` invalid-router diagnosis below remains
+open, not fixed by a routing bypass.
+
 ## 2026-09-15 — A reply to the bare-ask hint receives no answer or cleanup
 
 **Reported:** task «Ассистент» relayed the owner's screenshot: at about
@@ -90,20 +114,28 @@ current turn is `01a0a861-d194-7ad2-b92c-1ac845036bf8`, started04:02:58UTC on
 2026-09-16; it is not a user-message ID. Its message bodies remain unavailable
 to the root thread reader, so quotes retain worker-relay attribution.
 
-**Status: prepared locally.** Root loaded the versioned semantic supplement
+**Status: deployed.** Exact sourcea41518f was approved, pushed and deployed
+2026-09-16T04:32:23UTC. Root946passed/5fixture-skips,58-file image match,
+offline policy/footer, repeated health/config/schema/Console and HTTPS/auth
+checks passed. One runtime recreation/0rollback; lease/master closed04:34:43UTC.
+[Production receipt](reports/2026-09-16-porn-spam-policy-deployment.md).
+
+**Implementation and retained limits:** Root loaded the versioned semantic supplement
 under existing `spam_or_scam`, added its receipt hash and synthetic contract
 tests; Guard exemptions and action/idempotency fences remain unchanged.
 No new zero-model heuristic or fake provider boundary is needed for this slice.
-Assistant component metadata advances to2.4.38/planned2026-09-16 as required by
-the shared-source release guard; current live2.4.37 is unchanged.36synthetic
+Assistant component metadata advances to2.4.38/2026-09-16 as required by
+the shared-source release guard; this is now live.36synthetic
 labels are contract replay, not measured recognition. Rich-text-only quotation
 provenance is still unavailable, and the pre-existing link hard rule can still
 block a legitimate URL-containing report. These are not new exemptions.
 Provider/error/Guard failures remain fail-closed; a valid semantic spam verdict
 does not wait for review. New paid evaluation, capture, scraping and replay are
-excluded. A single exact candidate/service/three-current-chat risk decision
-and release lease are still required before mutation; rollback cannot restore
-deleted Telegram messages. The two Review bridge decisions remain separate.
+excluded. The exact candidate/service/three-current-chat risk decision was
+answered «Да, подтверждаю.» and relayed by the asking Moderator task;
+turn01a0a871-1515-75d3-905a-7156d240dc59 is not a message ID.
+Rollback cannot restore deleted Telegram messages. The two Review bridge
+decisions remain separate and unanswered.
 [Local charter](proposals/2026-09-16-porn-spam-policy-charter-v1.md).
 
 ## 2026-09-15 — Find repeated profile-bait spam and prepare immediate sanctions

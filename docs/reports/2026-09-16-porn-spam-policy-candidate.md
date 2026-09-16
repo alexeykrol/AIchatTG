@@ -1,7 +1,10 @@
 # Suspected porn-spam — exact runtime candidate
 
-Lifecycle: `prepared`. Source `a41518f4a4fd105cf19e7fc1a64fd35b77233084`.
-Not pushed, deployed or enabled. Root is sole integrator/release owner.
+Current lifecycle: `production-verified`. Source
+`a41518f4a4fd105cf19e7fc1a64fd35b77233084` was pushed and deployed at04:32:23UTC
+on2026-09-16. [Deployment and closed lease](2026-09-16-porn-spam-policy-deployment.md).
+The remaining text preserves the earlier pre-approval candidate checkpoint;
+its pending/not-run deployment statements are historical, not current status.
 
 ## Requested outcome and source
 

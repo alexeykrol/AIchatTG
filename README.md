@@ -74,23 +74,22 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Prepared, not deployed:** runtime source `a41518f` adds the semantic suspected
-porn-spam policy using the existing immediate ban/cleanup route. Local tests:
-946passed/5fixture-skips; real model recognition not_run. Runtime-only release,
-same three chats and irreversible deletion need the exact release decision.
-The source carries planned Assistant2.4.38/16.09.2026; current production below
-is unchanged. [Candidate and boundaries](docs/reports/2026-09-16-porn-spam-policy-candidate.md).
+**Current runtime: `a41518f`, production-verified.** The semantic suspected
+porn-spam policy uses the existing immediate ban/cleanup route in the same
+three chats. Local946passed/5fixture-skips; real model recognition not_run.
+One runtime recreation, no config/schema/Console changes; lease/master closed.
+[Release and boundaries](docs/reports/2026-09-16-porn-spam-policy-deployment.md).
 
-**Current Assistant version: `2.4.37` — 15.09.2026.** Production image
-`335a35a` started 2026-09-15 21:01:48 UTC. Every delivered Assistant reply now
-ends with `Версия 2.4.37 от 15.09.2026`, once on the final part for long answers.
+**Current Assistant version: `2.4.38` — 16.09.2026.** Production image
+`a41518f` started 2026-09-16 04:32:23 UTC. Every delivered Assistant reply
+ends with `Версия 2.4.38 от 16.09.2026`, once on the final part for long answers.
 Approved body copy and body-only dialogue memory are preserved. Public component
 metadata and a pre-release version-bump guard are shared by Codex and Claude Code.
-Root tests 758/758, historical receipt checks 29/29 and migration checks 9/9
-passed; all 57 deployed runtime/core source files match the exact archive.
-Config, schema, routes, knowledge and Console are unchanged. Rollback `0b54148`
+Root tests946passed/5fixture-skips and migration checks9/9 passed; all58
+deployed runtime/core package files match the exact archive.
+Config, schema, routes, knowledge mount and Console are unchanged. Rollback `335a35a`
 is retained; new live Telegram acceptance was not run. See the
-[current release receipt](docs/reports/2026-09-15-assistant-2.4.37-deployment.md)
+[current release receipt](docs/reports/2026-09-16-porn-spam-policy-deployment.md)
 for lifecycle and production verification evidence.
 
 **Current operator panel: Russian Console 3.2.0**, image `f650fe8`, released
@@ -111,12 +110,14 @@ and updated Help; bot behavior, rates and schema remain unchanged. At acceptance
 four of the last five questions had complete estimates averaging $0.0065898;
 the fifth full price remained unknown. Independent ordinary Chrome QA passed.
 
-**Local candidate only: Console 3.3.0 (`1829573`).** The private Moderator
+**Pushed, not deployed: Console 3.3.0 (`1829573`).** The private Moderator
 review workflow is accepted with synthetic tests and a disabled server mount;
 there is no live collector, private-store bootstrap or Telegram delivery.
 Root905passed/5explicit fixture skips, Console159/159 and independent review
-passed. It is not pushed/deployed; the next step is a local capture/checkpoint/
-delivery bridge contract. See the [acceptance report](docs/reports/2026-09-15-moderation-review-integration.md).
+passed. Two capture/checkpoint/delivery bridge policy decisions remain open;
+no activation lease exists. The `/ask` incident and cross-role judging design
+also remain unfinished; see the [release queue](docs/RELEASE_QUEUE.md) and
+[acceptance report](docs/reports/2026-09-15-moderation-review-integration.md).
 
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph

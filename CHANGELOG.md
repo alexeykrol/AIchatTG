@@ -3,6 +3,24 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.38 / runtime a41518f] — 2026-09-16 — Suspected porn-spam policy
+
+Lifecycle `production-verified`; runtime started04:32:23UTC. Console3.2.0
+unchanged. [Release receipt](docs/reports/2026-09-16-porn-spam-policy-deployment.md).
+
+- Add a versioned semantic supplement: suspected pornographic spam/profile
+  solicitation maps to the existing immediate ban/cleanup route without
+  requiring identical text, repetition, proof of automation or high confidence.
+- Preserve legitimate reporting/education distinctions and all existing
+  provider-error, Guard, action and idempotency fences. No new provider stage.
+- Record the policy artifact hash; advance the shared Assistant footer to
+  `Версия 2.4.38 от 16.09.2026`, leaving its answer-body behavior unchanged.
+- Root946passed/5explicit fixture skips, migration9/9,58deployed-file match,
+  repeated health/source/config/Console checks and HTTPS/auth passed.
+  Real-model recognition and live sanctions were not tested by this release.
+- One runtime recreation,0rollback; same config/schema/chats/mounts/routes.
+  `/ask` repair, cross-role judging and private Review are not included.
+
 ## [Console 3.2.0] — 2026-09-15 — Last-five question costs
 
 Lifecycle `production-verified`; exact image `f650fe8`, release23:12:03UTC.

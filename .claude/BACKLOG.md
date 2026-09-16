@@ -8,18 +8,28 @@ updated: 2026-09-16
 
 ## Next
 
+- [ ] CROSS-ROLE-JUDGEMENT-1: PO chose Assistant judgement for questions
+      addressed to it, Moderator judgement for ordinary posts, Moderator
+      enforcement under a validated protocol. Read-only review received;
+      current runtime cannot safely accept Assistant verdicts by simple reroute.
+      Design durable native-message/revision arbiter, one provider owner,
+      strict code-bound verdict and server-derived sanctions with recovery
+      and rollback fences. Root-owned shared scope; no implementation yet.
+      30-second ask-prompt/no-silence UX proposal remains separate.
 - [ ] ASK-ROUTER-INVALID: owner reply to forceReply hint did reach BOTH bots,
       but Moderator rejected router result (`provider_safety_router_invalid`),
       so Assistant skipped before claim and cleanup never started. Read-only
       production trace04:17:46UTC passed; Privacy Mode hypothesis refuted for
       this incident. Exact contract subreason remains unknown; no bypass,
       replay or paid probe authorized. See newest `docs/OWNER_FEEDBACK_LOG.md`.
-- [ ] PORN-SPAM-1: exact runtime candidatea41518f, lifecycle `prepared`,
+- [x] PORN-SPAM-1: exact runtimea41518f, lifecycle `production-verified`,
       semantic suspected solicitation under existing spam_or_scam/ban_purge.
       Root946passed/5skips, sourceguard/review passed; real recognition not_run.
-      One exact runtime/three-current-chat release risk decision pending;
-      no lease/push/deploy. No private Review activation. See
-      `docs/reports/2026-09-16-porn-spam-policy-candidate.md`.
+      Source pushed; PO-approved runtime-only deployment04:32:23UTC,
+      Assistant2.4.38;58-file hashes/repeated health/config/Console/HTTPS passed.
+      One recreation/0rollback; lease/master closed04:34:43UTC.
+      No private Review activation. See
+      `docs/reports/2026-09-16-porn-spam-policy-deployment.md`.
 - [x] CONSOLE-V32: exact source `f650fe8`, lifecycle `production-verified`,
       release23:12:03UTC. Last-five costs, known stages, mean denominator,
       3.1.1 labels and Help live. Root787passed/5skips/0failed, Console41/41;
@@ -33,11 +43,11 @@ updated: 2026-09-16
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts
       throughv5 accepted; recipient/principal unknown,
-      production collection/delivery disabled. Queue position2; requested
+      production collection/delivery disabled. Queue position1; requested
       mechanical owner Moderator, no active lease/SSH handoff. Root local source
       1829573/Console3.3.0 accepted:905passed/5fixture-skips, Console159/159,
-      P2 fixes and disabled no-store mount independently checked. Not pushed
-      or deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
+      P2 fixes and disabled no-store mount independently checked. Lifecycle
+      `pushed`, not deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
       LOCAL bridge proposal получен,54 сценария только специфицированы.
       До implementation нужны PO решения: приоритет Guard при сбое Review;
       retained HMAC markers/future-edit suppression после erase. См.

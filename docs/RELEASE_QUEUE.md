@@ -1,6 +1,6 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-16, after local porn-spam policy acceptance. The root integrator owns shared integration
+Checkpoint: 2026-09-16 04:34:43UTC, after verified porn-spam deployment. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
@@ -9,18 +9,17 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 `production-verified`. One Console-only recreation; lease consumed/master closed.
 [Deployment receipt](reports/2026-09-15-console-v32-deployment.md).
 
-## Position 1 — semantic suspected porn-spam policy
+### Semantic suspected porn-spam policy — completed
 
 - Exact runtime source `a41518f4a4fd105cf19e7fc1a64fd35b77233084`, lifecycle
-  `prepared`; not pushed/deployed. Root owns integration and the release lock.
-- PO requested completion/deployment; exact three-current-chat release/risk
-  decision still pending, no production lease.946passed/5fixture-skips;
-  independent review/source guard passed, model recognition not_run.
-- Runtime-only recreation; Console/private Review stay unchanged/off. Prior
-  runtime335a35a and Consolef650fe8 verified healthy/restart0 at04:08:03UTC.
-- [Exact candidate, boundaries and decision](reports/2026-09-16-porn-spam-policy-candidate.md).
+  `production-verified`; source pushed, one runtime-only recreation at04:32:23UTC.
+- Exact PO approval relayed by Moderator; lease consumed/master closed04:34:43.
+  946passed/5fixture-skips;58deployed-file hashes, footer2.4.38, repeated
+  health/restart0, unchanged config/schema/Console and HTTPS/auth passed.
+  Model recognition remains not_run. Private Review stays off.
+- [Deployment receipt](reports/2026-09-16-porn-spam-policy-deployment.md).
 
-## Position 2 — private Moderator review
+## Position 1 — private Moderator review
 
 - Requested mechanical deployment owner: task «Модератор»,
   `019fd023-a949-7961-87cd-693bcb893e2c`.
@@ -29,7 +28,7 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   Пока можешь встать в очередь.»
 - Root retains shared-source integration, fixes, acceptance and release lock.
 - Candidate: accepted local source `1829573015de5d307868afb73e4ef3dcfc0e7fdb`,
-  Console3.3.0, lifecycle `prepared`; not pushed/deployed. Root fixes close
+  Console3.3.0, lifecycle `pushed`; not deployed. Root fixes close
   truncated-evidence, unsafe grouping and nonempty preview-root defects.
   Root905passed/5fixture-skips, Console159/159, independent review and source
   guard passed. [Acceptance](reports/2026-09-15-moderation-review-integration.md).
@@ -50,3 +49,12 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 
 No claim of free storage, new spending, synthetic-collector activation, secret
 change or guessed notification destination follows from queue placement.
+
+## Separate source work — Assistant safety ownership and ask UX
+
+Owner decision relayed by Assistant: Assistant-addressed questions are judged
+by Assistant; ordinary posts by Moderator; Moderator performs sanctions from
+the accepted protocol. Root received the read-only cross-role arbiter review.
+No accepted implementation candidate, shared-write delegation or deployment
+lease exists. The 30-second prompt/no-silence UX proposal and the diagnosed
+`provider_safety_router_invalid` incident are separate from deployeda41518f.
