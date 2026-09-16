@@ -19,6 +19,51 @@ Newest entries first.
 
 ---
 
+## 2026-09-15 — Immediate sanctions for suspected pornographic spam
+
+**Owner decision:** relayed by «Модератор»: «Это порнуха, которая рассылается
+ботами под разными именами и текстовая строка может быть разной, как раз чтобы
+обманывать примитивные боты модераторы. Принцип - такой если подозрение, не
+разбираемся - сразу удаление и бан».
+
+**Policy:** suspected pornographic spam/profile solicitation is sufficient for
+the existing immediate ban-and-cleanup route, without warnings or an owner-review
+wait. Classify communicative meaning and evasion variants, not an exact string,
+display name or language. No proof of automation/common ownership, identical
+repetition or additional specimen is required to prepare this policy. The
+reported bot attribution is not independently proven and is not a prerequisite.
+Legitimate reporting, quotation, educational discussion and translation are not
+themselves spam; this distinction must not become mandatory human confirmation
+for actually suspected solicitation. This is not a blanket rule for all doubt.
+
+**Supersedes:** the earlier exact-pattern-only/high-certainty preparation
+recommendation and any request to choose again between delete and ban for this
+abuse class. Existing cleanup is bounded to up to100 known same-chat/author
+ledger entries plus the current message, not a claim to search/delete all history.
+
+**Follow-up release request:** the owner then said «Задеплой и включи -
+посмотрим как он разберется. В этом смысл. Проконтролируй все.» This requests
+completion and activation of this policy, not private Review. The worker's
+current turn is `01a0a861-d194-7ad2-b92c-1ac845036bf8`, started04:02:58UTC on
+2026-09-16; it is not a user-message ID. Its message bodies remain unavailable
+to the root thread reader, so quotes retain worker-relay attribution.
+
+**Status: prepared locally.** Root loaded the versioned semantic supplement
+under existing `spam_or_scam`, added its receipt hash and synthetic contract
+tests; Guard exemptions and action/idempotency fences remain unchanged.
+No new zero-model heuristic or fake provider boundary is needed for this slice.
+Assistant component metadata advances to2.4.38/planned2026-09-16 as required by
+the shared-source release guard; current live2.4.37 is unchanged.36synthetic
+labels are contract replay, not measured recognition. Rich-text-only quotation
+provenance is still unavailable, and the pre-existing link hard rule can still
+block a legitimate URL-containing report. These are not new exemptions.
+Provider/error/Guard failures remain fail-closed; a valid semantic spam verdict
+does not wait for review. New paid evaluation, capture, scraping and replay are
+excluded. A single exact candidate/service/three-current-chat risk decision
+and release lease are still required before mutation; rollback cannot restore
+deleted Telegram messages. The two Review bridge decisions remain separate.
+[Local charter](proposals/2026-09-16-porn-spam-policy-charter-v1.md).
+
 ## 2026-09-15 — Find repeated profile-bait spam and prepare immediate sanctions
 
 **Reported / requested:** relayed from «Модератор», task

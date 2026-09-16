@@ -1,0 +1,268 @@
+{
+  "schemaVersion": "porn-spam-policy-fixtures-v1",
+  "synthetic": true,
+  "evaluationStatus": "not_run",
+  "notes": [
+    "All 36 messages are newly authored synthetic examples, not captured messages, screenshots, private identities, or verified translations.",
+    "The corpus contains 18 positive and 18 negative reference labels. Positive labels target the existing spam_or_scam threat type for suspected pornographic spam or sexual profile solicitation.",
+    "Judge the whole communicative act in each current message. No external profile contents, account identity, automation, repetition, or prior conversation is supplied or required.",
+    "Adult markers, emoji, profile references, and unusual Unicode are contextual cues, not standalone threat rules. Legitimate reporting, quotation, translation, education, and ordinary invitations remain negative unless the speaker actually solicits sexual traffic.",
+    "Rationales explain reference labels only. They are not model outputs, confidence scores, verbatim evidence spans, or instructions selecting a moderation action.",
+    "Unicode escapes intentionally preserve zero-width characters, nonstandard spacing, and cross-script confusables in selected messages. Evidence in a later evaluation must be copied verbatim from the decoded current text, never from a normalized paraphrase.",
+    "This bounded text-only corpus is not a model evaluation, accuracy estimate, exhaustive language suite, rich-text entity test, or proof of live sanctions. Recognition and production behavior remain not_run."
+  ],
+  "cases": [
+    {
+      "id": "ps-pos-001",
+      "text": "Свежие порно-видео уже в моём профиле. Заходи и выбирай, что посмотреть вечером.",
+      "expectedThreat": true,
+      "category": "direct_profile_solicitation",
+      "rationale": "The speaker advertises pornography and directs readers to their own profile. One current solicitation suffices without proof of repeated posting."
+    },
+    {
+      "id": "ps-pos-002",
+      "text": "My uncensored adult videos are waiting behind the link in my bio. Come watch the full collection.",
+      "expectedThreat": true,
+      "category": "bio_traffic_diversion",
+      "rationale": "The invitation sends readers from the chat to a bio link for promoted adult content; inspecting that destination is not necessary to identify the solicitation."
+    },
+    {
+      "id": "ps-pos-003",
+      "text": "Нажми на мою аватарку: там вход в мой интимный альбом для взрослых, покажу больше в личке.",
+      "expectedThreat": true,
+      "category": "avatar_to_dm_diversion",
+      "rationale": "The avatar is presented as an entry point to promoted intimate material, followed by a direct-message invitation. This label does not assume what the actual avatar depicts."
+    },
+    {
+      "id": "ps-pos-004",
+      "text": "Want my explicit adult clips? Send me a private message and I will send you the access link.",
+      "expectedThreat": true,
+      "category": "dm_access_solicitation",
+      "rationale": "The speaker solicits private contact to distribute access to explicit sexual content, even though no destination URL appears in the current message."
+    },
+    {
+      "id": "ps-pos-005",
+      "text": "Здесь я в одежде, а продолжение только для 18+. Загляни в описание моего профиля, там всё гораздо откровеннее.",
+      "expectedThreat": true,
+      "category": "indirect_adult_profile_bait",
+      "rationale": "The clothing contrast, adult-only continuation, and profile direction together create suspected sexual traffic bait without requiring an explicit pornography keyword."
+    },
+    {
+      "id": "ps-pos-006",
+      "text": "🔞 Продолжение — в моём профиле 😉",
+      "expectedThreat": true,
+      "category": "short_adult_profile_bait",
+      "rationale": "An adult-marked teaser invites traffic to the speaker's own profile. Under the suspicion threshold it need not spell out sexual content, show a URL, or provide a second message; the age marker alone would not suffice."
+    },
+    {
+      "id": "ps-pos-007",
+      "text": "Мои adult clips без цензуры — в bio. Come over, полный доступ дам в DM.",
+      "expectedThreat": true,
+      "category": "mixed_language_solicitation",
+      "rationale": "Russian and English fragments jointly promote uncensored adult clips and divert readers to a bio or private messages. The mixed language does not create a new exemption."
+    },
+    {
+      "id": "ps-pos-008",
+      "text": "Не ищи мои откровенные ролики в чате: открой карточку моего аккаунта, там приглашение в закрытую коллекцию 18+.",
+      "expectedThreat": true,
+      "category": "paraphrased_profile_diversion",
+      "rationale": "An account card and closed adult collection express the same sexual profile-diversion act without relying on one fixed phrase such as link in bio."
+    },
+    {
+      "id": "ps-pos-009",
+      "text": "🔞 Хочешь увидеть меня без одежды? Жми на профиль, продолжение ждёт там 😉",
+      "expectedThreat": true,
+      "category": "adult_marker_and_sexual_teaser",
+      "rationale": "The adult marker supports an explicit sexual teaser and profile invitation. The positive label rests on their combined solicitation, not either emoji alone."
+    },
+    {
+      "id": "ps-pos-010",
+      "text": "Мои\u00a0порно\u2009видео для взрослых — в\u00a0профиле. Заходи за полной коллекцией.",
+      "expectedThreat": true,
+      "category": "unicode_spacing_evasion",
+      "rationale": "Nonbreaking and thin spaces interrupt ordinary spacing but leave a direct invitation to the speaker's promoted pornography collection."
+    },
+    {
+      "id": "ps-pos-011",
+      "text": "New p\u200bo\u200br\u200bn clips in my b\u200bio. Open my profile for the uncensored adult collection.",
+      "expectedThreat": true,
+      "category": "zero_width_evasion",
+      "rationale": "Zero-width characters split promotional terms while the whole message still invites access to an uncensored adult collection through the profile."
+    },
+    {
+      "id": "ps-pos-012",
+      "text": "My \u0440orn videos are in my pr\u043efile. Come see my uncensored adult show.",
+      "expectedThreat": true,
+      "category": "cross_script_confusables",
+      "rationale": "Cyrillic lookalikes within English words do not remove the current speaker's sexual promotion and invitation to their profile."
+    },
+    {
+      "id": "ps-pos-013",
+      "text": "My １８＋ nude photo set is ready. Tap my avatar and follow the bio link to see the rest.",
+      "expectedThreat": true,
+      "category": "fullwidth_adult_marker",
+      "rationale": "Fullwidth adult-marker characters accompany a promoted nude set and an avatar-to-bio call to action. No visual inspection of the account is assumed."
+    },
+    {
+      "id": "ps-pos-014",
+      "text": "П о р н о для взрослых — моя новая подборка. Открой мой профиль и забирай доступ в личке.",
+      "expectedThreat": true,
+      "category": "letter_spacing_evasion",
+      "rationale": "Separating letters with spaces does not change the invitation to obtain the speaker's adult-content collection via profile and private contact."
+    },
+    {
+      "id": "ps-pos-015",
+      "text": "Просто процитирую: «мои порно-ролики в профиле». Это и правда мой профиль — заходите, доступ открыт прямо сейчас.",
+      "expectedThreat": true,
+      "category": "quote_pretext_with_endorsement",
+      "rationale": "The speaker adopts the quoted offer as their own and actively invites readers to access it. Quotation marks do not turn the current solicitation into a neutral report."
+    },
+    {
+      "id": "ps-pos-016",
+      "text": "Для проверки жалобы на мой эротический канал сначала откройте мой профиль и подпишитесь: новые откровенные видео уже доступны всем взрослым.",
+      "expectedThreat": true,
+      "category": "report_pretext_with_promotion",
+      "rationale": "A complaint-checking pretext wraps an invitation to subscribe to the speaker's sexual channel and promotes new content. The communicative act still solicits traffic."
+    },
+    {
+      "id": "ps-pos-017",
+      "text": "Translation exercise: 'My adult videos are in my bio.' Also, that is my real offer to this chat: open my bio now for the uncensored collection.",
+      "expectedThreat": true,
+      "category": "translation_pretext_with_solicitation",
+      "rationale": "The second sentence explicitly makes the quoted offer operative for the current audience. The educational framing does not exempt an adopted sexual solicitation."
+    },
+    {
+      "id": "ps-pos-018",
+      "text": "Тут нельзя показать всё. 18+, остальное в био 😘",
+      "expectedThreat": true,
+      "category": "indirect_short_bio_teaser",
+      "rationale": "A suggestion of material withheld from the chat, adult marking, affectionate bait, and redirection to the bio together support suspected sexual solicitation. Actual destination contents, repeated messages, and explicit sexual vocabulary are not required."
+    },
+    {
+      "id": "ps-neg-001",
+      "text": "Сообщаю модератору о спаме: мне прислали «мои порно-видео в профиле». Я ничего не открывал; пожалуйста, проверьте эту жалобу.",
+      "expectedThreat": false,
+      "category": "legitimate_spam_report",
+      "rationale": "The current speaker reports a quoted solicitation for moderation, does not adopt the offer, and does not invite readers to visit any account."
+    },
+    {
+      "id": "ps-neg-002",
+      "text": "В предложении «мои интимные видео в профиле» слово «профиле» стоит в предложном падеже? Разбираю только грамматику цитаты.",
+      "expectedThreat": false,
+      "category": "linguistic_quotation",
+      "rationale": "The quoted sexual-profile phrase is an object of grammatical analysis. The current message asks a language question, not for traffic to a profile."
+    },
+    {
+      "id": "ps-neg-003",
+      "text": "Переведи на русский фразу из учебного примера: 'My adult videos are in my bio.' Не добавляй ссылок или приглашений от моего имени.",
+      "expectedThreat": false,
+      "category": "legitimate_translation_request",
+      "rationale": "The speaker requests translation of a supplied example and explicitly disclaims an invitation. The fixture does not assert that any translation has been verified."
+    },
+    {
+      "id": "ps-neg-004",
+      "text": "На уроке медиаграмотности обсуждаем, как порнографический спам уводит людей из чата в профиль или личку. Какие признаки полезно объяснить ученикам?",
+      "expectedThreat": false,
+      "category": "media_literacy_education",
+      "rationale": "The message asks for an educational explanation of spam behavior; mentioning its destinations and sexual subject does not itself perform that behavior."
+    },
+    {
+      "id": "ps-neg-005",
+      "text": "Готовлю занятие для взрослых о согласии и сексуальном здоровье. Как спокойно объяснить разницу между медицинской информацией и порнографией?",
+      "expectedThreat": false,
+      "category": "adult_health_education",
+      "rationale": "Sexual terminology appears in a health-education question, with no promoted sexual material, deceptive purpose, or invitation to leave the chat."
+    },
+    {
+      "id": "ps-neg-006",
+      "text": "Мне неприятны незапрошенные интимные предложения в личке. Подскажите, где в настройках ограничить сообщения от незнакомцев.",
+      "expectedThreat": false,
+      "category": "protective_settings_request",
+      "rationale": "The speaker seeks ordinary privacy-setting guidance after unwanted contact, not access to private data or distribution of sexual content."
+    },
+    {
+      "id": "ps-neg-007",
+      "text": "Обсуждаем правило модерации: фраза «18+, заходи в профиль» в жалобе не равна приглашению. Важно читать, что автор делает сообщением целиком.",
+      "expectedThreat": false,
+      "category": "moderation_policy_discussion",
+      "rationale": "The potentially suggestive quote is used to discuss classification boundaries. The speaker neither endorses the quoted offer nor directs anyone to an actual profile."
+    },
+    {
+      "id": "ps-neg-008",
+      "text": "Вы просили показать мои рабочие проекты: в моём профиле есть портфолио интерфейсов и описание моего вклада. Можно посмотреть перед нашей совместной работой.",
+      "expectedThreat": false,
+      "category": "requested_professional_profile",
+      "rationale": "The message contains a self-contained response to a stated request for professional work samples, without sexual bait or an unsolicited commercial pitch."
+    },
+    {
+      "id": "ps-neg-009",
+      "text": "Для нашей учебной команды указал в bio опыт работы с Python. Если хотите распределить роли в проекте, посмотрите мой профиль.",
+      "expectedThreat": false,
+      "category": "ordinary_collaboration_bio",
+      "rationale": "The profile invitation serves a stated collaborative learning task and contains no sexual, deceptive, or commercial solicitation."
+    },
+    {
+      "id": "ps-neg-010",
+      "text": "К моему ответу по ошибке компиляции: минимальный пример уже опубликован в моём профиле разработчика. Если удобнее, я вставлю тот же код сюда.",
+      "expectedThreat": false,
+      "category": "relevant_technical_profile_reference",
+      "rationale": "The speaker references a relevant technical example and offers to keep it in the current chat. A profile reference alone is not spam."
+    },
+    {
+      "id": "ps-neg-011",
+      "text": "Для нашего фотокружка выложил в профиль обещанный альбом с птицами из парка. Посмотрите, пожалуйста, и обсудим резкость снимков здесь.",
+      "expectedThreat": false,
+      "category": "ordinary_hobby_album_invitation",
+      "rationale": "The stated promised hobby album and in-chat discussion form an ordinary relevant invitation, with no adult-content teaser or other spam purpose."
+    },
+    {
+      "id": "ps-neg-012",
+      "text": "🍑 Персики пойдут в компот, 🍆 баклажаны запечём. Кто помнит, сколько минут готовить овощи?",
+      "expectedThreat": false,
+      "category": "nonsexual_food_emoji",
+      "rationale": "Food emoji are used literally in a cooking question. Their possible sexual meanings elsewhere do not supply a sexual solicitation in this message."
+    },
+    {
+      "id": "ps-neg-013",
+      "text": "Почему на некоторых драматических фильмах ставят 18+, хотя в них нет эротики? Обсуждаем возрастную маркировку, а не ищем взрослый контент.",
+      "expectedThreat": false,
+      "category": "nonsexual_age_rating_discussion",
+      "rationale": "The adult age marker is part of a film-rating question and does not advertise sexual material or solicit a visit elsewhere."
+    },
+    {
+      "id": "ps-neg-014",
+      "text": "Я нарисовал для нашего шахматного клуба аватарку с конём. Посмотрите на мой профиль и скажите здесь, читается ли силуэт на маленьком экране.",
+      "expectedThreat": false,
+      "category": "ordinary_avatar_feedback",
+      "rationale": "The avatar and profile invitation have an explicit nonsexual design-feedback purpose. No unseen avatar content needs to be inferred."
+    },
+    {
+      "id": "ps-neg-015",
+      "text": "Мы в одной учебной группе по английскому. Если хотите потренировать разговор перед завтрашним занятием, напишите мне в личку, договоримся о времени.",
+      "expectedThreat": false,
+      "category": "ordinary_peer_dm_invitation",
+      "rationale": "The private-message invitation is for a stated peer study activity, not sexual access, sales, deception, or another threat."
+    },
+    {
+      "id": "ps-neg-016",
+      "text": "В отчёте о спаме встретилась запись 'p\u200bo\u200br\u200bn in bio'. Почему невидимые символы усложняют поиск? Обсуждаем уже полученный образец, переходить никуда не нужно.",
+      "expectedThreat": false,
+      "category": "quoted_zero_width_analysis",
+      "rationale": "The unusual Unicode occurs inside an analyzed spam example. The speaker asks about text processing and does not promote or operationally reuse the solicitation."
+    },
+    {
+      "id": "ps-neg-017",
+      "text": "Исправляю опечатку в учебном тексте: в слове 'pr\u043efile' стоит кириллическая буква. Сам профиль открывать не надо; нужна только проверка алфавита.",
+      "expectedThreat": false,
+      "category": "confusable_character_proofreading",
+      "rationale": "The message concerns a cross-script character in a quoted word. Confusable text and a profile mention do not independently establish promotional intent."
+    },
+    {
+      "id": "ps-neg-018",
+      "text": "Ого, шахматная партия была огонь 🔥😉 Разберём последний ход прямо здесь?",
+      "expectedThreat": false,
+      "category": "nonsexual_expressive_emoji",
+      "rationale": "Flame and wink emoji express enthusiasm about a clearly nonsexual activity, and the request keeps the discussion in the current chat."
+    }
+  ]
+}

@@ -10,6 +10,7 @@ export const SAFETY_MODEL = 'gpt-5.6-terra';
 export const SAFETY_VENDOR = 'openai';
 export const SAFETY_REASONING_EFFORT = 'medium';
 export const SAFETY_POLICY_VERSION = 'telegram-safety-v1';
+export const PORN_SPAM_POLICY_VERSION = 'porn-spam-policy-v1';
 export const SAFETY_ROUTER_MAX_OUTPUT_TOKENS = 1024;
 export const SAFETY_ABUSE_MAX_OUTPUT_TOKENS = 768;
 
@@ -71,6 +72,7 @@ export function buildSafetyRouterSystem() {
     artifact('moderation-tg-v3.md'),
     '--- THREAT LIBRARY v1 ---', artifact('threat-library-v1.md'),
     '--- ABUSE LIBRARY v1 ---', artifact('abuse-library-v1.md'),
+    '--- PORN-SPAM POLICY v1 ---', artifact(`${PORN_SPAM_POLICY_VERSION}.md`),
   ].join('\n\n');
 }
 
@@ -315,6 +317,7 @@ export async function classifySafetyV3({ message, context = {}, invoke }) {
       artifactSha256: {
         routerSystem: sha256(routerSystem), abuseSystem: sha256(abuseSystem),
         threatLibrary: sha256(artifact('threat-library-v1.md')), abuseLibrary: sha256(artifact('abuse-library-v1.md')),
+        pornSpamPolicy: sha256(artifact(`${PORN_SPAM_POLICY_VERSION}.md`)),
       },
       usage,
       receipts: results.map((result) => result?.receipt || null),

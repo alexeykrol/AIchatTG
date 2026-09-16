@@ -17,6 +17,7 @@ import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramRuntimeHttpServer } from '../src/http-server.mjs';
 import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
 import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from '../src/assistant-release.mjs';
+import { classifySafetyV3 } from '../src/safety-v3.mjs';
 
 function config(overrides = {}) {
   return {
@@ -1586,6 +1587,45 @@ test('unproven pin rights fail closed and fence the native target against duplic
       WHERE chat_id = '-100' AND message_id = '112'`).get(), {
       state: 'skipped', error_code: 'guard_pin_rights_unproven',
     });
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+// This supplies a synthetic model verdict. It proves the real action/fencing
+// path, not the model's ability to recognise this text in production.
+test('suspected porn spam with low confidence immediately bans and purges once without warnings', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-porn-spam-contract-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  let modelCalls = 0;
+  const message = 'My adult-only private gallery is in my bio; come look.';
+  const provider = {
+    async moderate({ text }) {
+      return classifySafetyV3({ message: text, async invoke(input) {
+        modelCalls++;
+        assert.equal(input.stage, 'router');
+        assert.match(input.system, /PORN-SPAM POLICY v1/);
+        return { text: JSON.stringify({
+          threat: { match: true, types: ['spam_or_scam'], confidence: 0.35, evidence: ['adult-only private gallery'] },
+          abuse: { match: false, types: [], confidence: 0.99, evidence: [] },
+          target: 'group', context_used: false,
+        }) };
+      } });
+    },
+  };
+  const store = createRuntimeStore(db);
+  const runtime = createTelegramRuntime({
+    config: config(), store, provider, knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    const event = update(9001, 9002, message);
+    const result = await runtime.handleUpdate('moderator', event);
+    assert.deepEqual({ verdict: result.verdict, action: result.action }, { verdict: 'ban', action: 'ban_purge' });
+    assert.deepEqual(actions.map(([kind]) => kind), ['ban', 'delete']);
+    assert.equal(modelCalls, 1);
+    assert.equal(store.getWeakStrikeState({ chatId: '-100', userId: '7' }).weakStrikes, 0);
+    assert.deepEqual(await runtime.handleUpdate('moderator', event), result);
+    assert.equal(modelCalls, 1);
+    assert.equal(actions.length, 2);
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
 
