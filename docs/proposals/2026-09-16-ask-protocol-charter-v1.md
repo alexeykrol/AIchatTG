@@ -49,7 +49,7 @@
 
 - Owned files/contracts, only inside the result-owner worktree:
   `apps/telegram-runtime/src/{runtime,database,safety-v3,guard-adapter,telegram-adapter,server,http-server,moderator-recovery,assistant-policy,route-arbitration}.mjs`;
-  new `ask-*.mjs` and `judgement-*.mjs` in that src directory;
+  new `ask-*.mjs`, `judgement-*.mjs`, `assistant-ask-expiry.mjs` in that src directory;
   `packages/telegram-core/src/{index,schema}.mjs`;
   related `apps/telegram-runtime/test/**` and `packages/telegram-core/test/**`;
   `docs/proposals/2026-09-16-ask-protocol-design-v1.md` and
