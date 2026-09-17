@@ -4,6 +4,17 @@
 
 ## Текущее состояние
 
+- **Review deployment attempt17.09, lifecycle `pushed`:** exact7d99ae0 был
+  утверждён PO, собран и проверен наVPS, Review store provisioned once.
+  Включение Console остановлено11:48:29UTC: helper передал миллисекунды в
+  release timestamp, хотя приложение требует секунды. Exact-image reproduction
+  подтвердил причину/правильный формат. Rollback3.2.0 passed11:48:36;
+  runtime2.4.39 вообще не пересоздавался. Оба healthy/restart0, schema/drafts/
+  config сохранены; Review пуст и выключен, owner/socket отсутствуют.
+  Комментарий9709 удалён один раз с отдельным PO approval; parent9690 и автор
+  не затронуты. Повторное удаление запрещено. Lease closed11:51:31, SSH closed
+  11:51:52; один повтор того жеSHA запрошен уPO, пока не разрешён.
+  [Receipt](../docs/reports/2026-09-17-review-activation-rollback.md).
 - **Assistant2.4.39, lifecycle `production-verified`:** exact runtime `2c72e01`,
   image7fc9a7e6, StartedAt2026-09-16T06:57:40.921400883Z, healthy/restart0.
   Main integration762c251 и candidate branch запушены и проверены на GitHub.
@@ -61,8 +72,9 @@
   Node20.20.0 images без изменения паролей/демона.58runtime/38Console hashes,
   версии/footer и image-local tests passed (linux/arm64; не VPS receipt).
   Private recipient подтверждён read-only, без реальных отправок. Не выдавать
-  synthetic transport за live acceptance. Activation binding/reviewer/limits,
-  exact source/lease и production verification ещё впереди.
+  synthetic transport за live acceptance. Binding/reviewer/limits были затем
+  утверждены; первая activation attempt откатилась, см. newest checkpoint выше.
+  Production verification нового workflow ещё впереди.
   `docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md`;
   `docs/MODERATION_REVIEW_ACTIVATION.md`.
   `docs/RELEASE_QUEUE.md`; никаких SSH/production полномочий не передано.

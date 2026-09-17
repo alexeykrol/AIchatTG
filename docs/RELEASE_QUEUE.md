@@ -32,6 +32,12 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 
 ## Position 1 — private Moderator review
 
+- Latest checkpoint17.09 11:51UTC: approved exact7d99ae0 attempt stopped on
+  deployment-helper timestamp format; Console rolled back to3.2.0, runtime
+  unchanged2.4.39. Both healthy/restart0. Fresh empty Review store/config retained;
+  collection/delivery off. Candidate lifecycle `pushed`. Lease/master closed;
+  one corrected same-source retry needs the newly requested PO approval.
+  [Attempt and rollback receipt](reports/2026-09-17-review-activation-rollback.md).
 - Requested mechanical deployment owner: task «Модератор»,
   `019fd023-a949-7961-87cd-693bcb893e2c`.
 - Exact owner instruction re-read: message `01a0a750-c465-7292-ae0f-253ee0ab7a54`,
@@ -55,11 +61,13 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 - Frozen evidence: root1427passed/5fixture-skips, migration9/9, source guard
   and GitHub ref passed. Exact local Node20.20.0 Linux images/hash/footer/import
   checks passed after isolating the stalled local credential helper; saved
-  passwords/daemon/base version unchanged. No VPS deployment yet.
+  passwords/daemon/base version unchanged. Subsequent VPS attempt rolled back;
+  newest checkpoint above is authoritative, not this prepared evidence.
   [Candidate receipt](reports/2026-09-17-moderation-review-live-candidate.md).
 - The PO-selected private recipient is verified read-only. Reviewer access,
-  exact live chat/start/bounds/configuration, source/lease and real delivery
-  remain activation gates. No collection or notification is live. Follow the
+  exact chat/start/bounds/configuration and source were approved for the first
+  consumed lease. Retry approval and actual live delivery remain open gates.
+  No collection or notification is live. Follow the
   [activation procedure](MODERATION_REVIEW_ACTIVATION.md); ordinary base-only
   Compose leaves the optional feature off. Do not call that a completed workflow.
 - Before mechanical delegation: accepted exact source/tests, verified PO scope,

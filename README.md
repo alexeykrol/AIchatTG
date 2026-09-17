@@ -11,6 +11,12 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
+**Production checkpoint17.09 11:51UTC:** Assistant2.4.39 / Console3.2.0 are
+healthy. Review candidate7d99ae0 is pushed, not deployed: the approved attempt
+was rolled back after an integrator deployment-timestamp error. Review data
+was preserved, but capture/notifications remain off. A corrected same-source
+retry awaits a fresh approval. [Receipt](docs/reports/2026-09-17-review-activation-rollback.md).
+
 ## Architecture principle
 
 The Assistant uses a [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md),

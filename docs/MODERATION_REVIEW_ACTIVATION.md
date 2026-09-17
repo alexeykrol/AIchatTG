@@ -1,6 +1,9 @@
 # Private Moderator Review activation
 
-Status: prepared procedure; not a deployment receipt or activation approval.
+Status: procedure; not a deployment receipt or activation approval. The first
+approved attempt17.09 was rolled back on deployment-helper timestamp format;
+see [receipt](reports/2026-09-17-review-activation-rollback.md). Its lease is
+closed; the retained empty store must not be provisioned a second time.
 Candidate components: Console3.4.0 / Assistant2.4.40. Production baseline:
 runtime2c72e01 / Assistant2.4.39, Consolef650fe8 /3.2.0.
 
@@ -66,7 +69,11 @@ or an increase in any paid quota. No paid model call is part of Review.
    private environment. The second file is a versioned Compose activation
    extension, not a partial source overlay. Base-only deployment leaves Review
    off. Preserve existing ports/routes, health checks, logging, secrets, models,
-   runtime DB, knowledge mounts and other services.
+   runtime DB, knowledge mounts and other services. Before any recreation, run
+   the actual config loader inside the exact image with the complete composed
+   environment. Console `OPERATOR_CONSOLE_RELEASED_AT` requires UTC seconds
+   (`YYYY-MM-DDTHH:MM:SSZ`); Review `startAt` separately requires milliseconds.
+   Never reuse one timestamp formatter for both contracts without validation.
 4. Verify private directory ownership/modes (container UID1000), disk capacity,
    no existing owner/socket, canonical paths and no active other writer. Both
    services share only the Review config file readonly and the project-private

@@ -1,13 +1,20 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-16
+updated: 2026-09-17
 ---
 
 # Backlog
 
 ## Next
 
+- [ ] REVIEW-RELEASE-RETRY: same7d99ae0 retry requires fresh PO approval/lease.
+      First activation failed on helper's millisecond release timestamp;
+      exact-image regression accepts seconds. Validate full composed config
+      inside image before recreation. Baseline2.4.39/3.2.0 healthy; retained
+      Review store empty, no owner/socket; do not reprovision or replay.
+      Comment9709 deletion completed once, never repeat. See
+      `docs/reports/2026-09-17-review-activation-rollback.md`.
 - [x] CROSS-ROLE-JUDGEMENT-1: Assistant2.4.39/exact2c72e01,
       lifecycle `production-verified`; main integration762c251 pushed.
       Native-revision judge owner, strict verdict/enforcement/answer fences,

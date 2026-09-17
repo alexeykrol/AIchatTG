@@ -19,6 +19,29 @@ Newest entries first.
 
 ---
 
+## 2026-09-17 — Deploy now; the reported comment is still visible
+
+**Owner instruction:** «подтверждаю» accepted the exact Review activation;
+Moderator relayed «прошло почти 40 минут, задеплой, все сделай - пост до сих
+пор висит». Exact comment9709 deletion, excluding parent9690 and any ban,
+was separately authorized and acknowledged once at11:37:21.849UTC. Independent
+public refresh confirmed disappearance; this irreversible action is complete.
+
+**Actual release outcome:** exact7d99ae0 images/source/footer passed; empty
+Review store provisioned. Console activation failed before startup because
+the integrator's helper supplied milliseconds where the established release
+timestamp accepts seconds only. Automatic rollback restored3.2.0; runtime2.4.39
+never changed. Both healthy/restart0; config/schema/drafts preserved. Exact-image
+and local regression confirmed the correction without changing application code.
+
+**Recommendation:** validate exact generated environment inside the candidate
+image before any recreation; request one bounded same-source retry under a fresh
+lease. Do not repeat deletion, reset the retained store or replay history.
+First lease/master closed; retry approval pending.
+
+**Status: partial.** Comment removal complete; new Review workflow not live.
+[Evidence](reports/2026-09-17-review-activation-rollback.md).
+
 ## 2026-09-17 — Complete the previously assigned Review workflow
 
 **Recipient choice:** the owner supplied the private Telegram account in the
