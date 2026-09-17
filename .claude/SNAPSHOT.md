@@ -51,11 +51,15 @@
   Source1829573/Console3.3.0 принят, lifecycle `pushed`, не deployed.
   Два P2 и fingerprint bypass исправлены; root905passed/5skips,
   Console159/159, independent review/source guard passed на том checkpoint.
-  **Новый локальный кандидат3.4.0/Assistant2.4.40, prepared:** PO выбрал
+  **Кандидат7d99ae0/Console3.4.0/Assistant2.4.40, pushed:** PO выбрал
   независимую основную модерацию с видимыми пропусками и полное удаление
   связанных идентификаторов без replay-гарантии. Runtime capture, private IPC,
   Console-only live store, notification fences/limits, Admin decision/erase и
-  covert-testimonial detector реализованы; полный локальный suite проходит.
+  covert-testimonial detector реализованы; root1427passed/5skips, migration9/9,
+  source guard и remote-ref verification passed. Local Docker credential helper
+  завис; отдельный временный anonymous client config позволил собрать exact
+  Node20.20.0 images без изменения паролей/демона.58runtime/38Console hashes,
+  версии/footer и image-local tests passed (linux/arm64; не VPS receipt).
   Private recipient подтверждён read-only, без реальных отправок. Не выдавать
   synthetic transport за live acceptance. Activation binding/reviewer/limits,
   exact source/lease и production verification ещё впереди.

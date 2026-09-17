@@ -44,7 +44,7 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   Root905passed/5fixture-skips, Console159/159, independent review and source
   guard passed. [Acceptance](reports/2026-09-15-moderation-review-integration.md).
 - The disabled3.3.0 checkpoint is now extended by the local **Console3.4.0 /
-  Assistant2.4.40 candidate, prepared**. Both PO choices are resolved:
+  Assistant2.4.40 candidate7d99ae0, pushed**. Both PO choices are resolved:
   primary moderation continues independently on Review failure; erase removes
   linked identifiers without a future suppression guarantee. See the
   [selected v3 contract](proposals/2026-09-17-moderation-live-bridge-selected-v3.md).
@@ -52,6 +52,11 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   atomic receipts, generic one-attempt notification and manual decision/erase
   are implemented with synthetic tests. Covert testimonial/book promotion is
   review-only, not a new auto-ban/delete policy.
+- Frozen evidence: root1427passed/5fixture-skips, migration9/9, source guard
+  and GitHub ref passed. Exact local Node20.20.0 Linux images/hash/footer/import
+  checks passed after isolating the stalled local credential helper; saved
+  passwords/daemon/base version unchanged. No VPS deployment yet.
+  [Candidate receipt](reports/2026-09-17-moderation-review-live-candidate.md).
 - The PO-selected private recipient is verified read-only. Reviewer access,
   exact live chat/start/bounds/configuration, source/lease and real delivery
   remain activation gates. No collection or notification is live. Follow the

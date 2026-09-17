@@ -59,9 +59,12 @@ updated: 2026-09-16
       `pushed`, not deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
       2026-09-17: оба PO решения получены: Guard независим от Review;
       erase удаляет linked IDs без future suppression. Локальный кандидат
-      Console3.4.0/Assistant2.4.40 prepared: capture/IPC/store/notification/
+      7d99ae0/Console3.4.0/Assistant2.4.40 pushed: capture/IPC/store/notification/
       decision/erase и covert-testimonial detector реализованы и проверены
-      синтетически; Linux IPC/Compose passed. Нужны exact activation binding,
+      синтетически; root1427passed/5skips, migration9/9, Linux IPC/Compose passed.
+      Local exact-image builds/source hashes/footer/imports passed после обхода
+      зависшего credential helper отдельным временным anonymous Docker config.
+      Нужны exact activation binding,
       reviewer access/limits/lease, deploy и live acceptance. См.
       `docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md` и
       `docs/MODERATION_REVIEW_ACTIVATION.md`.

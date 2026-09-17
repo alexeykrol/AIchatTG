@@ -112,7 +112,7 @@ and updated Help; bot behavior, rates and schema remain unchanged. At acceptance
 four of the last five questions had complete estimates averaging $0.0065898;
 the fifth full price remained unknown. Independent ordinary Chrome QA passed.
 
-**Next private Review candidate: Console 3.4.0 / Assistant 2.4.40, prepared.**
+**Pushed private Review candidate: Console 3.4.0 / Assistant 2.4.40 (`7d99ae0`).**
 The previously pushed disabled Console3.3.0 slice is extended with a private
 runtime-to-Console collector, durable Review receipts, single-attempt private
 Telegram notifications and the covert book/testimonial detector. Primary
@@ -125,6 +125,10 @@ source, private binding, reviewer access, limits and rollback. See the
 [release queue](docs/RELEASE_QUEUE.md),
 [selected contract](docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md)
 and [activation procedure](docs/MODERATION_REVIEW_ACTIVATION.md).
+Root1427passed/5fixture-skips and migration9/9 passed. Exact local Linux images,
+source hashes, component versions/footer and image-local tests passed after
+isolating a stalled local Docker credential helper. Production activation is
+still pending. [Candidate receipt](docs/reports/2026-09-17-moderation-review-live-candidate.md).
 
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph
