@@ -1,6 +1,6 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-16 UTC / 2026-09-15 local
+**Last Updated:** 2026-09-17 UTC
 
 ## Текущее состояние
 
@@ -50,13 +50,17 @@
   исполнителем следующего деплоя; root сохраняет integration/lock/acceptance.
   Source1829573/Console3.3.0 принят, lifecycle `pushed`, не deployed.
   Два P2 и fingerprint bypass исправлены; root905passed/5skips,
-  Console159/159, independent review/source guard passed. Shared hook строго
-  disabled без store/collector/sender; Help это объясняет. Lease пока нет.
-  Следующий LOCAL contract-only bridge charter передан Moderator, frozen
-  worker source сохраняется. Предложение bridge получено/сохранено, но не принято:
-  нужны PO решения о приоритете основной защиты при сбое Review и сохранении
-  pseudonymous меток после erase. Code reservations/lease не выданы.
-  `docs/reports/2026-09-15-moderation-bridge-review.md`.
+  Console159/159, independent review/source guard passed на том checkpoint.
+  **Новый локальный кандидат3.4.0/Assistant2.4.40, prepared:** PO выбрал
+  независимую основную модерацию с видимыми пропусками и полное удаление
+  связанных идентификаторов без replay-гарантии. Runtime capture, private IPC,
+  Console-only live store, notification fences/limits, Admin decision/erase и
+  covert-testimonial detector реализованы; полный локальный suite проходит.
+  Private recipient подтверждён read-only, без реальных отправок. Не выдавать
+  synthetic transport за live acceptance. Activation binding/reviewer/limits,
+  exact source/lease и production verification ещё впереди.
+  `docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md`;
+  `docs/MODERATION_REVIEW_ACTIVATION.md`.
   `docs/RELEASE_QUEUE.md`; никаких SSH/production полномочий не передано.
 - **Новые feature workstreams, local-only:** PO-start Moderation review и
   Analytics last-five costs проверены. База9d326f4; страницы/new modules
@@ -66,8 +70,8 @@
   ручного удаления; local contract v1–v5 accepted, private erase с повторным
   подтверждением, uncertain verdict audit-only. V4 делает benign retained
   observations видимыми и удаляемыми, без признака подозрения/уведомлений.
-  Recipient/principal/production
-  limits ещё не утверждены; реальные сбор/уведомления выключены.
+  Recipient теперь выбран и проверен; principal/production limits ещё требуют
+  exact activation approval; реальные сбор/уведомления выключены.
   Standalone3.1.1 включён в production3.2.0.
   На текущем checkpoint production3.2.0/f650fe8 + runtime2c72e01;
   активной lease/SSH нет.

@@ -26,7 +26,7 @@ function safeEqual(left, right) {
   return typeof left === 'string' && left.length > 0 && left === right;
 }
 
-export function createTelegramRuntimeHttpServer({ config, runtime, logger = console }) {
+export function createTelegramRuntimeHttpServer({ config, runtime, logger = console, reviewCapture = null }) {
   return http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://127.0.0.1');
@@ -48,7 +48,14 @@ export function createTelegramRuntimeHttpServer({ config, runtime, logger = cons
       const raw = await readBody(request);
       let update;
       try { update = JSON.parse(raw); } catch { json(response, 400, { error: 'invalid_json' }); return; }
-      const result = await runtime.handleUpdate(role, update);
+      // Primary work starts first and never awaits Review. Even a failed or
+      // never-resolving capture cannot alter the existing webhook response.
+      const primary = runtime.handleUpdate(role, update);
+      let cancelReview = () => {};
+      try { cancelReview = reviewCapture?.start(role, update) || cancelReview; } catch { /* isolated optional capture */ }
+      let result;
+      try { result = await primary; }
+      finally { try { cancelReview(); } catch { /* no primary failure */ } }
       json(response, 200, { ok: true, result });
     } catch (error) {
       logger.error?.('[telegram-runtime] webhook processing failed', error.message);

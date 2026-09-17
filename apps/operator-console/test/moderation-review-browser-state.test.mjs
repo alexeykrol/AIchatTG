@@ -99,6 +99,36 @@ test('an unmounted new API is unavailable, not an empty queue or an expired case
   assert.equal(ui.node('review-save').disabled, true); assert.equal(ui.requests.length, 0);
 });
 
+test('failed live bootstrap is unavailable, not disabled or missing stored evidence', async () => {
+  const ui = await fixture({ search:`?case=${a}`, status:{ mode:'unavailable', decisionsEnabled:false } });
+  assert.match(ui.node('review-status').textContent, /недоступен.*Полнота захвата неизвестна.*основная модерация/u);
+  assert.match(ui.node('case-status').textContent, /не означает, что материалы удалены/u);
+  assert.equal(ui.requests.length, 0); assert.equal(ui.node('review-save').disabled, true);
+});
+
+test('live coverage reports attempts and unknown history without claiming complete capture', async () => {
+  const ui = await fixture({ status:{ ...enabled, mode:'live', deliveryEnabled:true,
+    coverage:{ countersKnownSinceBoot:true, counts:{ acknowledged:4, not_attempted:1, rejected:0, uncertain:2 } } } });
+  assert.match(ui.node('retention').textContent, /подтверждено 4, не начато 1, отклонено 0, исход неизвестен 2/u);
+  assert.match(ui.node('retention').textContent, /не уникальных сообщений.*Полнота истории неизвестна.*не восстанавливаются.*включены/u);
+  assert.match(ui.node('case-alert').textContent, /Личное служебное уведомление.*Санкции в чате не выполняются/u);
+  const unknown = await fixture({ status:{ ...enabled, mode:'live', coverage:{ status:'unknown', counts:null } } });
+  assert.match(unknown.node('retention').textContent, /Сведения о захвате сообщений недоступны/u);
+  assert.doesNotMatch(unknown.node('retention').textContent, /подтверждено 0/u);
+});
+
+test('covert promotion has cautious Russian reasons and erase discloses race and replay limits', async () => {
+  const ui = await fixture(); const selecting = ui.select(a);
+  ui.take(`${prefix}/cases/${a}`).respond(detail(a, 1, { patternIds:['covert-testimonial-bait'],
+    reasons:['covert_testimonial_bait'] })); await selecting;
+  assert.match(allText(ui.node('case-reasons')), /Подозрение на скрытую рекламу в отзыве/u);
+  ui.click('erase-start'); const warning = ui.node('erase-explanation').textContent;
+  assert.match(warning, /идентификаторы источника.*Защита от повторного появления.*не сохраняется/u);
+  assert.match(warning, /служебное уведомление может прийти после удаления.*Контекст в других кейсах/u);
+  ui.click('erase-cancel'); assert.equal(ui.node('erase-confirmation').hidden, true);
+  assert.equal(ui.requests.length, 0);
+});
+
 test('retained filter reads ordinary observations without changing the selected case or triggering actions', async () => {
   const ui = await fixture(); assert.equal(ui.node('queue-filter').value, 'pending');
   ui.choose('legitimate', 'Keep current edit'); ui.click('erase-start');

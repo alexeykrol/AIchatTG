@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { detectPromotionReview } from './moderation-review-detector.mjs';
+import { acquireModerationReviewOwner } from './moderation-review-owner.mjs';
+import { validateModerationReviewEnvelope } from '../../../packages/telegram-core/src/moderation-review-projection.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/iu;
 const LABELS = new Set(['hidden_advertising', 'legitimate', 'insufficient_evidence']);
 const APPLICATION_ID = 0x4d525631;
 const LIMIT_KEYS = ['retentionMs', 'maxTextChars', 'maxContextChars', 'maxNoteChars', 'maxObservations'];
+const LIVE_TABLES = ['review_cases', 'review_observations', 'review_decisions', 'review_decision_evidence',
+  'review_patterns', 'review_alerts', 'review_erasure_receipts', 'review_intake_binding', 'review_native_sources',
+  'review_intake_events', 'review_dispatch_authorizations', 'review_alert_budget', 'review_source_revisions'].sort();
 // This local synthetic slice has one process owner; it is not a shared production DB.
 const OPEN_STORES = new Set();
 
@@ -72,9 +77,12 @@ function receiptIdentifier(value) {
   fail('review_alert_receipt_invalid');
 }
 
-/** Private synthetic-only Review state. Never opens or modifies the runtime DB. */
-export function createModerationReviewStore({ root, mode, limits, now = Date.now } = {}) {
-  if (mode !== 'synthetic') fail('review_mode_invalid');
+/** Console-only Review state. Never opens or modifies the runtime DB. Live
+ * construction requires explicit policy and preprovisioned private storage. */
+export function createModerationReviewStore({ root, mode, limits, now = Date.now,
+  capturePolicy = null, maxEvents = null, maxErasureReceipts = null, maxAlertsPerHour = null, provision = false } = {}) {
+  const live = mode === 'live' && record(capturePolicy) && capturePolicy.enabled === true;
+  if (mode !== 'synthetic' && !live) fail('review_mode_invalid');
   if (typeof root !== 'string' || !isAbsolute(root)
     || ['/', resolve(homedir()), resolve(tmpdir())].includes(resolve(root))) fail('review_root_invalid');
   shape(limits, LIMIT_KEYS);
@@ -83,6 +91,12 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
   if (typeof now !== 'function') fail('review_clock_invalid');
   // Capture validated values; a caller cannot change retention or caps after construction.
   limits = Object.freeze({ ...limits });
+  if (live) {
+    if (limits.retentionMs !== null) fail('review_live_retention_invalid');
+    integer(maxEvents, 'maxEvents', 1); integer(maxErasureReceipts, 'maxErasureReceipts', 1);
+    integer(maxAlertsPerHour, 'maxAlertsPerHour', 1);
+    capturePolicy = JSON.parse(JSON.stringify(capturePolicy));
+  }
   const clock = () => {
     const value = now(); integer(value, 'clock');
     if (!Number.isFinite(new Date(value).getTime())) fail('review_clock_invalid');
@@ -90,19 +104,32 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
   };
   clock();
   const requestedRoot = resolve(root);
-  if (pathExists(requestedRoot)) privatePath(requestedRoot, 'directory');
+  if (live) {
+    let ancestor = requestedRoot;
+    while (!pathExists(ancestor)) ancestor = dirname(ancestor);
+    if (realpathSync(ancestor) !== ancestor) fail('review_storage_invalid', 503);
+  }
+  if (pathExists(requestedRoot)) {
+    const stat = privatePath(requestedRoot, 'directory');
+    if (live && (stat.mode & 0o777) !== 0o700) fail('review_storage_invalid', 503);
+  } else if (live && !provision) fail('review_storage_not_provisioned', 503);
   mkdirSync(requestedRoot, { recursive: true, mode: 0o700 });
   privatePath(requestedRoot, 'directory');
-  chmodSync(requestedRoot, 0o700);
+  if (!live) chmodSync(requestedRoot, 0o700);
   root = realpathSync(requestedRoot);
   const path = join(root, 'moderation-review.sqlite');
   if (OPEN_STORES.has(path)) fail('review_store_already_open', 409);
+  if (live && !existsSync(path) && provision !== true) fail('review_storage_not_provisioned', 503);
   for (const suffix of ['', '-wal', '-shm', '-journal']) {
     if (pathExists(path + suffix)) privatePath(path + suffix, 'file');
   }
-  if (!existsSync(path)) closeSync(openSync(path, 'wx', 0o600));
-  privatePath(path, 'file'); chmodSync(path, 0o600);
-  const rootStat = privatePath(root, 'directory'), databaseStat = privatePath(path, 'file');
+  const owner = live ? acquireModerationReviewOwner(root) : null;
+  let rootStat, databaseStat;
+  try {
+    if (!existsSync(path)) closeSync(openSync(path, 'wx', 0o600));
+    privatePath(path, 'file'); chmodSync(path, 0o600);
+    rootStat = privatePath(root, 'directory'); databaseStat = privatePath(path, 'file');
+  } catch (error) { owner?.release(); throw error; }
   OPEN_STORES.add(path);
   let db;
   try {
@@ -110,12 +137,22 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
     db.pragma('busy_timeout = 1000');
     const applicationId = db.pragma('application_id', { simple: true });
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+    const schemaDigest = () => hash(db.prepare(`SELECT type,name,tbl_name,sql FROM sqlite_master
+      WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name`).all());
     if ((applicationId !== APPLICATION_ID && tables.length) || (applicationId && applicationId !== APPLICATION_ID)) {
       fail('review_storage_schema_invalid', 503);
     }
-    if (applicationId === APPLICATION_ID && db.pragma('user_version', { simple: true }) !== 1) {
+    if (applicationId === APPLICATION_ID && ![1, 2].includes(db.pragma('user_version', { simple: true }))) {
       fail('review_storage_schema_invalid', 503);
     }
+    if (!live && db.pragma('user_version', { simple: true }) === 2) fail('review_mode_invalid');
+    if (live && db.pragma('user_version', { simple: true }) === 2) {
+      // Validate existing state BEFORE CREATE IF NOT EXISTS or orphan recovery:
+      // missing fences must never become an apparently fresh empty ledger.
+      if (tables.map((row) => row.name).sort().join(',') !== LIVE_TABLES.join(',')) fail('review_storage_schema_invalid', 503);
+      const binding = db.prepare('SELECT schema_digest FROM review_intake_binding WHERE singleton=1').get();
+      if (!binding || binding.schema_digest !== schemaDigest()) fail('review_storage_schema_invalid', 503);
+    } else if (live && (!provision || tables.length)) fail('review_storage_not_provisioned', 503);
     db.pragma('journal_mode = DELETE');
     db.pragma('secure_delete = ON');
     db.pragma('foreign_keys = ON');
@@ -163,18 +200,93 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
         expected_version INTEGER NOT NULL, deleted_at INTEGER NOT NULL
       );
     `);
-    db.pragma(`application_id = ${APPLICATION_ID}`); db.pragma('user_version = 1');
+    db.pragma(`application_id = ${APPLICATION_ID}`);
+    if (live) {
+      const policyHash = hash({ capturePolicy, limits, maxEvents, maxErasureReceipts, maxAlertsPerHour });
+      const hasBinding = db.prepare("SELECT name FROM sqlite_master WHERE name='review_intake_binding'").get();
+      if (!hasBinding && (!provision || db.prepare('SELECT count(*) AS n FROM review_cases').get().n
+        || db.prepare('SELECT count(*) AS n FROM review_erasure_receipts').get().n)) fail('review_storage_not_provisioned', 503);
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS review_intake_binding (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), binding_id TEXT NOT NULL,
+            epoch_id TEXT NOT NULL, policy_hash TEXT NOT NULL, intake_seq INTEGER NOT NULL,
+            schema_digest TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS review_native_sources (
+            chat_id TEXT NOT NULL, message_id TEXT NOT NULL,
+            case_id TEXT NOT NULL REFERENCES review_cases(id) ON DELETE CASCADE,
+            source_date INTEGER NOT NULL, revision_time INTEGER NOT NULL,
+            source_digest TEXT NOT NULL, revision INTEGER NOT NULL,
+            PRIMARY KEY(chat_id,message_id)
+          );
+          CREATE TABLE IF NOT EXISTS review_intake_events (
+            event_id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES review_cases(id) ON DELETE CASCADE,
+            source_digest TEXT NOT NULL, intake_seq INTEGER UNIQUE NOT NULL, outcome TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS review_source_revisions (
+            chat_id TEXT NOT NULL, message_id TEXT NOT NULL, revision_time INTEGER NOT NULL,
+            source_digest TEXT NOT NULL, case_id TEXT NOT NULL REFERENCES review_cases(id) ON DELETE CASCADE,
+            PRIMARY KEY(chat_id,message_id,revision_time)
+          );
+          CREATE TABLE IF NOT EXISTS review_dispatch_authorizations (
+            case_id TEXT PRIMARY KEY REFERENCES review_cases(id) ON DELETE CASCADE,
+            attempt_id TEXT UNIQUE NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS review_alert_budget (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), hour INTEGER NOT NULL, used INTEGER NOT NULL
+          );
+        `);
+        const binding = db.prepare('SELECT * FROM review_intake_binding WHERE singleton=1').get();
+        if (!binding) {
+          if (!provision || hasBinding) fail('review_checkpoint_unknown', 503);
+          db.prepare('INSERT INTO review_intake_binding VALUES (1,?,?,?,0,?)')
+            .run(capturePolicy.bindingId, capturePolicy.epochId, policyHash, schemaDigest());
+          db.prepare('INSERT INTO review_alert_budget VALUES (1,0,0)').run();
+        } else if (binding.binding_id !== capturePolicy.bindingId || binding.epoch_id !== capturePolicy.epochId
+          || binding.policy_hash !== policyHash || !Number.isSafeInteger(binding.intake_seq) || binding.intake_seq < 0
+          || db.prepare('SELECT count(*) AS n FROM review_intake_events WHERE intake_seq>?').get(binding.intake_seq).n) {
+          fail('review_checkpoint_unknown', 503);
+        }
+        db.pragma('user_version = 2');
+      }).immediate();
+      if (db.pragma('quick_check', { simple: true }) !== 'ok' || db.pragma('foreign_key_check').length) {
+        fail('review_storage_schema_invalid', 503);
+      }
+      if (db.prepare(`SELECT count(*) AS n FROM review_observations o
+        LEFT JOIN review_native_sources n ON n.chat_id=o.chat_id AND n.message_id=o.message_id
+        WHERE o.case_id IS NULL OR n.case_id IS NULL OR n.case_id<>o.case_id`).get().n
+        || db.prepare(`SELECT count(*) AS n FROM review_native_sources n
+          LEFT JOIN review_observations o ON o.chat_id=n.chat_id AND o.message_id=n.message_id AND o.revision=n.revision
+          WHERE o.id IS NULL OR n.case_id<>o.case_id OR n.source_digest<>o.fingerprint OR n.revision<>
+          (SELECT max(revision) FROM review_observations z WHERE z.chat_id=n.chat_id AND z.message_id=n.message_id)`).get().n
+        || db.prepare(`SELECT count(*) AS n FROM review_native_sources n LEFT JOIN review_source_revisions r
+          ON r.chat_id=n.chat_id AND r.message_id=n.message_id AND r.revision_time=n.revision_time
+          WHERE r.chat_id IS NULL OR r.source_digest<>n.source_digest OR r.case_id<>n.case_id`).get().n
+        || db.prepare(`SELECT count(*) AS n FROM review_intake_events e LEFT JOIN review_source_revisions r
+          ON r.case_id=e.case_id AND r.source_digest=e.source_digest WHERE r.chat_id IS NULL`).get().n
+        || db.prepare(`SELECT count(*) AS n FROM review_observations o LEFT JOIN review_source_revisions r
+          ON r.case_id=o.case_id AND r.chat_id=o.chat_id AND r.message_id=o.message_id AND r.source_digest=o.fingerprint
+          WHERE r.chat_id IS NULL`).get().n
+        || db.prepare(`SELECT count(*) AS n FROM review_source_revisions r LEFT JOIN review_intake_events e
+          ON e.case_id=r.case_id AND e.source_digest=r.source_digest WHERE e.event_id IS NULL`).get().n) fail('review_checkpoint_unknown', 503);
+      const budget = db.prepare('SELECT * FROM review_alert_budget WHERE singleton=1').get();
+      if (!budget || !Number.isSafeInteger(budget.hour) || budget.hour < 0 || !Number.isSafeInteger(budget.used)
+        || budget.used < 0 || budget.used > maxAlertsPerHour) fail('review_checkpoint_unknown', 503);
+    } else db.pragma('user_version = 1');
     // A send whose process ended has an unknown external outcome. Never requeue it.
     db.prepare("UPDATE review_alerts SET state='uncertain' WHERE state='calling'").run();
   } catch (error) {
     db?.close();
     OPEN_STORES.delete(path);
+    owner?.release();
     if (error instanceof ModerationReviewError) throw error;
     throw new ModerationReviewError('review_storage_unavailable', 503);
   }
   let closed = false;
   function ready() {
     if (closed) fail('review_store_closed', 503);
+    owner?.verify();
     try {
       privatePath(requestedRoot, 'directory');
       const directory = privatePath(root, 'directory'), file = privatePath(path, 'file');
@@ -226,7 +338,7 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
     return { caseId: row.case_id, requestId: row.request_id, principal: row.principal,
       expectedVersion: row.expected_version, deletedAt: iso(row.deleted_at), erased: true };
   }
-  function normalize(input) {
+  function normalize(input, admission = {}) {
     shape(input, ['chatId', 'messageId', 'revision', 'text', 'observedAt'], ['userId', 'context']);
     const value = { chatId: identifier(input.chatId, 'chatId'), messageId: identifier(input.messageId, 'messageId'),
       revision: integer(input.revision, 'revision'), text: plainText(input.text, 'text'),
@@ -237,9 +349,10 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
     }
     // Retry arrival time is not a content revision; keep the first observedAt.
     const { observedAt, ...sourceIdentity } = value;
-    const fingerprint = hash(sourceIdentity);
-    const truncated = { text: value.text.length > limits.maxTextChars,
-      context: Boolean(value.context && value.context.text.length > limits.maxContextChars) };
+    const fingerprint = admission.sourceDigest || hash(sourceIdentity);
+    const truncated = { text: value.text.length > limits.maxTextChars || admission.truncated?.text === true,
+      context: Boolean(value.context && value.context.text.length > limits.maxContextChars) || admission.truncated?.context === true,
+      ...(admission.contextUnavailable ? { contextUnavailable: true } : {}) };
     value.text = value.text.slice(0, limits.maxTextChars);
     if (value.context) value.context.text = value.context.text.slice(0, limits.maxContextChars);
     const detectorObservation = { ...value, context: value.context && { ...value.context } };
@@ -264,14 +377,16 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
       }
     }).immediate();
   } catch {
-    db.close(); OPEN_STORES.delete(path);
+    db.close(); OPEN_STORES.delete(path); owner?.release();
     fail('review_storage_unavailable', 503);
   }
   const reviewCaseId = (id) => id && db.prepare('SELECT status FROM review_cases WHERE id=?').get(id)?.status !== 'retained'
     ? id : null;
-  return {
-    ingest(input) {
-      const { value, fingerprint, truncated, detectorObservation } = normalize(input);
+  const captureAdmission = Symbol('capture-admission');
+  const api = {
+    ingest(input, admission = {}) {
+      if (live && admission[captureAdmission] !== true) fail('review_capture_required', 403);
+      const { value, fingerprint, truncated, detectorObservation } = normalize(input, admission);
       return atomic(() => {
         const prior = db.prepare('SELECT * FROM review_observations WHERE chat_id=? AND message_id=? ORDER BY revision DESC LIMIT 1')
           .get(value.chatId, value.messageId);
@@ -301,7 +416,7 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
           // A clipped source/context may omit a claim or its qualification.
           // Retain it visibly for manual inspection, but introduce no detector
           // claim, repeat grouping or alert from incomplete evidence.
-          if (truncated.text || truncated.context) {
+          if (Object.values(truncated).some(Boolean)) {
             return { ...result, patternIds: [], reasons: [], relatedMessageIds: [] };
           }
           return result;
@@ -355,6 +470,11 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
             // Move all immutable revisions before retiring the never-reviewed
             // source case. Its old opaque ID intentionally becomes missing.
             db.prepare('UPDATE review_observations SET case_id=? WHERE case_id=?').run(caseId, donor);
+            if (live) {
+              db.prepare('UPDATE review_native_sources SET case_id=? WHERE case_id=?').run(caseId, donor);
+              db.prepare('UPDATE review_intake_events SET case_id=? WHERE case_id=?').run(caseId, donor);
+              db.prepare('UPDATE review_source_revisions SET case_id=? WHERE case_id=?').run(caseId, donor);
+            }
             db.prepare('DELETE FROM review_cases WHERE id=?').run(donor);
           }
         }
@@ -365,8 +485,65 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
         return { caseId: status === 'retained' ? null : caseId, duplicate: false, stale: false };
       });
     },
+    capture(input) {
+      if (!live) fail('review_capture_disabled', 503);
+      const envelope = validateModerationReviewEnvelope(input, capturePolicy, { now: new Date(clock()).toISOString() });
+      const receipt = (row) => ({ contract: 'moderation-review-receipt/v1', bindingId: capturePolicy.bindingId,
+        epochId: capturePolicy.epochId, intakeSeq: row.intake_seq, outcome: row.outcome });
+      return atomic(() => {
+        const priorEvent = db.prepare('SELECT * FROM review_intake_events WHERE event_id=?').get(envelope.updateId);
+        if (priorEvent) {
+          if (priorEvent.source_digest !== envelope.sourceDigest) fail('review_event_conflict', 409);
+          return receipt(priorEvent);
+        }
+        if (db.prepare('SELECT count(*) AS n FROM review_intake_events').get().n >= maxEvents) fail('review_event_capacity_reached', 409);
+        let native = db.prepare('SELECT * FROM review_native_sources WHERE chat_id=? AND message_id=?')
+          .get(envelope.chatId, envelope.messageId);
+        const revisionTime = envelope.kind === 'edit' ? envelope.editDateSec : -1;
+        if (native && native.source_date !== envelope.sourceDateSec) fail('review_source_date_conflict', 409);
+        const knownRevision = db.prepare('SELECT * FROM review_source_revisions WHERE chat_id=? AND message_id=? AND revision_time=?')
+          .get(envelope.chatId, envelope.messageId, revisionTime);
+        if (knownRevision && knownRevision.source_digest !== envelope.sourceDigest) fail('review_revision_order_conflict', 409);
+        let outcome = 'accepted', caseId = native?.case_id;
+        if (native && revisionTime < native.revision_time) outcome = 'stale';
+        else if (native && revisionTime === native.revision_time) {
+          if (native.source_digest !== envelope.sourceDigest) fail('review_revision_order_conflict', 409);
+          outcome = 'duplicate';
+        } else {
+          // Reserve eventual minimal erase-receipt capacity before admitting a
+          // new native/case. Erasure itself has no additional logical quota gate.
+          if (!native && db.prepare(`SELECT (SELECT count(*) FROM review_cases)
+            +(SELECT count(*) FROM review_erasure_receipts) AS n`).get().n >= maxErasureReceipts) {
+            fail('review_erasure_reserve_full', 409);
+          }
+          const revision = (native?.revision || 0) + 1;
+          api.ingest({ chatId: envelope.chatId, messageId: envelope.messageId, revision,
+            text: envelope.text, observedAt: envelope.observedAt,
+            ...(envelope.userId === null ? {} : { userId: envelope.userId }),
+            ...(envelope.context === null ? {} : { context: {
+              messageId: envelope.context.messageId, text: envelope.context.text,
+            } }) }, { [captureAdmission]: true, sourceDigest: envelope.sourceDigest,
+            truncated: envelope.truncated, contextUnavailable: envelope.contextStatus === 'unavailable' });
+          caseId = db.prepare('SELECT case_id FROM review_observations WHERE chat_id=? AND message_id=? AND revision=?')
+            .get(envelope.chatId, envelope.messageId, revision).case_id;
+          db.prepare(`INSERT INTO review_native_sources VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(chat_id,message_id) DO UPDATE SET case_id=excluded.case_id,
+            revision_time=excluded.revision_time,source_digest=excluded.source_digest,revision=excluded.revision`)
+            .run(envelope.chatId, envelope.messageId, caseId, envelope.sourceDateSec, revisionTime, envelope.sourceDigest, revision);
+        }
+        const binding = db.prepare('SELECT intake_seq FROM review_intake_binding WHERE singleton=1').get();
+        if (!binding || !Number.isSafeInteger(binding.intake_seq + 1)) fail('review_checkpoint_unknown', 503);
+        const sequence = binding.intake_seq + 1;
+        if (!knownRevision) db.prepare('INSERT INTO review_source_revisions VALUES (?,?,?,?,?)')
+          .run(envelope.chatId, envelope.messageId, revisionTime, envelope.sourceDigest, caseId);
+        db.prepare('INSERT INTO review_intake_events VALUES (?,?,?,?,?)')
+          .run(envelope.updateId, caseId, envelope.sourceDigest, sequence, outcome);
+        db.prepare('UPDATE review_intake_binding SET intake_seq=? WHERE singleton=1').run(sequence);
+        return receipt({ intake_seq: sequence, outcome });
+      });
+    },
     status() {
-      return atomic(() => ({ mode: 'synthetic', collectionEnabled: false, deliveryEnabled: false,
+      return atomic(() => ({ mode: live ? 'live' : 'synthetic', collectionEnabled: live, deliveryEnabled: false,
         decisionsEnabled: true, patternActivationEnabled: false, sanctionsEnabled: false,
         retentionMs: limits.retentionMs, counts: {
           retained: db.prepare("SELECT count(*) AS n FROM review_cases WHERE status='retained'").get().n,
@@ -469,6 +646,11 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
     },
     claimAlert() {
       return atomic(() => {
+        if (live) {
+          const budget = db.prepare('SELECT * FROM review_alert_budget WHERE singleton=1').get();
+          if (!budget) fail('review_checkpoint_unknown', 503);
+          if (budget.hour >= Math.floor(clock() / 3_600_000) && budget.used >= maxAlertsPerHour) return null;
+        }
         const pending = db.prepare(`SELECT a.case_id FROM review_alerts a JOIN review_cases c ON c.id=a.case_id
           WHERE a.state='pending' ORDER BY c.created_at,c.id LIMIT 1`).get();
         if (!pending) return null;
@@ -478,6 +660,25 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
         return { caseId: pending.case_id, attemptId };
       });
     },
+    authorizeAlert(input) {
+      if (!live) fail('review_delivery_disabled', 503);
+      shape(input, ['caseId', 'attemptId']);
+      const caseId = uuid(input.caseId, 'caseId'), attemptId = uuid(input.attemptId, 'attemptId');
+      return atomic(() => {
+        const row = db.prepare('SELECT * FROM review_alerts WHERE case_id=?').get(caseId);
+        if (!row || row.state !== 'calling' || row.attempt_id !== attemptId) return { authorized: false };
+        if (db.prepare('SELECT 1 FROM review_dispatch_authorizations WHERE case_id=? OR attempt_id=?').get(caseId, attemptId)) {
+          return { authorized: false };
+        }
+        const budget = db.prepare('SELECT * FROM review_alert_budget WHERE singleton=1').get();
+        const hour = Math.floor(clock() / 3_600_000);
+        if (!budget || budget.hour > hour || (budget.hour === hour && budget.used >= maxAlertsPerHour)) return { authorized: false };
+        db.prepare('UPDATE review_alert_budget SET hour=?,used=? WHERE singleton=1')
+          .run(hour, budget.hour === hour ? budget.used + 1 : 1);
+        db.prepare('INSERT INTO review_dispatch_authorizations VALUES (?,?)').run(caseId, attemptId);
+        return { authorized: true };
+      });
+    },
     finishAlert(input) {
       shape(input, ['caseId', 'attemptId', 'state'], ['receipt']);
       const caseId = uuid(input.caseId, 'caseId'), attemptId = uuid(input.attemptId, 'attemptId');
@@ -485,7 +686,10 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
       const receipt = receiptIdentifier(input.receipt);
       return atomic(() => {
         const row = db.prepare('SELECT * FROM review_alerts WHERE case_id=?').get(caseId);
-        if (!row) fail('review_case_not_found', 404);
+        if (!row) {
+          if (db.prepare('SELECT 1 FROM review_erasure_receipts WHERE case_id=?').get(caseId)) return { caseId, state: 'erased' };
+          fail('review_case_not_found', 404);
+        }
         if (row.attempt_id !== attemptId) fail('review_alert_attempt_conflict', 409);
         if (row.state !== 'calling') {
           if (row.state === input.state && row.receipt_id === receipt) return { caseId, state: row.state };
@@ -496,6 +700,7 @@ export function createModerationReviewStore({ root, mode, limits, now = Date.now
       });
     },
     purgeExpired() { ready(); return db.transaction(purge).immediate(); },
-    close() { if (!closed) { db.close(); OPEN_STORES.delete(path); closed = true; } },
+    close() { if (!closed) { db.close(); OPEN_STORES.delete(path); closed = true; owner?.release(); } },
   };
+  return api;
 }

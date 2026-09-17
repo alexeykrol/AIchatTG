@@ -13,7 +13,7 @@ test('promotion detector is deterministic, private and explicitly review-only', 
   const input = Object.freeze(observation());
   const first = detectPromotionReview(input);
   assert.deepEqual(first, detectPromotionReview(input));
-  assert.equal(first.version, 'promotion-review-v1');
+  assert.equal(first.version, 'promotion-review-v2');
   assert.equal(first.reviewOnly, true);
   assert.match(first.fingerprint, /^[a-f0-9]{64}$/u);
   assert.deepEqual(first.patternIds, ['personal-experience-promotion']);
@@ -191,5 +191,191 @@ test('standard-reply local character threshold has an exact 120-character bounda
       history: [history({ text }), history({ text, messageId: '2' })],
     });
     assert.deepEqual(result.patternIds, length === 120 ? ['repeated-standard-reply'] : []);
+  }
+});
+
+// Synthetic targeting corpus: these are suspicions for a human, not labelled
+// proof of a campaign. No production text, user identity or message coordinates.
+const TESTIMONIALS = [
+  'Недавно наткнулся на книгу «Тихая траектория». Ждал очередных обещаний успеха, а научился спокойнее принимать решения. Принципы пригодились и дома, и на работе. Думаю, стоит почитать.',
+  'Дочитала книгу «Линия ветра». Думала, будут одни банальности, но после чтения перестала откладывать важные дела. Есть аудиоверсия. Возможно, вам тоже стоит познакомиться.',
+  'Случайно нашёл книгу «Северный шаг» и прочитал за выходные. Мне стало проще выбирать приоритеты. Её принципы работают в повседневной жизни и делах. Можно слушать аудиокнигу, присмотритесь.',
+  'Открыл книгу «Ясный поворот» из любопытства. Ожидал привычную мотивацию, однако разбор помог мне перестать метаться между задачами. Эти принципы применяю и в работе, и в личной жизни.',
+  'Недавно попалась книга «Ровный горизонт». Прочла её, хотя ожидала пустых советов об успехе. На деле стало легче доводить начатое до конца. Если ищете что-то полезное, советую обратить внимание.',
+  'По совету знакомого послушал одну книгу. После неё мне проще справляться с ежедневными решениями. Общие принципы пригодились в жизни и работе. Удобно, что она есть в аудио; могу порекомендовать.',
+  'Прошла курс «Спокойный вектор». Думала, опять красивые лозунги, но упражнения помогли мне увереннее расставлять приоритеты. Материалы можно слушать в аудиоформате.',
+  'Взял почитать «Новый ритм». Сначала считал эту книгу очередной историей про успешный успех, но она помогла мне наладить привычки. Идеи использую дома и в рабочих делах. Может оказаться полезной.',
+  'Я прочитал книгу «Малый компас». Теперь легче отделяю важное от срочного. Принципы универсальные — для работы и обычной жизни. Аудиоверсия тоже есть, рекомендую присмотреться.',
+  'Нашла и прочитала книгу «Точка равновесия». Настраивалась на общие слова, а получила понятный способ организовать день. Подход пригодился в личных и рабочих делах. Ещё доступна озвученная версия.',
+  'I stumbled upon the book Quiet Meridian and read it last weekend. I expected generic success advice, but it helped me finish neglected tasks. An audiobook is available too; it may be worth a look.',
+  'I completed the Clear Path course. It helped me make decisions with less hesitation. I use its principles both at work and in everyday life. There is an audio edition; I would recommend exploring it.',
+  'Друзья, попалась книга про личные ориентиры. Думал, снова будет про постоянную гонку за результатом, а автор объясняет, как выбирать важное в работе и повседневной жизни. Если удобно, есть аудио, очень советую.',
+];
+const UNRELATED_PARENT = { messageId: '501', text: 'Обсуждаем перенос автобусной остановки и новый маршрут.' };
+
+for (const [index, text] of TESTIMONIALS.entries()) {
+  test('covert testimonial singleton ' + (index + 1) + ' is review-only without commercial CTA', () => {
+    const result = detectPromotionReview(observation({ text, context: UNRELATED_PARENT }));
+    assert.deepEqual(result.patternIds, ['covert-testimonial-bait']);
+    assert.deepEqual(result.relatedMessageIds, ['3']);
+    assert.equal(result.reviewOnly, true);
+    assert.ok(result.reasons.includes('personal_testimonial_with_benefit'));
+    assert.ok(result.reasons.length >= 3);
+    assert.equal(result.reasons.includes('commercial_call_to_action'), false);
+    assert.equal(result.reasons.includes('observed_in_multiple_contexts'), false);
+    assert.equal(/bot|ownership|automated|ai_author|off_topic/iu.test(result.reasons.join(' ')), false);
+  });
+}
+
+const BENIGN_TESTIMONIALS = [
+  { text: 'Я прочитал книгу «Тихая траектория». Не понял, почему рассказчик меняет точку зрения в последней главе. Как вы это объясняете?' },
+  { text: TESTIMONIALS[0], context: { messageId: '502', text: 'Посоветуйте книги, которые помогли вам принимать решения. Интересует ваш личный опыт.' } },
+  { text: TESTIMONIALS[2], context: { messageId: '503', text: 'Какую аудиокнигу о выборе приоритетов вы посоветуете и почему?' } },
+  { text: 'Цитата: ' + TESTIMONIALS[1] },
+  { text: 'Модераторы, проверьте сообщение: «Я прочитал книгу, ожидал банальностей, но она помогла мне изменить жизнь и работу. Есть аудиоверсия, рекомендую». Это повторяют под разными темами.' },
+  { text: TESTIMONIALS[4], context: { messageId: '504', text: 'Учебное задание: напишите по шаблону пример рекламного текста.' } },
+  { text: 'Я прочитал книгу по геометрии, и пример помог мне понять доказательство. Если нужна помощь с этим упражнением, напишите мне — разберём решение.' },
+  { text: 'Я прочитал книгу «Синтетическая геометрия». В главе «Подобие треугольников» разобрано именно ваше построение: проведите высоту и сравните углы. Есть аудиоверсия, но рекомендую рисунок на странице 42.', context: { messageId: '505', text: 'Как доказать подобие этих треугольников?' } },
+  { text: 'Я прочитал книгу «Ровный горизонт». Ожидал полезных принципов для жизни и работы, но она мне не помогла. Есть аудиоверсия, однако рекомендовать её не могу.' },
+  { text: 'Если бы я прочитал такую книгу и она помогла мне в жизни и работе, возможно, порекомендовал бы её. Пока даже не знаю, существует ли аудиоверсия.' },
+  { text: 'У книги «Малый компас» появилась аудиоверсия. Кто сравнивал перевод с бумажным изданием?' },
+  { text: 'I read the book and its chapter on fractions helped me solve this exercise. Message me if you want to check the denominator together.' },
+  { text: TESTIMONIALS[10], context: { messageId: '506', text: 'Which book would you recommend for making everyday decisions?' } },
+  { text: 'Reporting spam: ' + TESTIMONIALS[10] },
+  { text: 'I read the book. I expected useful advice but it did not help in life or work. An audiobook is available; I cannot recommend it.' },
+];
+for (const [index, changes] of BENIGN_TESTIMONIALS.entries()) {
+  test('legitimate testimonial counterexample ' + (index + 1) + ' stays negative', () => {
+    assert.deepEqual(detectPromotionReview(observation(changes)).patternIds, []);
+  });
+}
+
+test('testimonial cues tolerate case, whitespace and invisible separators without changing identity', () => {
+  const source = TESTIMONIALS[12];
+  const base = detectPromotionReview(observation({ text: source }));
+  for (const text of [source.toUpperCase(), source.replaceAll(' ', '  '), source.replaceAll(' ', '\n'),
+    source.replace('попалась', 'по\u200bпалась').replace('книга', 'кни\u200dга')]) {
+    const result = detectPromotionReview(observation({ text }));
+    assert.deepEqual(result.patternIds, base.patternIds);
+    assert.equal(result.reviewOnly, true);
+  }
+  assert.notEqual(base.fingerprint, detectPromotionReview(observation({
+    text: source.replace('попалась', 'по\u200bпалась'),
+  })).fingerprint);
+});
+
+test('multiple synonyms in one support family do not replace two independent supports', () => {
+  const text = 'Я прочитал книгу, она помогла расставить приоритеты. Рекомендую, советую присмотреться, стоит почитать.';
+  assert.deepEqual(detectPromotionReview(observation({ text })).patternIds, []);
+});
+
+test('bare product, experience, benefit or format cues do not become findings', () => {
+  for (const text of [
+    'Книга про жизнь и работу, есть аудиоверсия, рекомендую.',
+    'Я прочитал книгу. Есть аудиоверсия, рекомендую.',
+    'Мне помогло расставить приоритеты в жизни и работе, рекомендую, есть аудио.',
+    'Я прочитал книгу, она помогла выбрать приоритеты.',
+  ]) assert.deepEqual(detectPromotionReview(observation({ text })).patternIds, []);
+});
+
+test('missing context is not invented as proof of irrelevance', () => {
+  const result = detectPromotionReview(observation({ text: TESTIMONIALS[12] }));
+  assert.ok(result.reasons.includes('original_context_missing'));
+  assert.equal(result.reasons.some((reason) => /irrelevant|unrelated|off_topic/u.test(reason)), false);
+});
+
+test('paraphrases and different product names do not create repetition or shared identity', () => {
+  const first = history({ text: TESTIMONIALS[0], userId: '55', context: UNRELATED_PARENT });
+  const current = observation({ text: TESTIMONIALS[1], context: { messageId: '507', text: 'Другой синтетический пост.' } });
+  const result = detectPromotionReview(current, { history: [first] });
+  assert.deepEqual(result.patternIds, ['covert-testimonial-bait']);
+  assert.deepEqual(result.relatedMessageIds, ['3']);
+  assert.notEqual(result.fingerprint, detectPromotionReview(first).fingerprint);
+  assert.equal(result.reasons.includes('observed_in_multiple_contexts'), false);
+});
+
+test('new contextual exclusions do not override existing explicit commercial detection', () => {
+  const context = { messageId: '502', text: 'Посоветуйте книги для работы.' };
+  assert.deepEqual(detectPromotionReview(observation({ context })).patternIds, ['personal-experience-promotion']);
+  const report = 'Модераторы, проверьте текст. Я прочитал книгу. Купите книгу по промокоду FIXTURE.';
+  assert.ok(detectPromotionReview(observation({ text: report })).patternIds.includes('personal-experience-promotion'));
+});
+
+test('requested narrative exact copies still preserve the separate repetition-only contract', () => {
+  const context = { messageId: '502', text: 'Посоветуйте книги для работы.' };
+  const text = TESTIMONIALS[0];
+  const result = detectPromotionReview(observation({ text, context }), { history: [
+    history({ text, context }), history({ text, context, messageId: '2' }),
+  ] });
+  assert.deepEqual(result.patternIds, ['repeated-standard-reply']);
+  assert.deepEqual(result.relatedMessageIds, ['1', '2', '3']);
+});
+
+test('life/work cues require word boundaries rather than unrelated substrings', () => {
+  const text = 'Я прочитал книгу: она помогла разобраться с различными алгоритмами. Советую сделать таблицу.';
+  assert.deepEqual(detectPromotionReview(observation({ text })).patternIds, []);
+  for (const text of [
+    'Я прочитал книгу, она помогла различными примерами в работе, советую.',
+    'Я прочитал книгу, она помогла понять жизнь, советую сделать таблицу.',
+  ]) assert.deepEqual(detectPromotionReview(observation({ text })).patternIds, []);
+});
+
+test('plural and singular requests for recommendations qualify as supplied context', () => {
+  for (const text of [
+    'Какие книги вы посоветуете для принятия решений в жизни и работе?',
+    'Какую книгу порекомендуете?',
+    'Какой курс вы посоветуете?',
+    'Посоветуй книгу для работы.',
+    'Порекомендуйте аудиокнигу.',
+  ]) assert.deepEqual(detectPromotionReview(observation({
+    text: TESTIMONIALS[12], context: { messageId: '508', text },
+  })).patternIds, []);
+});
+
+test('explicit spam reports remain reports with a greeting or a direct label', () => {
+  for (const prefix of ['Спам: ', 'Здравствуйте, модераторы, проверьте сообщение: ', 'Привет, модераторы, посмотрите: ']) {
+    assert.deepEqual(detectPromotionReview(observation({ text: prefix + '«' + TESTIMONIALS[8] + '»' })).patternIds, []);
+  }
+});
+
+test('negated experience is not described as a personal testimonial', () => {
+  const text = 'Я не прочитал книгу «Малый компас». Мне рассказывали, что она помогла им в жизни и работе. Есть аудиоверсия.';
+  assert.deepEqual(detectPromotionReview(observation({ text })).patternIds, []);
+});
+
+test('a counterfactual conclusion does not erase an actual narrated endorsement', () => {
+  for (const suffix of [
+    ' Если бы не она, я бы до сих пор откладывал важные дела.',
+    ' Если бы я прочитал её раньше, не тратил бы столько времени зря.',
+  ]) assert.deepEqual(detectPromotionReview(observation({ text: TESTIMONIALS[8] + suffix })).patternIds, ['covert-testimonial-bait']);
+});
+
+test('polite recommendation requests remain supplied contextual exceptions', () => {
+  for (const text of [
+    'Можете посоветовать книгу для принятия решений в жизни и работе?',
+    'Можете ли вы порекомендовать книгу?',
+    'Можешь посоветовать аудиокнигу?',
+    'Могли бы вы порекомендовать книгу?',
+  ]) assert.deepEqual(detectPromotionReview(observation({
+    text: TESTIMONIALS[12], context: { messageId: '509', text },
+  })).patternIds, []);
+});
+
+test('English negative benefit tenses and advice to avoid a book are not endorsements', () => {
+  for (const sentence of [
+    'It has not helped me in life or work.',
+    "It hasn't helped me in life or work.",
+    'It never helped me in life or work.',
+    'It does not help me in life or work.',
+  ]) assert.deepEqual(detectPromotionReview(observation({
+    text: 'I read the book. ' + sentence + ' There is an audiobook; I would recommend exploring it.',
+  })).patternIds, []);
+  for (const recommendation of ['I would recommend avoiding it.', 'I recommend against reading it.']) {
+    assert.deepEqual(detectPromotionReview(observation({
+      text: 'I read the book. It has not helped me in life or work. There is an audiobook; ' + recommendation,
+    })).patternIds, []);
+    assert.deepEqual(detectPromotionReview(observation({
+      text: 'I read the book. It helped me initially in life and work, but the advice later proved misleading. There is an audiobook; ' + recommendation,
+    })).patternIds, []);
   }
 });

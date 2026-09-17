@@ -7,6 +7,8 @@ import { createDomainCandidateStore, DomainCandidateError } from './domain-candi
 import { createSettingsCandidateStore, SettingsCandidateError } from './settings-candidates.mjs';
 import { assistantCostAnalytics } from './assistant-cost-analytics.mjs';
 import { createModerationReviewHandler } from './moderation-review-http.mjs';
+import { createConsoleReviewService, createUnavailableConsoleReviewService } from './moderation-review-service.mjs';
+import { loadModerationReviewBinding } from '../../../packages/telegram-core/src/moderation-review-config.mjs';
 import {
   legacyAssistantAnalytics,
   legacyAssistantConfig,
@@ -174,17 +176,19 @@ function apiResponse(config, path, searchParams) {
   return null;
 }
 
-export function createOperatorConsoleServer({ config, logger = console } = {}) {
+export function createOperatorConsoleServer({ config, logger = console, review = null, reviewBinding = null } = {}) {
   if (!config) throw new Error('operator console config is required');
   const domains = createDomainCandidateStore({
     domainIndexPath: config.domainIndexPath,
     candidateRoot: config.candidateRoot ? `${config.candidateRoot}/domain-bundles` : null,
   });
   const settings = createSettingsCandidateStore(config);
-  // Deliberately no store, collector, recipient or live-delivery bootstrap.
+  // No store or collection without an explicitly provisioned binding. A live
+  // identity comes from the approved binding, never request JSON or a guess.
   const moderationReview = createModerationReviewHandler({
+    store: review?.store || null, getStatus: review?.status || null, origin: reviewBinding?.consoleUrl || null,
     authenticate: (request) => validOperatorAuthorization(request.headers.authorization, config.token)
-      ? 'operator' : null,
+      ? reviewBinding?.reviewerPrincipal || 'operator' : null,
   });
   const authorize = (request, response) => {
     if (!config.token) {
@@ -294,11 +298,22 @@ export function createOperatorConsoleServer({ config, logger = console } = {}) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = loadOperatorConsoleConfig();
-  const server = createOperatorConsoleServer({ config });
+  const loadedReview = loadModerationReviewBinding(process.env.AICHATTG_REVIEW_BINDING_PATH);
+  let review = loadedReview.code === 'review_disabled' ? null : createUnavailableConsoleReviewService();
+  if (loadedReview.binding && config.token) {
+    try { review = await createConsoleReviewService({ binding: loadedReview.binding }); }
+    catch { console.error('[operator-console] review unavailable; collection disabled'); }
+  }
+  const server = createOperatorConsoleServer({ config, review, reviewBinding: loadedReview.binding });
   server.listen(config.port, config.bindHost, () => {
     console.log(`[operator-console] listening on ${config.bindHost}:${config.port}; route-auth=${config.token ? 'configured' : 'disabled'}`);
   });
   for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.once(signal, () => server.close(() => process.exit(0)));
+    process.once(signal, () => {
+      // Release private sockets/owner even if an unrelated HTTP client drains
+      // slowly. Do not leave Review cleanup behind Docker's stop deadline.
+      const reviewClosed = Promise.resolve(review?.close()).catch(() => {});
+      server.close(async () => { await reviewClosed; process.exit(0); });
+    });
   }
 }

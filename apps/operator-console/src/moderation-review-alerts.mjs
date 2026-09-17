@@ -45,7 +45,7 @@ export async function deliverNextModerationReviewAlert({ store, send, consoleUrl
   let state = 'uncertain';
   let receipt = null;
   try {
-    const result = await send({ text: `Новый случай для проверки в Admin.\n\n${url}`, url });
+    const result = await send({ text: `Новый случай для проверки в Admin.\n\n${url}`, url }, { caseId, attemptId });
     if (result?.ok === true) {
       state = 'sent';
       receipt = safeReceipt(result.receipt);
@@ -56,6 +56,6 @@ export async function deliverNextModerationReviewAlert({ store, send, consoleUrl
     // Exception contents may include private provider response bodies or
     // credentials. Persist only the outcome, never stringify the exception.
   }
-  await store.finishAlert({ caseId, attemptId, state, receipt });
-  return { caseId, attemptId, state };
+  const finalized = await store.finishAlert({ caseId, attemptId, state, receipt });
+  return { caseId, attemptId, state: finalized?.state === 'erased' ? 'erased' : state };
 }

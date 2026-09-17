@@ -51,16 +51,20 @@ updated: 2026-09-16
       Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts
-      throughv5 accepted; recipient/principal unknown,
+      throughv5 accepted; recipient selected and verified, reviewer access pending,
       production collection/delivery disabled. Queue position1; requested
       mechanical owner Moderator, no active lease/SSH handoff. Root local source
       1829573/Console3.3.0 accepted:905passed/5fixture-skips, Console159/159,
       P2 fixes and disabled no-store mount independently checked. Lifecycle
       `pushed`, not deployed; see `docs/reports/2026-09-15-moderation-review-integration.md`.
-      LOCAL bridge proposal получен,54 сценария только специфицированы.
-      До implementation нужны PO решения: приоритет Guard при сбое Review;
-      retained HMAC markers/future-edit suppression после erase. См.
-      `docs/reports/2026-09-15-moderation-bridge-review.md`.
+      2026-09-17: оба PO решения получены: Guard независим от Review;
+      erase удаляет linked IDs без future suppression. Локальный кандидат
+      Console3.4.0/Assistant2.4.40 prepared: capture/IPC/store/notification/
+      decision/erase и covert-testimonial detector реализованы и проверены
+      синтетически; Linux IPC/Compose passed. Нужны exact activation binding,
+      reviewer access/limits/lease, deploy и live acceptance. См.
+      `docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md` и
+      `docs/MODERATION_REVIEW_ACTIVATION.md`.
 - [x] CONSOLE-COST-V1 local implementation: integrated into3.2.0/f650fe8;
       production acceptance passed in CONSOLE-V32 above. No guessed usage/zero
       costs; worker backend preserved. Incorporates pushed3.1.1 copy fixes.

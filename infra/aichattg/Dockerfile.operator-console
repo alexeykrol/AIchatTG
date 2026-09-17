@@ -13,6 +13,9 @@ RUN npm ci --omit=dev
 
 COPY apps/operator-console/src/ ./src/
 COPY apps/operator-console/public/ ./public/
+COPY packages/telegram-core/src/moderation-review-projection.mjs /app/packages/telegram-core/src/moderation-review-projection.mjs
+COPY packages/telegram-core/src/moderation-review-ipc.mjs /app/packages/telegram-core/src/moderation-review-ipc.mjs
+COPY packages/telegram-core/src/moderation-review-config.mjs /app/packages/telegram-core/src/moderation-review-config.mjs
 COPY apps/telegram-runtime/src/safety-artifacts/ ./safety-artifacts/
 COPY apps/telegram-runtime/src/assistant-domains.mjs /app/apps/telegram-runtime/src/assistant-domains.mjs
 COPY apps/telegram-runtime/src/domains/ /app/apps/telegram-runtime/src/domains/

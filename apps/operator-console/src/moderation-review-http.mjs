@@ -82,7 +82,7 @@ export const DISABLED_REVIEW_STATUS = Object.freeze({
 
 /** authenticate(request) returns a trusted principal string or null, never a
  * client-supplied JSON identity. Unconfigured authentication fails closed. */
-export function createModerationReviewHandler({ store = null, authenticate = () => null, origin = null } = {}) {
+export function createModerationReviewHandler({ store = null, authenticate = () => null, origin = null, getStatus = null } = {}) {
   if (typeof authenticate !== 'function') throw new TypeError('review authenticate must be a function');
   if (origin !== null) {
     const parsed = new URL(origin);
@@ -102,7 +102,7 @@ export function createModerationReviewHandler({ store = null, authenticate = () 
       const suffix = url.pathname.slice(MODERATION_REVIEW_PREFIX.length);
       if (request.method === 'GET' && suffix === '/status') {
         if (url.search) throw new RequestError('review_query_invalid', 400);
-        reply(response, 200, store ? store.status() : DISABLED_REVIEW_STATUS);
+        reply(response, 200, getStatus ? await getStatus() : store ? store.status() : DISABLED_REVIEW_STATUS);
         return true;
       }
       const match = /^\/cases\/([^/]+)(?:\/(decisions|erase))?$/u.exec(suffix);

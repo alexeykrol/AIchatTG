@@ -1,0 +1,33 @@
+# Explicit activation overlay; never include in an ordinary base-only deploy.
+# Provision private owner/config/socket directories under a reviewed lease first.
+services:
+  aichattg-telegram-runtime:
+    environment:
+      AICHATTG_REVIEW_BINDING_PATH: /run/aichattg-review-config/binding.json
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/review-config/binding.json"
+        target: /run/aichattg-review-config/binding.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/review-ipc"
+        target: /run/aichattg-review-ipc
+        bind:
+          create_host_path: false
+  aichattg-operator-console:
+    environment:
+      AICHATTG_REVIEW_BINDING_PATH: /run/aichattg-review-config/binding.json
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/review-config/binding.json"
+        target: /run/aichattg-review-config/binding.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/review-ipc"
+        target: /run/aichattg-review-ipc
+        bind:
+          create_host_path: false

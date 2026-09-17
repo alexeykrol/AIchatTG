@@ -19,6 +19,106 @@ Newest entries first.
 
 ---
 
+## 2026-09-17 — Complete the previously assigned Review workflow
+
+**Recipient choice:** the owner supplied the private Telegram account in the
+Moderator task. A bounded read-only check on2026-09-17T10:12:42Z matched its
+administrator identity in an approved chat, then verified the exact numeric
+account as private. The binding is kept only in ignored private local evidence;
+no recipient identifiers appear in committed fixtures. Zero sends/mutations.
+Runtime remained exact2c72e01, healthy and unchanged; one SSH master closed.
+
+**New owner instruction relayed by task «Модератор»:** «нужно довести эту
+задачу до конца)))», followed by «я даю разрешение заранее». This authorizes
+continuing the original local implementation and records advance release
+intent; it does not identify a release SHA, private recipient, spending limit
+or exact production lease by itself.
+
+**Explicit decisions subsequently supplied:** «Продолжать модерацию, отмечать
+пропуски» and «Удалять связанные идентификаторы; не обещать защиту от повторного
+появления». Primary moderation must remain independent of Review failure.
+Erasure removes linked identifiers; no permanent suppression markers, raw
+retry backlog or post-erasure deduplication guarantee may be introduced.
+These are actual selected options, not interpretations of generic preapproval.
+
+**Status: partial; local implementation verified.** Root accepted the isolated
+detector from Moderator and implemented capture/IPC/store lifecycle, runtime
+hooks, UI, integration/tests. The old frozen worker tree is preserved. Completion
+requires a working private review/notification/admin-decision path and actual
+production evidence, not another detector-only or disabled-surface claim.
+Recipient is resolved. Reviewer access, exact binding/limits/source and release
+lease still need activation approval. Tests include real local Unix IPC with
+fake Telegram, private Admin decision/erase, concurrency and cancellation,
+without paid calls or real sends. See the selected v3 contract and current
+candidate report; this remains distinct from production completion.
+
+## 2026-09-17 — Previously requested covert-promotion workflow was not delivered
+
+**Owner correction relayed by task «Модератор»:** «мы обсуждали такие кейсы».
+The original discussion explicitly included covert book promotion framed as
+«Я прочитал книгу...» / guerrilla marketing. The owner requested recognition,
+pattern accumulation and notification so that the owner could decide, followed
+by «Делай, все, что мы обсудили...». This is an unfulfilled part of an existing
+assignment, not a new feature request or a reason to ask the owner to explain
+the requirements again.
+
+**Delivery gap / status: partial, not production-complete.** The existing
+covert-promotion recognition/collection/notification scenario was not brought
+to production. A healthy runtime and a technically valid `clean` decision for
+message9709 do not satisfy that earlier product assignment. The incident-stage
+diagnosis below remains correct, but describing the remedy merely as a new
+optional enhancement concealed the delivery gap; that framing is corrected.
+
+**Required distinction:** suspected book promotion was to enter review,
+accumulate patterns and notify the owner for a decision. The later immediate
+ban/delete instruction concerned pornographic spam; it does not silently
+authorize automatic sanctions for book recommendations.
+
+**Current action:** documentation correction only. Preserve and use the prior
+instructions as acceptance criteria; do not ask the owner to restate them.
+This correction starts no source implementation, production operation, paid
+test, replay or sanction and does not claim that the missing workflow is fixed.
+
+## 2026-09-17 — Book reply exposed the undelivered review workflow
+
+**Owner report relayed by task «Модератор»:** «как там наш модератор поживает.
+появился пост с паттерном, который мы обсуждали в виде ответа на публикацию -
+модератор бездействует». Scope is diagnosis only, not a fix or release.
+
+**Locator supplied:** https://t.me/aialexekrol/9709 . The Moderator task's
+public-page check identifies a group reply in «КвестТКР_Чат», parent9690,
+published2026-09-17T09:20:25Z. This is reported covert book advertising, not
+the separate porn-spam policy. Native chat identity was subsequently verified
+by the bounded read-only diagnostic, not inferred from the numeric URL alone.
+
+**Initial status: inconclusive; final incident-stage diagnosis: passed.**
+Read-only `getChat` verified that the supplied public group is in Moderator
+scope. Message9709 arrived09:20:25UTC; its accepted native envelope chose
+Moderator. By09:20:28UTC the provider job was resolved, result `clean`,
+confidence0.99. The persisted policy chose `none`; enforcement was skipped
+with code `clean`. No delivery, route, stale/legacy fence or Guard/action
+failure explains this exact message. This is a semantic nonmatch relative to
+the owner's reported advertising pattern, not a stopped bot.
+
+**Limits / next safe action:** the durable decision intentionally omits model
+rationale, so its specific reasoning is not recoverable from this receipt.
+The shipped judge sees current text and warning/strike state, not the parent
+post or a cross-author campaign. Generic spam rules exempt recommendations
+without identified promotional/deceptive/traffic-diversion intent; there is
+no explicit book-testimonial supplement. The previously assigned recognition,
+pattern-accumulation and owner-notification workflow remains undelivered;
+recover its existing acceptance criteria rather than treating it as a new ask.
+The private Review collector/library is undeployed and must not be described
+as a working protection that failed here. Whether the sender was conducting
+a coordinated advertising campaign is not proven by this metadata trace.
+
+Fresh09:27:16–18UTC: exact runtime2c72e01/image7fc9a7e6, healthy/restart0,
+unchanged container/start/config;7critical deployed source hashes matched.
+Two OTHER jobs in the same bounded chat/window had invalid-router errors;
+they are not the cause of9709. No production/model/sanction/replay/config/data
+mutation or Docker-log read occurred. One master closed; socket absence
+verified. [Diagnostic receipt](reports/2026-09-17-moderator-book-reply-diagnostic.md).
+
 ## 2026-09-16 — Deploy2.4.39 and resolve remaining technical decisions
 
 **Owner instruction:** root received «Ну так задеплой и запуш». After root

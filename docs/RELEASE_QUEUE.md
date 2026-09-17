@@ -1,6 +1,6 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-16 06:59:32UTC, after verified Assistant2.4.39 deployment. The root integrator owns shared integration
+Checkpoint: 2026-09-17, local Review bridge implemented; production remains2.4.39/Console3.2.0. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
@@ -43,16 +43,20 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   truncated-evidence, unsafe grouping and nonempty preview-root defects.
   Root905passed/5fixture-skips, Console159/159, independent review and source
   guard passed. [Acceptance](reports/2026-09-15-moderation-review-integration.md).
-- The mounted Review API is disabled without storage/collection/delivery.
-  The [local bridge contract](proposals/2026-09-15-moderation-live-bridge-contract-v1.md)
-  is offered but not accepted: the [root review](reports/2026-09-15-moderation-bridge-review.md)
-  identifies PO choices for primary-moderation availability and retained
-  pseudonymous markers after erase. No implementation reservation or exact
-  release lease exists; do not deploy this as a completed live workflow.
-  The v2 documentation addendum resolves the reported specification defects
-  conditionally; it selects neither policy. Waiting for the two PO decisions.
-- No Moderator feature from this candidate is deployed. Collection, recipient,
-  reviewer identity, source checkpoint, limits and real delivery are still gated.
+- The disabled3.3.0 checkpoint is now extended by the local **Console3.4.0 /
+  Assistant2.4.40 candidate, prepared**. Both PO choices are resolved:
+  primary moderation continues independently on Review failure; erase removes
+  linked identifiers without a future suppression guarantee. See the
+  [selected v3 contract](proposals/2026-09-17-moderation-live-bridge-selected-v3.md).
+  Runtime projection/cancellation, private Unix IPC, Console-only store/owner,
+  atomic receipts, generic one-attempt notification and manual decision/erase
+  are implemented with synthetic tests. Covert testimonial/book promotion is
+  review-only, not a new auto-ban/delete policy.
+- The PO-selected private recipient is verified read-only. Reviewer access,
+  exact live chat/start/bounds/configuration, source/lease and real delivery
+  remain activation gates. No collection or notification is live. Follow the
+  [activation procedure](MODERATION_REVIEW_ACTIVATION.md); ordinary base-only
+  Compose leaves the optional feature off. Do not call that a completed workflow.
 - Before mechanical delegation: accepted exact source/tests, verified PO scope,
   explicit single-writer/lock handoff, fresh baseline and one-time lease naming
   service/SHA/scope/rollback/expiry/verification/stops. Until then this task has

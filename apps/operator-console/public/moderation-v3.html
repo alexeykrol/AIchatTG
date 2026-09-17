@@ -282,6 +282,7 @@
     ['repeated-product-seeding', 'Повторяющееся продвижение продукта'],
     ['templated-testimonial', 'Повторяющийся отзыв'],
     ['repeated-standard-reply', 'Повторяющийся шаблонный ответ'],
+    ['covert-testimonial-bait', 'Подозрение на скрытую рекламу в отзыве'],
   ]);
   const reasonNames = new Map([
     ['personal_experience_with_commercial_cues', 'Рассказ о личном опыте содержит признаки коммерческого продвижения.'],
@@ -292,6 +293,11 @@
     ['original_context_missing', 'Контекст исходного сообщения отсутствует.'],
     ['observed_in_multiple_contexts', 'Одинаковый текст наблюдался в ответах на разные исходные сообщения.'],
     ['repeated_long_standard_reply', 'Длинный одинаковый ответ повторяется в нескольких сообщениях этого чата. Сам по себе повтор не доказывает рекламу.'],
+    ['personal_testimonial_with_benefit', 'Рассказ о личном опыте и пользе сочетается с несколькими признаками продвижения. Это повод для проверки, а не доказательство рекламы.'],
+    ['expectation_reversal', 'Отзыв построен на контрасте первоначальных ожиданий и заявленного результата.'],
+    ['broad_life_work_benefit', 'Заявлена широкая польза одновременно для жизни и работы.'],
+    ['audio_format_available', 'Упомянута доступность аудиоверсии.'],
+    ['soft_recommendation', 'Есть мягкий призыв ознакомиться с продуктом.'],
   ]);
   const pageSize = 30;
   let capabilities = null, statusLoading = false, statusEpoch = 0;
@@ -414,7 +420,7 @@
     for (const id of Array.isArray(record.patternIds) ? record.patternIds : []) add(technical, 'div', id, 'mono');
     reasons.append(technical);
     const alerts = new Map([['pending', 'ожидает отправки'], ['calling', 'отправляется'], ['sent', 'отправлено'], ['failed', 'не доставлено'], ['uncertain', 'результат неизвестен'], ['disabled', 'отключено']]);
-    text('case-alert', record.status === 'retained' ? 'Уведомление отключено. Сохранённое наблюдение не вызывает отправку в Telegram.' : `Уведомление: ${alerts.get(record.alert?.state) || 'статус неизвестен'}. Это не действие в Telegram.`);
+    text('case-alert', record.status === 'retained' ? 'Уведомление отключено. Сохранённое наблюдение не вызывает отправку в Telegram.' : `Личное служебное уведомление: ${alerts.get(record.alert?.state) || 'статус неизвестен'}. Санкции в чате не выполняются.`);
     const decisions = el('case-decisions'); decisions.replaceChildren();
     for (const decision of Array.isArray(record.decisions) ? record.decisions : []) renderDecision(decisions, decision);
     el('case-detail').hidden = false;
@@ -472,12 +478,23 @@
       if (epoch !== statusEpoch) return;
       capabilities = status; statusLoading = false;
       if (status?.decisionsEnabled !== true) {
+        if (status?.mode === 'unavailable') {
+          say(el('review-status'), 'Сервис ручной проверки недоступен. Полнота захвата неизвестна; основная модерация продолжает работать независимо.', 'warn');
+          say(el('case-status'), 'Кейс не загружен: сервис проверки недоступен. Это не означает, что материалы удалены.', 'warn');
+          return;
+        }
         say(el('review-status'), 'Ручная проверка отключена. Это не пустая очередь; новые материалы и решения здесь недоступны.', 'warn');
         say(el('case-status'), id ? 'Кейс не загружен: ручная проверка отключена.' : 'Выберите кейс после включения ручной проверки.', 'warn');
         return;
       }
       say(el('review-status'), status.mode === 'synthetic' ? 'Локальная синтетическая проверка. Сбор, доставка, обучение и санкции не включаются этой страницей.' : 'Ручная проверка доступна. Решения не включают обучение или санкции.');
       text('retention', status.retentionMs === null ? 'Бессрочно, до ручного удаления' : Number.isSafeInteger(status.retentionMs) && status.retentionMs > 0 ? `Срок хранения: ${status.retentionMs} мс` : 'Срок хранения не указан');
+      if (status.mode === 'live') {
+        const counts = status.coverage?.countersKnownSinceBoot === true ? status.coverage.counts : null;
+        const number = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 'неизвестно';
+        const coverage = counts ? `С начала текущего запуска: подтверждено ${number(counts.acknowledged)}, не начато ${number(counts.not_attempted)}, отклонено ${number(counts.rejected)}, исход неизвестен ${number(counts.uncertain)}.` : 'Сведения о захвате сообщений недоступны.';
+        text('retention', `${el('retention').textContent}. ${coverage} Это счётчики попыток, не уникальных сообщений. Полнота истории неизвестна; пропуски не восстанавливаются автоматически. Уведомления: ${status.deliveryEnabled === true ? 'включены' : 'выключены или остановлены'}.`);
+      }
       loadPage('queue');
       if (currentPanel === 'patterns' || currentPanel === 'history') loadPage(currentPanel);
       if (selectedId === id && uuid(id)) selectCase(id, { updateUrl:false });
@@ -559,7 +576,7 @@
   el('erase-start').addEventListener('click', () => {
     if (!ready()) return;
     confirmation = { id:selectedId, version:selectedCase.version, epoch:selectionEpoch };
-    text('erase-explanation', `Удалить материалы кейса ${selectedId}, версия ${selectedCase.version}? Из хранилища Review будут удалены исходные сообщения, контекст, заметки, решения и связанные черновые примеры. Telegram не затрагивается. Восстановление через Review невозможно. Физическое удаление с диска, из снимков или резервных копий не гарантируется.`);
+    text('erase-explanation', `Удалить материалы кейса ${selectedId}, версия ${selectedCase.version}? Из хранилища Review будут удалены исходные сообщения, контекст, заметки, решения, связанные черновые примеры и идентификаторы источника. Telegram не затрагивается. Защита от повторного появления при новой доставке не сохраняется. Уже разрешённое служебное уведомление может прийти после удаления; ссылка покажет, что кейс отсутствует. Контекст в других кейсах остаётся до их удаления. Восстановление через Review невозможно. Физическое удаление с диска, из снимков или резервных копий не гарантируется.`);
     el('erase-confirmation').hidden = false; updateControls();
   });
   el('erase-cancel').addEventListener('click', cancelConfirmation);

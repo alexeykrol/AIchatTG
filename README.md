@@ -112,14 +112,19 @@ and updated Help; bot behavior, rates and schema remain unchanged. At acceptance
 four of the last five questions had complete estimates averaging $0.0065898;
 the fifth full price remained unknown. Independent ordinary Chrome QA passed.
 
-**Pushed, not deployed: Console 3.3.0 (`1829573`).** The private Moderator
-review workflow is accepted with synthetic tests and a disabled server mount;
-there is no live collector, private-store bootstrap or Telegram delivery.
-Root905passed/5explicit fixture skips, Console159/159 and independent review
-passed. Two capture/checkpoint/delivery bridge policy decisions remain open;
-no activation lease exists. The `/ask` incident and cross-role judging design
-also remain unfinished; see the [release queue](docs/RELEASE_QUEUE.md) and
-[acceptance report](docs/reports/2026-09-15-moderation-review-integration.md).
+**Next private Review candidate: Console 3.4.0 / Assistant 2.4.40, prepared.**
+The previously pushed disabled Console3.3.0 slice is extended with a private
+runtime-to-Console collector, durable Review receipts, single-attempt private
+Telegram notifications and the covert book/testimonial detector. Primary
+moderation continues on Review failure; gaps remain visible/unknown. Erasure
+removes linked identifiers without guaranteeing suppression on redelivery.
+The PO selected both policies; the private notification account was verified.
+Local tests use synthetic content and fake Telegram; this is not live delivery.
+Production remains2.4.39/Console3.2.0 until an exact activation lease covers the
+source, private binding, reviewer access, limits and rollback. See the
+[release queue](docs/RELEASE_QUEUE.md),
+[selected contract](docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md)
+and [activation procedure](docs/MODERATION_REVIEW_ACTIVATION.md).
 
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph

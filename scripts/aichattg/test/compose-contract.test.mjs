@@ -48,3 +48,16 @@ test('the UTC release timestamp reaches only the production Console', async () =
   const dockerfile = await readFile(new URL('../../../infra/aichattg/Dockerfile.operator-console', import.meta.url), 'utf8');
   assert.match(dockerfile, /ENV NODE_ENV=production/u);
 });
+
+test('private Review activation is opt-in with exact readonly config and project-only sockets', async () => {
+  const base = await readFile(composeUrl, 'utf8');
+  const overlay = await readFile(new URL('../../../infra/aichattg/docker-compose.review.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(base, /AICHATTG_REVIEW_BINDING_PATH/u);
+  assert.equal((overlay.match(/AICHATTG_REVIEW_BINDING_PATH: \/run\/aichattg-review-config\/binding.json/gu) || []).length, 2);
+  assert.equal((overlay.match(/target: \/run\/aichattg-review-config\/binding.json\n\s+read_only: true/gu) || []).length, 2);
+  assert.equal((overlay.match(/target: \/run\/aichattg-review-ipc/gu) || []).length, 2);
+  assert.equal((overlay.match(/create_host_path: false/gu) || []).length, 4);
+  assert.doesNotMatch(overlay, /ports:|labels:|secrets:|\/var\/lib\/aichattg\/operator-console|news-digest/u);
+  const image = await readFile(new URL('../../../infra/aichattg/Dockerfile.operator-console', import.meta.url), 'utf8');
+  for (const module of ['config', 'ipc', 'projection']) assert.ok(image.includes(`COPY packages/telegram-core/src/moderation-review-${module}.mjs `));
+});

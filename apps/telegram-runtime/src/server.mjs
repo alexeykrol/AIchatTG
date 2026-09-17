@@ -16,6 +16,8 @@ import { createTelegramRuntimeHttpServer } from './http-server.mjs';
 import { createModeratorRecoveryWorker } from './moderator-recovery.mjs';
 import { createAssistantAskExpiryWorker } from './assistant-ask-expiry.mjs';
 import { loadDomainCatalog } from './assistant-domains.mjs';
+import { loadModerationReviewBinding } from '../../../packages/telegram-core/src/moderation-review-config.mjs';
+import { createRuntimeReviewService } from './moderation-review-service.mjs';
 
 const config = loadRuntimeConfig();
 const domainCatalog = loadDomainCatalog({ indexPath: config.assistantDomainIndexPath });
@@ -100,7 +102,13 @@ const runtime = createTelegramRuntime({
   assistantTelegram: createTelegramAdapter(config.assistant),
   notifier: createNotificationAdapter(config.notification),
 });
-const server = createTelegramRuntimeHttpServer({ config, runtime });
+const loadedReview = loadModerationReviewBinding(process.env.AICHATTG_REVIEW_BINDING_PATH);
+let review = null;
+if (loadedReview.binding) {
+  try { review = await createRuntimeReviewService({ binding: loadedReview.binding, config }); }
+  catch { console.error('[telegram-runtime] review unavailable; primary moderation unchanged'); }
+}
+const server = createTelegramRuntimeHttpServer({ config, runtime, reviewCapture: review?.capture });
 const recoveryWorker = createModeratorRecoveryWorker({
   runtime,
   intervalSec: config.moderatorRecoveryIntervalSec,
@@ -117,6 +125,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
     recoveryWorker.stop();
     askExpiryWorker.stop();
-    server.close(() => { database.close(); process.exit(0); });
+    const reviewClosed = Promise.resolve(review?.close()).catch(() => {});
+    server.close(async () => { await reviewClosed; database.close(); process.exit(0); });
   });
 }
