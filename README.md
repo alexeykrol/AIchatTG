@@ -19,6 +19,13 @@ Review remains off. Its old7d99ae0 retry is superseded: a future candidate must
 retain this fix and pass new release/approval gates.
 [Receipt](docs/reports/2026-09-19-assistant-2.4.41-deployment.md).
 
+**Live acceptance follow-up19.09 22:34UTC:** five safe inputs and12 real model
+calls passed bounded technical checks. Website routing differs between legacy
+and test-chat dispatch; both observed answers respect their source boundaries.
+Native Telegram delivery/cleanup remains untested because the available actor
+is exempt. No new deploy; run closed.
+[Scope and evidence](docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
+
 ## Architecture principle
 
 The Assistant uses a [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md),

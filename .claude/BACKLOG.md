@@ -8,11 +8,19 @@ updated: 2026-09-19
 
 ## Next
 
+- [ ] NATIVE-ACCEPTANCE-2.4.41: provider-only follow-up passed5safe inputs/
+      12real calls/37,462tokens, upperUSD0.24941862. Native delivery/repeat/
+      cleanup still not_run: needs authorized ordinary test actor, no exempt
+      bot/creator bypass. Original website question routes assistant-self on
+      legacy and out_of_corpus on dispatch; real legacy answer is truthful but
+      not exact boundary copy. Separate acceptance decision if modes must
+      converge. Closed run; no remaining paid/external authority.
+      `docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md`.
 - [x] SAFETY-CONTRACT-ALIGNMENT: Assistant2.4.41/exacte523485 deployed and
       production-verified19.09 22:07UTC. Strict schema/prompt alignment and safe
       rejection diagnostics; approved irrelevant-question body preserved.
-      Isolated1164passed/5skips, integrated1450passed/5skips. New paid/live-model
-      acceptance remains not_run; exact historical invalid field unknown.
+      Isolated1164passed/5skips, integrated1450passed/5skips. Paid/live-model
+      follow-up is partial as above; exact historical invalid field unknown.
       `docs/reports/2026-09-19-assistant-2.4.41-deployment.md`.
 - [ ] REVIEW-RELEASE-RETRY: old7d99ae0 same-source retry is superseded by2.4.41.
       New candidate must include e523485, advance Assistant version, pass full
@@ -39,9 +47,11 @@ updated: 2026-09-19
       so Assistant skipped before claim and cleanup never started. Read-only
       production trace04:17:46UTC passed; Privacy Mode hypothesis refuted for
       this incident. Partial mitigation deployed in2.4.39: one-owner protocol,
-      operational fallback and cleanup; exact old contract subreason remains
-      unknown and real-model validity/answer-quality acceptance not_run.
-      No bypass/replay. See newest `docs/OWNER_FEEDBACK_LOG.md`.
+      operational fallback and cleanup. Follow-up2.4.41 repaired the contract;
+      five real benign inputs passed, but native delivery/cleanup still needs
+      an ordinary actor as above. Exact old contract subreason remains unknown;
+      broad answer quality is not proven. No bypass/replay.
+      See newest `docs/OWNER_FEEDBACK_LOG.md`.
 - [ ] KNOWLEDGE-COVERAGE-COPY-1: reported2.4.38 answer exposes
       `missingDomains: content` and substitutes general course information.
       Read-only source diagnosis exists; actual live event/admission/retrieval

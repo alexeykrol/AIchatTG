@@ -10,8 +10,11 @@ lifecycle `production-verified`; source/main pushed, one activation22:06:09UTC.
 Strict safety contract and content-free diagnostics, approved copy unchanged.
 1164passed/5skips isolated;1450passed/5skips integrated; migration9/9,
 64source hashes/footer, unchanged config/schema/Console, HTTPS/webhooks passed.
-Paid/live model acceptance not_run. Lease/master closed22:07:05UTC;0rollbacks.
+Paid/live model acceptance was not_run at deployment; later bounded follow-up
+passed5inputs/12real calls, with cross-mode variance and native acceptance still
+not_run. Both deployment and later test leases/masters are closed;0rollbacks.
 [Receipt](reports/2026-09-19-assistant-2.4.41-deployment.md).
+[Live follow-up](reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
 
 Historical completed checkpoints:
 

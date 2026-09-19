@@ -4,13 +4,24 @@
 
 ## Текущее состояние
 
+- **Live acceptance19.09 22:34UTC, partial:** 5safe inputs/12real calls,
+  37,462tokens, conservative upperUSD0.24941862; all HTTP200/complete and
+  safety clean. Help/empty-ask/boundary bodies+footer checked. Website question
+  has genuine cross-mode variance: legacy assistant-self with an honest
+  model-generated capability answer; testchat dispatch out_of_corpus with
+  approved boundary. Do not generalize dispatch to the historical group.
+  Native delivery/repeat/cleanup not_run: available creator and synthetic bot
+  are exempt; an authorized ordinary actor is needed. No new deploy/config/DB
+  changes; both services unchanged healthy/restart0; lease/master closed.
+  [Report](../docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
 - **Assistant2.4.41, lifecycle `production-verified`:** exact isolated runtime
   e523485, image dc7585b6, started19.09 22:06:09UTC, healthy/restart0.
   Strict safety schema, explicit clean target/context and sanitized terminal
   diagnostics; no safety bypass or approved-copy changes. Isolated1164passed/
   5skips, integrated1450passed/5skips, migration9/9,64source hashes/footer,
-  unchanged schema/config/Console and HTTPS/webhooks passed. Paid/live model
-  acceptance not_run; historical invalid field unknown. Source/main pushed;
+  unchanged schema/config/Console and HTTPS/webhooks passed. At deployment,
+  paid/live model acceptance was not_run; later evidence is above. Historical
+  invalid field unknown. Source/main pushed;
   main retains pending Review but was not deployed. One runtime activation,
   0rollbacks; lease/master closed22:07:05UTC. Console remains3.2.0/f650fe8.
   Review7d99ae0 retry is now superseded: rebase/integrate this fix, advance

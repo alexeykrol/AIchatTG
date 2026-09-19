@@ -19,6 +19,32 @@ Newest entries first.
 
 ---
 
+## 2026-09-19 — Run the real paid acceptance test
+
+**Owner instruction:** «сделай живой прогон, зачем тогда тест, если его не делать?».
+Accepted one bounded run, at most8 safe inputs/USD1, through23:00UTC; first
+failure stops, no retries. Provider-only evidence was explicitly allowed as
+partial while an ordinary native Telegram actor was sought.
+
+**Result:** 5inputs,12 real calls,37,462tokens; all HTTP200/complete, all5 safety
+decisions clean. Deployed help/empty-ask/boundary text and2.4.41 footer checked.
+Upper estimated costUSD0.24941862, actual invoice unknown. Original website
+question differs by mode: legacy router chooses assistant-self; test-chat
+analyzer chooses out_of_corpus. The actual legacy answer honestly limits the
+bot to connected learning help; it is not the byte-exact irrelevant scenario.
+The registry admits capability questions, so this difference is not labelled
+a proven defect or silently corrected to an invented test expectation.
+
+**Remaining / recommendation:** an ordinary authorized participant is required
+for native delivery/repeat/cleanup verification. Existing synthetic bot and
+available human creator are safety-exempt; no bypass or permission change was
+used. If identical routing for ambiguous capability questions is required,
+confirm that acceptance rule separately. No new code/deploy/config/DB changes.
+Both services unchanged healthy/restart0; lease/master closed22:34:46UTC.
+
+**Status: partial — real-provider checks passed, native Telegram not_run.**
+[Live acceptance](reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
+
 ## 2026-09-19 — Irrelevant-question scenario must run, not a stray fallback
 
 **Owner instruction (relayed by Assistant task):** the existing irrelevant
