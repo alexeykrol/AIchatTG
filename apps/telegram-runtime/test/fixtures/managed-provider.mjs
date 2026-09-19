@@ -24,7 +24,7 @@ export function createManagedProviders({ record }) {
       else if (stage === 'router') content = JSON.stringify({ action: 'teach', sourceId: 'course-content-v1' });
       else content = `Assistant reply about prompting: ${input.question}`;
       return { ok: true, status: 200, async json() { return { model: body.model,
-        usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }, choices: [{ message: { content } }] }; } };
+        usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }, choices: [{ finish_reason: 'stop', message: { content } }] }; } };
     },
   });
   return { provider: wire, stateProvider: workingStateProviderFromAnalyzer(wire) };

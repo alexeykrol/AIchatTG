@@ -63,7 +63,7 @@ test('current compiled router and analyzer inputs equal actual provider-boundary
       const request = JSON.parse(init.body); requests.push(request);
       return { ok: true, status: 200, headers: { get() { return null; } }, async json() {
         return { model: 'fake-router', usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-          choices: [{ message: { content: JSON.stringify(request.max_completion_tokens > 256 ? verdict(['operations']) : { domains: ['operations'] }) } }] };
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(request.max_completion_tokens > 256 ? verdict(['operations']) : { domains: ['operations'] }) } }] };
       } };
     } });
   await provider.routeAssistant({ text: c.question, dialogue: c.dialogue, domainHints: hints });

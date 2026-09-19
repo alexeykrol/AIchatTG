@@ -62,7 +62,7 @@ for (const mode of ['router', 'dispatch']) {
         return { ok: true, status: 200, headers: { get() { return null; } },
           async json() { return { model: request.model,
             usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 },
-            choices: [{ message: { content: typeof output === 'string' ? output : JSON.stringify(output) } }] }; } };
+            choices: [{ finish_reason: 'stop', message: { content: typeof output === 'string' ? output : JSON.stringify(output) } }] }; } };
       },
     });
     const analyzer = createAnalyzerAdapter({ domainCatalog: catalog, provider, spec: runtimeAnalyzerSpec().spec,

@@ -33,6 +33,61 @@ export const ABUSE_BASES = Object.freeze([
   'sexual_harassment', 'malicious_accusation', 'severe_personal_degradation',
 ]);
 
+function deepFreeze(value) {
+  for (const child of Object.values(value)) if (child && typeof child === 'object') deepFreeze(child);
+  return Object.freeze(value);
+}
+function closedObject(properties) {
+  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+}
+function matchSchema(types) {
+  return closedObject({
+    match: { type: 'boolean' },
+    types: { type: 'array', items: { type: 'string', enum: [...types] } },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    evidence: { type: 'array', maxItems: 3, items: { type: 'string', minLength: 1, maxLength: 240 } },
+  });
+}
+
+// The wire schema and local validator share their field and enum definitions.
+// Cross-field meaning and verbatim evidence remain code-validated, not delegated
+// to Structured Outputs. These are the existing two stages, not extra calls.
+export const SAFETY_ROUTER_RESPONSE_FORMAT = deepFreeze({
+  type: 'json_schema',
+  json_schema: {
+    name: 'telegram_safety_router_v1', strict: true,
+    schema: closedObject({
+      threat: matchSchema(THREAT_TYPES), abuse: matchSchema(ABUSE_TYPES),
+      target: { type: 'string', enum: [...SAFETY_TARGETS] }, context_used: { type: 'boolean' },
+    }),
+  },
+});
+export const SAFETY_ABUSE_RESPONSE_FORMAT = deepFreeze({
+  type: 'json_schema',
+  json_schema: {
+    name: 'telegram_abuse_severity_v1', strict: true,
+    schema: closedObject({
+      severity: { type: 'string', enum: [...ABUSE_SEVERITIES] },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      basis: { type: 'string', enum: [...ABUSE_BASES] },
+    }),
+  },
+});
+
+// Only these content-free categories may leave the validator. Never report a
+// rejected key, enum value or evidence span received from the provider.
+export const SAFETY_CONTRACT_REJECTION_REASONS = Object.freeze([
+  'request_invalid', 'json_invalid', 'json_duplicate_keys', 'router_keys_invalid',
+  ...['threat', 'abuse'].flatMap((domain) => [
+    'keys_invalid', 'match_invalid', 'confidence_invalid', 'types_invalid', 'types_duplicate',
+    'match_types_mismatch', 'evidence_invalid', 'evidence_not_verbatim', 'match_evidence_mismatch',
+  ].map((reason) => `${domain}_${reason}`)),
+  'target_invalid', 'context_used_invalid', 'target_match_mismatch', 'overlapping_evidence',
+  'warning_context_mismatch', 'warning_context_unavailable', 'severity_keys_invalid',
+  'severity_invalid', 'severity_confidence_invalid', 'severity_basis_invalid',
+  'severity_basis_mismatch', 'severity_router_type_mismatch',
+]);
+
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const TARGET_SET = new Set(SAFETY_TARGETS);
 const ABUSE_SEVERITY_SET = new Set(ABUSE_SEVERITIES);
@@ -129,58 +184,95 @@ export function hasDuplicateJsonObjectKeys(text) {
   return false;
 }
 
+class VerdictValidationError extends Error {
+  constructor(reason) { super(reason); this.reason = reason; }
+}
+function rejectVerdict(reason) { throw new VerdictValidationError(reason); }
+
 function strictJsonObject(raw) {
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== 'string') rejectVerdict('json_invalid');
   const text = raw.trim();
-  if (!text.startsWith('{') || !text.endsWith('}') || hasDuplicateJsonObjectKeys(text)) return null;
+  if (!text.startsWith('{') || !text.endsWith('}')) rejectVerdict('json_invalid');
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch { return null; }
+    parsed = JSON.parse(text);
+  } catch { rejectVerdict('json_invalid'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) rejectVerdict('json_invalid');
+  if (hasDuplicateJsonObjectKeys(text)) rejectVerdict('json_duplicate_keys');
+  return parsed;
 }
 
 function confidence(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1; }
 
-function evidence(value, message) {
-  if (!Array.isArray(value) || value.length > 3) return null;
-  if (value.some((span) => typeof span !== 'string' || !span.trim() || span.length > 240)) return null;
-  if (value.some((span) => !message.includes(span))) return null;
+function evidence(value, message, domain) {
+  if (!Array.isArray(value) || value.length > 3
+    || value.some((span) => typeof span !== 'string' || !span.trim() || span.length > 240)) {
+    rejectVerdict(`${domain}_evidence_invalid`);
+  }
+  if (value.some((span) => !message.includes(span))) rejectVerdict(`${domain}_evidence_not_verbatim`);
   return [...value];
 }
 
-function verdictMatch(value, typeOrder, message) {
-  if (!exactKeys(value, ['match', 'types', 'confidence', 'evidence'])) return null;
-  if (typeof value.match !== 'boolean' || !confidence(value.confidence)) return null;
+function verdictMatch(value, typeOrder, message, domain) {
+  const schema = SAFETY_ROUTER_RESPONSE_FORMAT.json_schema.schema.properties[domain];
+  if (!exactKeys(value, schema.required)) rejectVerdict(`${domain}_keys_invalid`);
+  if (typeof value.match !== 'boolean') rejectVerdict(`${domain}_match_invalid`);
+  if (!confidence(value.confidence)) rejectVerdict(`${domain}_confidence_invalid`);
   const allowed = new Set(typeOrder);
-  if (!Array.isArray(value.types) || value.types.some((item) => !allowed.has(item))) return null;
-  if (new Set(value.types).size !== value.types.length || value.match !== (value.types.length > 0)) return null;
-  const spans = evidence(value.evidence, message);
-  if (!spans || value.match !== (spans.length > 0)) return null;
+  if (!Array.isArray(value.types) || value.types.some((item) => !allowed.has(item))) rejectVerdict(`${domain}_types_invalid`);
+  if (new Set(value.types).size !== value.types.length) rejectVerdict(`${domain}_types_duplicate`);
+  if (value.match !== (value.types.length > 0)) rejectVerdict(`${domain}_match_types_mismatch`);
+  const spans = evidence(value.evidence, message, domain);
+  if (value.match !== (spans.length > 0)) rejectVerdict(`${domain}_match_evidence_mismatch`);
   const selected = new Set(value.types);
   return { match: value.match, types: typeOrder.filter((item) => selected.has(item)), confidence: value.confidence, evidence: spans };
 }
 
-export function parseSafetyRouterVerdict(raw, message) {
-  if (typeof message !== 'string') return null;
+function validatedSafetyRouterVerdict(raw, message) {
+  if (typeof message !== 'string') rejectVerdict('request_invalid');
   const parsed = strictJsonObject(raw);
-  if (!exactKeys(parsed, ['threat', 'abuse', 'target', 'context_used'])) return null;
-  const threat = verdictMatch(parsed.threat, THREAT_TYPES, message);
-  const abuse = verdictMatch(parsed.abuse, ABUSE_TYPES, message);
-  if (!threat || !abuse || !TARGET_SET.has(parsed.target) || typeof parsed.context_used !== 'boolean') return null;
-  if ((threat.match || abuse.match) === (parsed.target === 'none')) return null;
+  if (!exactKeys(parsed, SAFETY_ROUTER_RESPONSE_FORMAT.json_schema.schema.required)) rejectVerdict('router_keys_invalid');
+  const threat = verdictMatch(parsed.threat, THREAT_TYPES, message, 'threat');
+  const abuse = verdictMatch(parsed.abuse, ABUSE_TYPES, message, 'abuse');
+  if (!TARGET_SET.has(parsed.target)) rejectVerdict('target_invalid');
+  if (typeof parsed.context_used !== 'boolean') rejectVerdict('context_used_invalid');
+  if ((threat.match || abuse.match) === (parsed.target === 'none')) rejectVerdict('target_match_mismatch');
   if (threat.match && abuse.match && threat.evidence.some((threatSpan) => abuse.evidence.some(
     (abuseSpan) => threatSpan.includes(abuseSpan) || abuseSpan.includes(threatSpan),
-  ))) return null;
+  ))) rejectVerdict('overlapping_evidence');
   return { threat, abuse, target: parsed.target, context_used: parsed.context_used };
 }
 
-export function parseAbuseSeverityVerdict(raw) {
+function validatedAbuseSeverityVerdict(raw) {
   const parsed = strictJsonObject(raw);
-  if (!exactKeys(parsed, ['severity', 'confidence', 'basis']) || !ABUSE_SEVERITY_SET.has(parsed.severity)
-    || !confidence(parsed.confidence) || !ABUSE_BASIS_SET.has(parsed.basis)) return null;
-  if (parsed.severity === 'weak' && !WEAK_ABUSE_BASES.has(parsed.basis)) return null;
-  if (parsed.severity === 'strong' && !STRONG_ABUSE_BASES.has(parsed.basis)) return null;
+  if (!exactKeys(parsed, SAFETY_ABUSE_RESPONSE_FORMAT.json_schema.schema.required)) rejectVerdict('severity_keys_invalid');
+  if (!ABUSE_SEVERITY_SET.has(parsed.severity)) rejectVerdict('severity_invalid');
+  if (!confidence(parsed.confidence)) rejectVerdict('severity_confidence_invalid');
+  if (!ABUSE_BASIS_SET.has(parsed.basis)) rejectVerdict('severity_basis_invalid');
+  if (parsed.severity === 'weak' && !WEAK_ABUSE_BASES.has(parsed.basis)
+    || parsed.severity === 'strong' && !STRONG_ABUSE_BASES.has(parsed.basis)) rejectVerdict('severity_basis_mismatch');
   return { severity: parsed.severity, confidence: parsed.confidence, basis: parsed.basis };
+}
+
+// Preserve the public null-on-rejection parsers at the submission boundary.
+export function parseSafetyRouterVerdict(raw, message) {
+  try { return validatedSafetyRouterVerdict(raw, message); } catch (error) {
+    if (error instanceof VerdictValidationError) return null;
+    throw error;
+  }
+}
+export function parseAbuseSeverityVerdict(raw) {
+  try { return validatedAbuseSeverityVerdict(raw); } catch (error) {
+    if (error instanceof VerdictValidationError) return null;
+    throw error;
+  }
+}
+
+function classifyVerdict(stage, results, parse) {
+  try { return parse(); } catch (error) {
+    if (error instanceof VerdictValidationError) throw new SafetyV3ContractError(stage, error.reason, results);
+    throw error;
+  }
 }
 
 function boundedInteger(value) {
@@ -294,7 +386,8 @@ export function validateJudgementSemantic(value, message, context = {}) {
 /**
  * Execute the two-stage deployed Moderator contract through one injected,
  * non-retrying transport. `invoke` receives prebuilt code-owned payloads and
- * must return only `{ text, receipt }`; it does not get a fallback opportunity.
+ * returns `{ text, receipt, completion? }`; optional completion metadata is
+ * content-free and transport-validated. There is no fallback opportunity.
  */
 export async function classifySafetyV3({ message, context = {}, invoke }) {
   if (typeof message !== 'string' || !message.trim() || typeof invoke !== 'function') {
@@ -304,14 +397,15 @@ export async function classifySafetyV3({ message, context = {}, invoke }) {
   const results = [];
   const routerResult = await invoke({
     stage: 'router', system: buildSafetyRouterSystem(), user: routerPayload(message, safeContext),
-    maxOutputTokens: SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
+    maxOutputTokens: SAFETY_ROUTER_MAX_OUTPUT_TOKENS, responseFormat: SAFETY_ROUTER_RESPONSE_FORMAT,
   });
   results.push(routerResult);
-  const router = parseSafetyRouterVerdict(routerResult?.text, message);
-  if (!router) throw new SafetyV3ContractError('router', 'invalid_router_json', results);
-  if (router.context_used !== router.abuse.types.includes('warning_dispute')
-    || (router.context_used && !warningContextAvailable(safeContext))) {
-    throw new SafetyV3ContractError('router', 'invalid_warning_context', results);
+  const router = classifyVerdict('router', results, () => validatedSafetyRouterVerdict(routerResult?.text, message));
+  if (router.context_used !== router.abuse.types.includes('warning_dispute')) {
+    throw new SafetyV3ContractError('router', 'warning_context_mismatch', results);
+  }
+  if (router.context_used && !warningContextAvailable(safeContext)) {
+    throw new SafetyV3ContractError('router', 'warning_context_unavailable', results);
   }
 
   const route = safetyRoute(router);
@@ -320,17 +414,18 @@ export async function classifySafetyV3({ message, context = {}, invoke }) {
     const abuseResult = await invoke({
       stage: 'abuse_classifier', system: buildAbuseClassifierSystem(),
       user: abusePayload(message, router, safeContext), maxOutputTokens: SAFETY_ABUSE_MAX_OUTPUT_TOKENS,
+      responseFormat: SAFETY_ABUSE_RESPONSE_FORMAT,
     });
     results.push(abuseResult);
-    abuse = parseAbuseSeverityVerdict(abuseResult?.text);
-    const allowedBasisTypes = abuse ? ABUSE_BASIS_TYPES[abuse.basis] : null;
+    abuse = classifyVerdict('abuse_classifier', results, () => validatedAbuseSeverityVerdict(abuseResult?.text));
+    const allowedBasisTypes = ABUSE_BASIS_TYPES[abuse.basis];
     const basisMatchesRouter = Boolean(
       allowedBasisTypes && router.abuse.types.some((type) => allowedBasisTypes.has(type)),
     );
-    if (!abuse || (abuse.basis === 'warning_dispute' && !warningContextAvailable(safeContext))
-      || !basisMatchesRouter) {
-      throw new SafetyV3ContractError('abuse_classifier', 'invalid_abuse_json', results);
+    if (abuse.basis === 'warning_dispute' && !warningContextAvailable(safeContext)) {
+      throw new SafetyV3ContractError('abuse_classifier', 'warning_context_unavailable', results);
     }
+    if (!basisMatchesRouter) throw new SafetyV3ContractError('abuse_classifier', 'severity_router_type_mismatch', results);
   }
   const routerSystem = buildSafetyRouterSystem();
   const abuseSystem = buildAbuseClassifierSystem();

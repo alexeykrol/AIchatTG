@@ -47,7 +47,7 @@ function adapterFixture(catalog) {
         ok: true, status: 200, headers: { get() { return null; } },
         async json() {
           return { model: request.model, usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 },
-            choices: [{ message: { content: request.response_format
+            choices: [{ finish_reason: 'stop', message: { content: request.response_format
               ? '{"domains":["orchard"],"riskFlags":[]}' : 'Offline grounded answer.' } }] };
         },
       };

@@ -289,7 +289,7 @@ test('provider adapter accepts only explicit runtime configuration and fake fetc
         async json() {
           return {
             model: 'gpt-5.6-terra',
-            choices: [{ message: { content: JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
               threat: { match: false, types: [], confidence: 1, evidence: [] },
               abuse: { match: false, types: [], confidence: 1, evidence: [] },
               target: 'none', context_used: false,
@@ -1086,7 +1086,7 @@ test('a poisoned dialogue turn does not break the next answer', async () => {
         async json() {
           return {
             model: body.model,
-            choices: [{ message: { content: answer } }],
+            choices: [{ finish_reason: 'stop', message: { content: answer } }],
             usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
           };
         },

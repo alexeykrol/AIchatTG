@@ -32,7 +32,7 @@ export function createFixtureProviders({ record, config, answer, wrapFetch = (fn
     else if (stage === 'router') content = JSON.stringify({ action: 'teach', sourceId: 'course-content-v1' });
     else content = answer(input);
     return { ok: true, status: 200, async json() { return { model: body.model,
-      usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }, choices: [{ message: { content } }] }; } };
+      usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 }, choices: [{ finish_reason: 'stop', message: { content } }] }; } };
   };
   const wire = createProviderAdapter({ enabled: true, vendor: 'openai', endpoint: 'https://offline.invalid/v1', apiKey: 'fixture',
     modelTuples: { moderatorSafety: { model: 'gpt-5.6-terra', reasoningEffort: 'medium', maxOutputTokens: 1024 },

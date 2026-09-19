@@ -35,7 +35,7 @@ export function dialogueRuntime(databasePath, { mode = 'dispatch', turnLimit = 3
       : `Assistant response: ${input.question}`;
     if (stage === 'analysis') faults.afterAnalysis?.();
     return { ok: true, status: 200, async json() {
-      return { model: body.model, choices: [{ message: { content } }] };
+      return { model: body.model, choices: [{ finish_reason: 'stop', message: { content } }] };
     } };
   } });
   const config = {
