@@ -8,6 +8,7 @@ import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
 import { compileDomainRouterPrompt } from './assistant-domain-routing.mjs';
 import {
   SAFETY_ABUSE_MAX_OUTPUT_TOKENS,
+  SAFETY_CONTRACT_REJECTION_REASONS,
   SAFETY_MODEL,
   SAFETY_REASONING_EFFORT,
   SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
@@ -178,6 +179,45 @@ function responseHeader(response, name) {
 
 function tokenCount(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
 
+const SAFETY_STAGES = new Set(['router', 'abuse_classifier']);
+const FINISH_REASONS = new Set(['stop', 'length', 'content_filter', 'tool_calls', 'function_call', 'missing', 'unknown']);
+const SAFETY_FAILURE_REASONS = new Set([
+  ...SAFETY_CONTRACT_REJECTION_REASONS,
+  'transport_failed', 'http_error', 'response_envelope_invalid', 'completion_refusal',
+  'completion_truncated', 'completion_filtered', 'completion_not_stopped',
+  'completion_empty', 'completion_content_invalid',
+]);
+
+/** Database-safe, idempotent projection: no arbitrary provider strings survive. */
+export function sanitizeProviderFailureDiagnostic(value) {
+  if (!plainObject(value) || !SAFETY_STAGES.has(value.stage) || !SAFETY_FAILURE_REASONS.has(value.reason)) return null;
+  const projected = {
+    stage: value.stage, reason: value.reason,
+    finishReason: FINISH_REASONS.has(value.finishReason) ? value.finishReason : 'unknown',
+    refusal: value.refusal === true,
+    outputTextChars: tokenCount(value.outputTextChars),
+  };
+  for (const key of ['inputTokens', 'outputTokens', 'totalTokens']) {
+    if (Object.hasOwn(value, key)) projected[key] = tokenCount(value[key]);
+  }
+  return Object.freeze(projected);
+}
+
+/** This diagnostic never includes prompts, returned text, keys or request IDs. */
+export function providerFailureDiagnostic(error) {
+  if (!(error instanceof ProviderRequestError)) return null;
+  return sanitizeProviderFailureDiagnostic({
+    stage: error.safetyStage, reason: error.safetyReason,
+    finishReason: error.safetyCompletion?.finishReason ?? 'missing',
+    refusal: error.safetyCompletion?.refusal === true,
+    outputTextChars: error.safetyCompletion?.outputTextChars ?? null,
+    ...(plainObject(error.receipt) ? {
+      inputTokens: error.receipt.inputTokens, outputTokens: error.receipt.outputTokens,
+      totalTokens: error.receipt.totalTokens,
+    } : {}),
+  });
+}
+
 /** Вызов, чью цену никто не назвал: пусто во всех счётчиках, но не ноль. */
 const UNMEASURED_CALL = Object.freeze({
   modelId: null, inputTokens: null, outputTokens: null, totalTokens: null,
@@ -238,6 +278,32 @@ function completionText(response) {
       .map((part) => part.text).join('');
     return text || null;
   }
+  return null;
+}
+
+function safetyCompletionMetadata(result) {
+  const choice = result?.choices?.[0];
+  const message = choice?.message;
+  const finish = choice?.finish_reason;
+  return Object.freeze({
+    finishReason: finish == null ? 'missing' : FINISH_REASONS.has(finish) ? finish : 'unknown',
+    refusal: message?.refusal != null,
+    outputTextChars: typeof message?.content === 'string' ? message.content.length : null,
+  });
+}
+
+function safetyCompletionRejection(result, completion) {
+  if (!Array.isArray(result?.choices) || result.choices.length !== 1 || !plainObject(result.choices[0]?.message)) {
+    return 'response_envelope_invalid';
+  }
+  if (completion.refusal) return 'completion_refusal';
+  if (completion.finishReason === 'length') return 'completion_truncated';
+  if (completion.finishReason === 'content_filter') return 'completion_filtered';
+  if (completion.finishReason !== 'stop') return 'completion_not_stopped';
+  const message = result.choices[0].message;
+  if (message.tool_calls != null || message.function_call != null) return 'completion_content_invalid';
+  if (message.content == null || typeof message.content === 'string' && !message.content.trim()) return 'completion_empty';
+  if (typeof message.content !== 'string') return 'completion_content_invalid';
   return null;
 }
 
@@ -414,7 +480,7 @@ function requestFor({ tuple, system, input, maxOutputTokens, responseFormat }) {
     max_completion_tokens: maxOutputTokens,
   };
   if (tuple.reasoningEffort !== 'none') request.reasoning_effort = tuple.reasoningEffort;
-  if (responseFormat) request.response_format = { type: 'json_object' };
+  if (responseFormat) request.response_format = responseFormat === true ? { type: 'json_object' } : responseFormat;
   return request;
 }
 
@@ -426,7 +492,9 @@ function parseStructuredResult(text, receipt) {
 }
 
 /** A single POST with no retry/fallback. Its receipt contains no prompt or answer. */
-async function callOnce({ config, fetchFn, operation, tuple, system, input, maxOutputTokens, responseFormat }) {
+async function callOnce({ config, fetchFn, operation, tuple, system, input, maxOutputTokens, responseFormat, safetyStage }) {
+  const failure = (code, reason, receipt = null, completion = null) => new ProviderRequestError(code, receipt,
+    safetyStage ? { safetyStage, safetyReason: reason, safetyCompletion: completion } : {});
   let response;
   try {
     response = await fetchFn(`${config.endpoint}chat/completions`, {
@@ -437,16 +505,21 @@ async function callOnce({ config, fetchFn, operation, tuple, system, input, maxO
       // classification and is never retried automatically.
       signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
-  } catch { throw new ProviderRequestError('provider_transport_failed'); }
+  } catch { throw failure('provider_transport_failed', 'transport_failed'); }
   const status = Number(response?.status) || 0;
   let result = null;
   try { result = typeof response?.json === 'function' ? await response.json() : null; } catch { result = null; }
   const receipt = receiptFor({ operation, tuple, result, response, status });
-  if (!response?.ok) throw new ProviderRequestError('provider_http_error', receipt);
-  if (!plainObject(result) || !receipt) throw new ProviderRequestError('provider_response_invalid', receipt);
+  const completion = safetyStage ? safetyCompletionMetadata(result) : null;
+  if (!response?.ok) throw failure('provider_http_error', 'http_error', receipt, completion);
+  if (!plainObject(result) || !receipt) throw failure('provider_response_invalid', 'response_envelope_invalid', receipt, completion);
+  if (safetyStage) {
+    const reason = safetyCompletionRejection(result, completion);
+    if (reason) throw failure(`provider_safety_${safetyStage}_invalid`, reason, receipt, completion);
+  }
   const text = completionText(result);
   if (text == null) throw new ProviderRequestError('provider_response_invalid', receipt);
-  return { text, receipt };
+  return { text, receipt, ...(completion ? { completion } : {}) };
 }
 
 /**
@@ -468,6 +541,7 @@ export function createProviderAdapter(config, {
   async function moderate(payload) {
     const text = questionText(payload?.text);
     if (!text) throw new ProviderRequestError('provider_request_invalid');
+    const safetyReceipts = [];
     try {
       const result = await classifySafetyV3({
         message: text,
@@ -475,11 +549,20 @@ export function createProviderAdapter(config, {
           currentWeakStrikes: payload?.currentWeakStrikes,
           warningStage: payload?.warningStage,
         },
-        invoke: ({ stage, system, user, maxOutputTokens }) => callOnce({
-          config: validated.config, fetchFn, operation: `moderatorSafety.${stage}`,
-          tuple: validated.config.modelTuples.moderatorSafety, system, input: user,
-          maxOutputTokens, responseFormat: true,
-        }),
+        async invoke({ stage, system, user, maxOutputTokens, responseFormat }) {
+          try {
+            const completed = await callOnce({
+              config: validated.config, fetchFn, operation: `moderatorSafety.${stage}`,
+              tuple: validated.config.modelTuples.moderatorSafety, system, input: user,
+              maxOutputTokens, responseFormat, safetyStage: stage,
+            });
+            safetyReceipts.push(completed.receipt);
+            return completed;
+          } catch (error) {
+            if (error instanceof ProviderRequestError) error.safetyReceipts = [...safetyReceipts, error.receipt];
+            throw error;
+          }
+        },
       });
       return { ...result, receipt: result.safetyTrace.receipts.at(-1) || null };
     } catch (error) {
@@ -487,6 +570,7 @@ export function createProviderAdapter(config, {
         const receipt = error.receipts.at(-1)?.receipt || null;
         throw new ProviderRequestError(`provider_safety_${error.stage}_invalid`, receipt, {
           safetyStage: error.stage, safetyReason: error.reason,
+          safetyCompletion: error.receipts.at(-1)?.completion || null,
           safetyReceipts: error.receipts.map((item) => item?.receipt || null),
         });
       }

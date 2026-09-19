@@ -12,9 +12,12 @@ import {
   createProviderAdapter,
   ProviderRequestError,
   ProviderUnavailableError,
+  providerFailureDiagnostic,
+  sanitizeProviderFailureDiagnostic,
   SAFETY_PROVIDER_TUPLE,
   validateProviderRuntimeConfig,
 } from '../src/provider-adapter.mjs';
+import { SAFETY_ABUSE_RESPONSE_FORMAT, SAFETY_ROUTER_RESPONSE_FORMAT } from '../src/safety-v3.mjs';
 
 function providerConfig(overrides = {}) {
   return {
@@ -31,8 +34,11 @@ function providerConfig(overrides = {}) {
   };
 }
 
-function completion(content, { model = 'returned-model', usage = { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } } = {}) {
-  return { model, choices: [{ message: { content } }], usage };
+function completion(content, {
+  model = 'returned-model', usage = { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+  finishReason = 'stop', refusal = null,
+} = {}) {
+  return { model, choices: [{ finish_reason: finishReason, message: { content, refusal } }], usage };
 }
 
 function response(body, { ok = true, status = 200, requestId = 'req_fixture' } = {}) {
@@ -146,7 +152,7 @@ test('clean Moderator makes exactly one fixed router request with no raw history
   assert.equal(calls[0].request.model, 'gpt-5.6-terra');
   assert.equal(calls[0].request.max_completion_tokens, 1024);
   assert.equal(calls[0].request.reasoning_effort, 'medium');
-  assert.deepEqual(calls[0].request.response_format, { type: 'json_object' });
+  assert.deepEqual(calls[0].request.response_format, SAFETY_ROUTER_RESPONSE_FORMAT);
   assert.match(calls[0].request.messages[0].content, /THREAT LIBRARY v1/);
   assert.match(calls[0].request.messages[0].content, /ABUSE LIBRARY v1/);
   assert.deepEqual(JSON.parse(calls[0].request.messages[1].content), {
@@ -174,6 +180,7 @@ test('abuse makes exactly one router plus one severity request and maps weak pol
   assert.deepEqual(calls.map((call) => [call.model, call.reasoning_effort, call.max_completion_tokens]), [
     ['gpt-5.6-terra', 'medium', 1024], ['gpt-5.6-terra', 'medium', 768],
   ]);
+  assert.deepEqual(calls.map((call) => call.response_format), [SAFETY_ROUTER_RESPONSE_FORMAT, SAFETY_ABUSE_RESPONSE_FORMAT]);
   assert.match(calls[1].messages[0].content, /semantic severity/);
   assert.deepEqual(JSON.parse(calls[1].messages[1].content), {
     message: 'Ты идиот',
@@ -230,6 +237,146 @@ test('malformed second-stage JSON is fenced after its single second-stage attemp
   await assert.rejects(adapter.moderate({ text: 'Ну ты клоун' }), (error) => error instanceof ProviderRequestError
     && error.code === 'provider_safety_abuse_classifier_invalid' && error.safetyReceipts.length === 2);
   assert.equal(calls, 2);
+});
+
+test('the reported website question and other benign questions can pass clean safety without a relevance decision', async () => {
+  // These are contract replays, not claims about live model accuracy. Safety
+  // must neither answer these questions nor turn them into operations routing.
+  for (const text of ['Ты можешь сделать сайт /ask', 'Как открыть урок курса?', 'Какая погода на Марсе?']) {
+    const requests = [];
+    const adapter = createProviderAdapter(providerConfig(), {
+      async fetchFn(_url, init) {
+        requests.push(JSON.parse(init.body));
+        return response(completion(routerVerdict()));
+      },
+    });
+    const result = await adapter.moderate({ text, currentWeakStrikes: 2, warningStage: 'final' });
+    assert.equal(result.safetyRoute, 'clean');
+    assert.equal(result.safetyTrace.router.target, 'none');
+    assert.equal(result.safetyTrace.router.context_used, false);
+    assert.equal(Object.hasOwn(result, 'action'), false);
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].messages[1].content).message, text);
+    assert.deepEqual(requests[0].response_format, SAFETY_ROUTER_RESPONSE_FORMAT);
+  }
+});
+
+test('every incomplete/refused/empty/unknown safety completion is fenced even with valid-looking JSON', async () => {
+  const valid = routerVerdict();
+  const missingFinish = completion(valid);
+  delete missingFinish.choices[0].finish_reason;
+  const toolCall = completion(valid);
+  toolCall.choices[0].message.tool_calls = [{ secret: 'must-not-leak' }];
+  const cases = [
+    [completion(valid, { finishReason: 'length' }), 'completion_truncated', 'length', false, valid.length],
+    [completion('{"threat":', { finishReason: 'length' }), 'completion_truncated', 'length', false, 10],
+    [completion(valid, { finishReason: 'content_filter' }), 'completion_filtered', 'content_filter', false, valid.length],
+    [completion(valid, { refusal: 'private refusal contents' }), 'completion_refusal', 'stop', true, valid.length],
+    [completion(null, { refusal: 'private refusal contents' }), 'completion_refusal', 'stop', true, null],
+    [completion(valid, { finishReason: 'tool_calls' }), 'completion_not_stopped', 'tool_calls', false, valid.length],
+    [completion(valid, { finishReason: 'function_call' }), 'completion_not_stopped', 'function_call', false, valid.length],
+    [completion(valid, { finishReason: 'private unknown finish reason' }), 'completion_not_stopped', 'unknown', false, valid.length],
+    [missingFinish, 'completion_not_stopped', 'missing', false, valid.length],
+    [completion(''), 'completion_empty', 'stop', false, 0],
+    [completion('  '), 'completion_empty', 'stop', false, 2],
+    [completion(null), 'completion_empty', 'stop', false, null],
+    [completion([{ type: 'text', text: valid }]), 'completion_content_invalid', 'stop', false, null],
+    [toolCall, 'completion_content_invalid', 'stop', false, valid.length],
+    [{ choices: [], usage: null }, 'response_envelope_invalid', 'missing', false, null],
+  ];
+  for (const [body, reason, finishReason, refusal, outputTextChars] of cases) {
+    let calls = 0;
+    const adapter = createProviderAdapter(providerConfig(), {
+      async fetchFn() { calls++; return response(body); },
+    });
+    await assert.rejects(adapter.moderate({ text: 'Ты можешь сделать сайт /ask' }), (error) => {
+      assert.ok(error instanceof ProviderRequestError);
+      assert.equal(error.code, 'provider_safety_router_invalid');
+      assert.equal(error.retryable, false);
+      const diagnostic = providerFailureDiagnostic(error);
+      assert.deepEqual(diagnostic, {
+        stage: 'router', reason, finishReason, refusal, outputTextChars,
+        inputTokens: body.usage?.prompt_tokens ?? null,
+        outputTokens: body.usage?.completion_tokens ?? null,
+        totalTokens: body.usage?.total_tokens ?? null,
+      });
+      for (const secret of ['private', 'req_fixture', 'fixture-key', 'must-not-leak', 'threat', 'Ты можешь']) {
+        assert.equal(JSON.stringify(diagnostic).includes(secret), false);
+      }
+      return true;
+    });
+    assert.equal(calls, 1, reason);
+  }
+});
+
+test('semantic failures retain legacy error codes and exact allowlisted reason plus completion metadata', async () => {
+  const cases = [
+    ['not json', 'json_invalid'],
+    [routerVerdict().replace('{', '{"target":"none",'), 'json_duplicate_keys'],
+    [routerVerdict({ target: 'assistant' }), 'target_match_mismatch'],
+    [routerVerdict({ contextUsed: true }), 'warning_context_mismatch'],
+    [routerVerdict({ threat: true, threatTypes: ['credentials'], threatEvidence: ['invented'] }), 'threat_evidence_not_verbatim'],
+  ];
+  for (const [content, reason] of cases) {
+    let calls = 0;
+    const adapter = createProviderAdapter(providerConfig(), {
+      async fetchFn() { calls++; return response(completion(content)); },
+    });
+    await assert.rejects(adapter.moderate({ text: 'Ты можешь сделать сайт /ask' }), (error) => {
+      assert.equal(error.code, 'provider_safety_router_invalid');
+      assert.equal(error.safetyReason, reason);
+      assert.deepEqual(providerFailureDiagnostic(error), {
+        stage: 'router', reason, finishReason: 'stop', refusal: false, outputTextChars: content.length,
+        inputTokens: 11, outputTokens: 7, totalTokens: 18,
+      });
+      assert.equal(JSON.stringify(error).includes(content), false);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('second-stage completion failure keeps both call receipts and never retries or emits a moderation verdict', async () => {
+  let calls = 0;
+  const replies = [
+    completion(routerVerdict({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'] })),
+    completion('{"severity":"weak"', { finishReason: 'length' }),
+  ];
+  const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; return response(replies.shift()); } });
+  await assert.rejects(adapter.moderate({ text: 'Ты идиот' }), (error) => {
+    assert.equal(error.code, 'provider_safety_abuse_classifier_invalid');
+    assert.equal(error.safetyReceipts.length, 2);
+    assert.equal(providerFailureDiagnostic(error).stage, 'abuse_classifier');
+    assert.equal(providerFailureDiagnostic(error).reason, 'completion_truncated');
+    assert.equal(error.retryable, false);
+    return true;
+  });
+  assert.equal(calls, 2);
+});
+
+test('failure diagnostics are a closed idempotent content-free projection', () => {
+  const safe = sanitizeProviderFailureDiagnostic({
+    stage: 'router', reason: 'target_match_mismatch', finishReason: 'stop', refusal: false,
+    outputTextChars: 243, inputTokens: 100, outputTokens: 20, totalTokens: 120,
+    text: 'private output', prompt: 'private input', requestId: 'private request', apiKey: 'private key',
+  });
+  assert.deepEqual(sanitizeProviderFailureDiagnostic(safe), safe);
+  assert.deepEqual(Object.keys(safe), [
+    'stage', 'reason', 'finishReason', 'refusal', 'outputTextChars', 'inputTokens', 'outputTokens', 'totalTokens',
+  ]);
+  assert.ok(Object.isFrozen(safe));
+  for (const value of [null, [], {}, { ...safe, stage: 'private value' }, { ...safe, reason: 'private value' }]) {
+    assert.equal(sanitizeProviderFailureDiagnostic(value), null);
+  }
+  assert.deepEqual(sanitizeProviderFailureDiagnostic({
+    ...safe, finishReason: 'private value', refusal: 'private value', outputTextChars: 'private value',
+    inputTokens: -1, outputTokens: 1.2, totalTokens: Number.MAX_SAFE_INTEGER + 1,
+  }), {
+    stage: 'router', reason: 'target_match_mismatch', finishReason: 'unknown', refusal: false,
+    outputTextChars: null, inputTokens: null, outputTokens: null, totalTokens: null,
+  });
+  assert.equal(providerFailureDiagnostic(new Error('private error')), null);
+  assert.equal(providerFailureDiagnostic(new ProviderRequestError('provider_response_invalid')), null);
 });
 
 test('router and answer retain their own tuples without identity leakage', async () => {

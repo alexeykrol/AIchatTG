@@ -23,6 +23,7 @@ import {
   isProvenNoCallRequestError,
   isProviderUnavailableError,
   providerCallUsage,
+  providerFailureDiagnostic,
 } from './provider-adapter.mjs';
 import { assistantDialogue } from './assistant-dialogue.mjs';
 import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from './assistant-release.mjs';
@@ -934,6 +935,7 @@ export function createTelegramRuntime({
       }
       store.manualReviewModeratorJudgement({
         claim, errorCode: String(error?.code || 'provider_request_failed').slice(0, 120), providerBoundary: 'unknown',
+        providerDiagnostic: providerFailureDiagnostic(error),
       });
       store.upsertAssistantDisposition({
         chatId: comment.chatId, messageId: comment.messageId, status: 'error',

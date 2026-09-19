@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { createJudgementStore } from './judgement-store.mjs';
 import { createJudgementAnswerClaims } from './judgement-answer-claims.mjs';
+import { sanitizeProviderFailureDiagnostic } from './provider-adapter.mjs';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runtime_inbound_events (
@@ -820,7 +821,7 @@ export function createRuntimeStore(db, {
     WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
   const manualReviewModeratorJob = db.prepare(`UPDATE runtime_moderator_judgement_jobs
     SET state = 'manual_review', provider_boundary = ?, lease_id = NULL, lease_expires_at = NULL,
-      error_code = ?, updated_at = ?
+      error_code = ?, result_json = ?, updated_at = ?
     WHERE event_id = ? AND state IN ('safe_retry', 'calling') AND lease_id = ? AND claim_generation = ?`);
   const markModeratorDecisionReady = db.prepare(`UPDATE runtime_moderator_judgement_jobs
     SET state = 'decision_ready', provider_boundary = 'returned', lease_id = NULL, lease_expires_at = NULL,
@@ -1246,12 +1247,14 @@ export function createRuntimeStore(db, {
       ).changes === 1;
       return { deferred, row: moderatorJob.get(String(judgementClaim.eventId)) || null };
     },
-    manualReviewModeratorJudgement({ claim: judgementClaim, errorCode = 'manual_review', providerBoundary = 'unknown' }) {
+    manualReviewModeratorJudgement({ claim: judgementClaim, errorCode = 'manual_review', providerBoundary = 'unknown', providerDiagnostic = null }) {
       if (!judgementClaim) return { marked: false, row: null };
       const boundary = ['not_started', 'calling', 'returned', 'unknown'].includes(providerBoundary)
         ? providerBoundary : 'unknown';
+      const diagnostic = sanitizeProviderFailureDiagnostic(providerDiagnostic);
       const marked = manualReviewModeratorJob.run(
-        boundary, String(errorCode).slice(0, 120), now(),
+        boundary, String(errorCode).slice(0, 120),
+        diagnostic ? JSON.stringify({ providerDiagnostic: diagnostic }) : null, now(),
         judgementClaim.eventId, judgementClaim.leaseId, judgementClaim.claimGeneration,
       ).changes === 1;
       return { marked, row: moderatorJob.get(String(judgementClaim.eventId)) || null };

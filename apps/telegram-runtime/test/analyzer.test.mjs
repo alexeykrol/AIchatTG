@@ -756,7 +756,7 @@ test('the analyzer call reuses the router tuple but raises the output ceiling', 
       requests.push({ url, body: JSON.parse(init.body) });
       return {
         ok: true, status: 200, headers: { get: () => null },
-        json: async () => ({ id: 'x', model: 'router-model', choices: [{ message: { content: VERDICT } }] }),
+        json: async () => ({ id: 'x', model: 'router-model', choices: [{ finish_reason: 'stop', message: { content: VERDICT } }] }),
       };
     },
   });
