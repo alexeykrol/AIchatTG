@@ -19,33 +19,15 @@ Newest entries first.
 
 ---
 
-## 2026-09-19 — Urgent Review completion and reported visible post
-
-**Owner message relayed again by Moderator:** «прошло почти40 минут,
-задеплой, все сделай — пост до сих пор висит». This is an urgent completion
-request, not verified fresh approval of the changed exactebf0a8a release.
-
-**Current evidence:** candidate remains locally prepared and independently
-accepted. No fresh exact source/binding/access approval was received in root.
-The prior receipt proves one acknowledged deletion of message9709 at
-17.09 11:37:21.849UTC, without author ban or parent deletion. It must not be
-repeated. The controller's fresh public page check was unavailable, so current
-rendered absence and whether the report names another item are inconclusive.
-
-**Next stop:** one concrete request now separates push and activation scope,
-states retained17September boundary/access/notification effects, limits,
-60-minute release window, current rollback and image/live verification gates.
-If another post is meant, obtain its exact link/ID before any new action.
-No SSH, production mutation or further deletion follows from this reminder.
-
-**Status: partial — candidate ready; exact release approval and post identity pending.**
-[Exact decision](proposals/2026-09-19-review-ebf0a8a-approval.md).
-
 ## 2026-09-19 — Local continuation of the earlier Review deployment request
 
 **Context:** following the previously requested Review release, the Moderator
 controller reminded root to prepare a safety-preserving successor locally.
 This was not a new Product Owner production approval.
+The urgent “almost40 minutes / post still visible” quotation belongs to the
+earlier task history, not a newly established19September owner report or
+post-candidate approval. The current event is candidate handoff and controller
+acceptance only; the original report remains in its17September entry below.
 
 **Diagnosis / preparation:** the former7d99ae0 retry and2.4.39 rollback would
 remove the newer2.4.41 repair. Prepared exactebf0a8a/Assistant2.4.42 with that
@@ -62,6 +44,7 @@ reprovision or repeat deletion. Public production remains2.4.41/Console3.2.0.
 
 **Status: prepared — local candidate only.**
 [Candidate receipt](reports/2026-09-19-review-retry-candidate.md).
+[Single pending release decision](proposals/2026-09-19-review-ebf0a8a-approval.md).
 
 ## 2026-09-19 — Run the real paid acceptance test
 

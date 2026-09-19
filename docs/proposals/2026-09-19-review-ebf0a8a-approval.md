@@ -82,8 +82,11 @@ Assistant2.4.41/Console3.2.0 unchanged.
 
 ## Separate visible-post clarification
 
-The prior deletion of message9709 was acknowledged17September11:37:21.849UTC,
-with no author ban or parent deletion. Current rendered absence is inconclusive;
-the controller could not load a fresh public view. If the owner now refers to
-another visible item, obtain its exact link/message ID. Do not infer a new
-target or repeat the acknowledged deletion.
+The urgent owner quotation is historical, not a verified new post-candidate
+report. The prior deletion of message9709 was acknowledged17September
+11:37:21.849UTC, with no author ban or parent deletion. The controller's latest
+public recheck returned the group/View Post landing without message text,
+consistent with that acknowledged deletion; it is not independent proof of
+every client's current rendered state. No fresh report identifying another
+post has been established. If one arrives, obtain its exact link/message ID.
+Do not infer a new target or repeat the acknowledged deletion.
