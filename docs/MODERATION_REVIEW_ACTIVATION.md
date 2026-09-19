@@ -4,12 +4,16 @@ Status: procedure; not a deployment receipt or activation approval. The first
 approved attempt17.09 was rolled back on deployment-helper timestamp format;
 see [receipt](reports/2026-09-17-review-activation-rollback.md). Its lease is
 closed; the retained empty store must not be provisioned a second time.
-Candidate components: Console3.4.0 / Assistant2.4.40. Production baseline:
-runtime2c72e01 / Assistant2.4.39, Consolef650fe8 /3.2.0.
+Current local candidate components: Console3.4.0 / Assistant2.4.42 (planned
+release date2026-09-19). Production baseline last verified19.09 22:34UTC:
+runtimee523485 / Assistant2.4.41, Consolef650fe8 /3.2.0. Refresh that baseline
+before any future approved remote operation. The old7d99ae0/2.4.40 candidate
+and its2.4.39 rollback are superseded: neither may remove the safety repair.
+This local procedure grants no SSH, deployment, notification or data authority.
 
 ## Scope and boundaries
 
-This completes the owner-requested suspected promotion → private Review →
+The candidate implements the owner-requested suspected promotion → private Review →
 generic personal notification → Admin decision/draft path. It does not add
 sanctions, model calls, automatic training, historical replay or imports.
 Primary moderation continues if Review fails. Coverage is bounded attempt
@@ -31,12 +35,33 @@ verification and rollback/stop rules. Generic advance intent is not this lease.
 Root owns the single shared-host master; a delegated operator needs an exact
 acknowledged handoff. Use safe-remote-deploy and never unbounded Docker logs.
 
-Proposed first binding (values still require exact activation approval):
+## Retained binding: mandatory retry distinction
+
+The17September attempt already provisioned a private schema-v2 store. Reuse
+requires the **exact retained binding bytes and persisted policy**, including
+bindingId, epochId, startAt, limits and caps; expected private binding SHA-256:
+`c48f4370dd4ca80b6f9d51cc9846ebef9ad1fce91fe749fc3a4e6d1fe8119b83`.
+The frozen start boundary is **2026-09-17T11:48:07.284Z**, not a newly generated
+19September timestamp. Store policy identity includes this boundary; changing
+it fails checkpoint validation even when the store is empty. There is no
+supported in-place rebind/migration. Do not delete, reset or reprovision to
+make a changed binding fit.
+
+A fresh approval must explicitly accept retaining that earlier boundary.
+Collection processes new deliveries only; it does not fetch history or replay
+the gap automatically. Nevertheless, a newly delivered source or genuine edit
+dated since that boundary can be eligible, including gap-period material. If
+the owner requires a later source cutoff instead, stop for a separately scoped
+policy-transition candidate; do not silently reset the retained store.
+
+Retained binding scope to reverify under a fresh exact activation approval:
 
 - Current three Moderator chats only; no new group, source or historical import.
-- Newly arriving original/edit source dates at or after the frozen UTC activation
-  boundary. No automatic recovery/backfill; a later genuine delivery may be
-  admitted after erasure. Original messages predating the boundary stay excluded.
+- Newly delivered original events use their original date; edited events use
+  edit_date. The applicable event date must be at or after the frozen boundary.
+  A genuine later edit can be eligible even when its original message predates
+  the boundary. No automatic recovery/backfill; a later genuine delivery may
+  be admitted after erasure. Do not describe this as a fresh19September cutoff.
 - `allowUserId=false`; only text/caption, supplied direct same-chat reply context
   and required native IDs. Own/exempt bot IDs match the exact runtime configuration.
 - `limits`: retentionMs=null, maxTextChars=8192, maxContextChars=2048,
@@ -63,7 +88,7 @@ or an increase in any paid quota. No paid model call is part of Review.
    `scripts/aichattg/verify-release-source.sh <candidate> <runtime-baseline>`.
    Preserve current untracked work. Push and verify the exact remote ref.
 2. Build both images from `git archive` of that exact source. Check labels,
-   Assistant2.4.40/footer and Console3.4.0 inside the images. Never copy dirty
+   Assistant2.4.42/footer and Console3.4.0 inside the images. Never copy dirty
    overlays into a running service or use a synthetic preview store.
 3. Compile `docker-compose.yml` plus `docker-compose.review.yml` with the exact
    private environment. The second file is a versioned Compose activation
@@ -74,12 +99,33 @@ or an increase in any paid quota. No paid model call is part of Review.
    environment. Console `OPERATOR_CONSOLE_RELEASED_AT` requires UTC seconds
    (`YYYY-MM-DDTHH:MM:SSZ`); Review `startAt` separately requires milliseconds.
    Never reuse one timestamp formatter for both contracts without validation.
+   For the Console release only, normalize the new release instant with
+   `new Date(instant).toISOString().replace(/\.\d{3}Z$/, 'Z')` and pass it to
+   the actual config loader. Preserve the retained Review startAt unchanged;
+   do not derive it from the new Console release time. The tracked Console
+   regression includes the actual failed17September millisecond form.
 4. Verify private directory ownership/modes (container UID1000), disk capacity,
    no existing owner/socket, canonical paths and no active other writer. Both
    services share only the Review config file readonly and the project-private
    IPC directory read/write. Runtime must not mount Console Review storage.
 
-## Provision and start under the lease
+## Reopen the retained store under a fresh lease
+
+This is the current retry path. **Do not run the provision command.** Before
+recreation, verify the retained binding digest, policy/schema identity,
+integrity, directory modes/owners, counts and absence of owner/socket using
+approved bounded checks. Compare with the last retained-store receipt; any
+unexpected evidence or ownership is a stop, not permission to clear it.
+The store opens with its exact policy and preserves all retained data.
+
+The prior release helper/lease is closed and has the wrong runtime baseline.
+Do not rerun it unchanged. Any future helper must name the new exact candidate,
+baseline runtimee523485 image and Consolef650fe8 image, preserve the binding,
+and omit provisioning/deletion. Validate the full composed environment inside
+both exact images before recreation. A new lease must cover both services,
+private capture/notification effects, limits and the rollback below.
+
+## Historical first provisioning — not the retained-store retry
 
 Provisioning is an explicit production data mutation, not ordinary bootstrap.
 The approved new Review root must be fresh/empty. Create its Console-owned
@@ -95,10 +141,15 @@ node src/moderation-review-provision.mjs --provision /run/aichattg-review-config
 ```
 
 It creates an empty private schema-v2 store, closes its owner and starts no
-collector, socket, timer or sender. It refuses an existing nonempty store.
+collector, socket, timer or sender. It refuses any existing store, even empty.
 On error preserve partial state; no automatic cleanup or retry. Normal Console
 boot never provisions/rebuilds a missing or damaged database. Policy/hash/schema
 and cross-process ownership are verified before intake starts.
+
+The command above describes only a separately approved fresh installation.
+It is not idempotent and is forbidden for this retained-store retry.
+
+## Start and verify under the lease
 
 Start the exact runtime and Console through the approved Compose pair. A brief
 Review-unavailable interval during recreation is an acknowledged gap, never
@@ -130,9 +181,17 @@ not a misleading empty queue or disabled-by-choice status.
 
 Review configuration/activation rollback is a production mutation. Under its
 lease, gracefully stop the Review-capable services first, then recreate the
-previous exact runtime2c72e01 and Consolef650fe8 with the prior base configuration.
-This candidate changes no runtime DB schema. Verify actual rollback compatibility
-before claiming it proven. Preserve the new private Review database, owner
+previous exact runtimee523485 (Assistant2.4.41) and Consolef650fe8 (3.2.0) with
+their prior base configuration. Known baseline images at the last checkpoint:
+
+- runtime: `sha256:dc7585b68a99929c0ce88314fe71f86b46b3b24ef2973c8bdcd8c7df63416bf5`;
+- Console: `sha256:6f76808829b1c0e4bc2544330f23fadd3f529e2991e98ce3bd1cac6a811af1e9`.
+
+Refresh image/config identities before an approved attempt. Do not use2c72e01
+as this candidate's rollback: that would remove the safety contract repair.
+This candidate changes no runtime DB schema versus e523485; verify exact
+source/schema compatibility and actual image/config readiness before claiming
+a rollback proven. Preserve the private Review database, owner
 evidence and config; do not migrate it backward into the synthetic-v1 store.
 
 Previously authorized notifications cannot be recalled; their links may become
@@ -142,6 +201,6 @@ dispatch identifiers are removed, so a new delivery may appear again.
 No automatic stale lock/socket takeover: after an unclean stop, prove both
 owners stopped and preserve the exact stale artifacts before controlled recovery.
 
-Never roll the runtime back to a41518f/335a35a against the current2.4.39 database.
+Never roll the runtime back to a41518f/335a35a against the current database.
 Those old binaries are not the baseline for this release. No News container,
 database, secrets or routes belong to this operation.

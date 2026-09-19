@@ -117,6 +117,57 @@ test('second provisioning refuses an existing store and preserves exact database
   const store = reopen(f.binding); store.close();
 });
 
+test('retained empty store reopens only with its original binding and policy without resetting evidence', (t) => {
+  const f = fixture(t); provisionModerationReview(['--provision', f.file]);
+  const bindingDigest = digest(f.file), databaseInode = lstatSync(f.database).ino;
+  const retainedEvidence = () => {
+    const db = new Database(f.database, { readonly: true });
+    try {
+      assert.equal(db.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(db.pragma('foreign_key_check'), []);
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
+      return { schemaVersion: db.pragma('user_version', { simple: true }),
+        schema: db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all(),
+        rows: Object.fromEntries(tables.map(({ name }) => [name, db.prepare(`SELECT * FROM ${name}`).all()])) };
+    } finally { db.close(); }
+  };
+  const before = retainedEvidence();
+  assert.equal(before.schemaVersion, 2);
+  assert.equal(before.rows.review_intake_binding[0].intake_seq, 0);
+  assert.deepEqual(before.rows.review_alert_budget, [{ singleton: 1, hour: 0, used: 0 }]);
+  for (const [table, rows] of Object.entries(before.rows)) {
+    if (!['review_intake_binding', 'review_alert_budget'].includes(table)) assert.deepEqual(rows, [], table);
+  }
+  const reopenOriginal = () => {
+    const store = reopen(f.binding);
+    try { assert.deepEqual(store.status().counts, COUNTS); assert.equal(store.claimAlert(), null); }
+    finally { store.close(); }
+    assert.deepEqual(retainedEvidence(), before);
+    assert.equal(digest(f.file), bindingDigest);
+    assert.equal(lstatSync(f.database).ino, databaseInode);
+    assert.deepEqual(readdirSync(f.binding.storeRoot), ['moderation-review.sqlite']);
+    assert.equal(existsSync(f.binding.ipcRoot), false);
+  };
+  reopenOriginal();
+  const changes = [
+    ['startAt', { startAt: '2026-09-17T11:00:00.001Z' }],
+    ['bindingId', { bindingId: 'different_binding' }],
+    ['epochId', { epochId: 'different_epoch' }],
+    ...['maxTextChars', 'maxContextChars', 'maxNoteChars', 'maxObservations'].map((key) =>
+      [`limits.${key}`, { limits: { ...f.binding.limits, [key]: f.binding.limits[key] + 1 } }]),
+    ...['maxEvents', 'maxErasureReceipts', 'maxAlertsPerHour'].map((key) => [key, { [key]: f.binding[key] + 1 }]),
+  ];
+  for (const [name, change] of changes) {
+    assert.throws(() => {
+      const unexpected = reopen({ ...f.binding, ...change });
+      unexpected.close();
+    }, { code: 'review_checkpoint_unknown', statusCode: 503 }, name);
+    assert.deepEqual(retainedEvidence(), before, name);
+    assert.equal(existsSync(join(f.binding.storeRoot, '.review-owner')), false, name);
+    reopenOriginal();
+  }
+});
+
 test('nonempty, regular-file and direct symbolic store roots are preserved untouched', (t) => {
   const nonempty = fixture(t); mkdirSync(nonempty.binding.storeRoot, { mode: 0o700 });
   const sentinel = join(nonempty.binding.storeRoot, 'do-not-overwrite'); writeFileSync(sentinel, 'synthetic retained file');

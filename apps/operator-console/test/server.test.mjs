@@ -41,12 +41,24 @@ test('operator auth is explicit and has no default password', () => {
 test('Console release time accepts only a real UTC timestamp', () => {
   assert.equal(loadOperatorConsoleConfig({ OPERATOR_CONSOLE_RELEASED_AT: '2026-09-15T21:40:00Z' }).releasedAt,
     '2026-09-15T21:40:00Z');
-  for (const value of ['2026-02-30T12:00:00Z', '2026-09-15T21:40:00-07:00', 'tomorrow']) {
+  for (const value of ['2026-02-30T12:00:00Z', '2026-09-15T21:40:00-07:00',
+    '2026-09-17T11:48:24.569Z', 'tomorrow']) {
     assert.throws(() => loadOperatorConsoleConfig({ OPERATOR_CONSOLE_RELEASED_AT: value }),
       /OPERATOR_CONSOLE_RELEASED_AT/u);
   }
   assert.throws(() => loadOperatorConsoleConfig({ NODE_ENV: 'production' }),
     /OPERATOR_CONSOLE_RELEASED_AT is required/u);
+});
+
+test('Review activation Console release clock uses seconds, not the binding millisecond clock', () => {
+  const reviewStartAt = '2026-09-17T11:48:24.569Z';
+  const releasedAt = new Date(reviewStartAt).toISOString().replace(/\.\d{3}Z$/u, 'Z');
+  assert.equal(releasedAt, '2026-09-17T11:48:24Z');
+  assert.equal(loadOperatorConsoleConfig({ NODE_ENV: 'production',
+    OPERATOR_CONSOLE_RELEASED_AT: releasedAt }).releasedAt, releasedAt);
+  assert.throws(() => loadOperatorConsoleConfig({ NODE_ENV: 'production',
+    OPERATOR_CONSOLE_RELEASED_AT: reviewStartAt }), /exact UTC timestamp/u);
+  assert.equal(reviewStartAt, '2026-09-17T11:48:24.569Z');
 });
 
 test('new pages require operator auth and domain edits save only a versioned candidate', async () => {
