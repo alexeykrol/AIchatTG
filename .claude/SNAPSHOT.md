@@ -4,6 +4,13 @@
 
 ## Текущее состояние
 
+- **Review retry, lifecycle `prepared`:** local exactebf0a8a, Assistant2.4.42
+  (planned19.09) / Console3.4.0, not pushed/deployed. Safety2.4.41 unchanged;
+ 1452passed/5skips, migration9/9, source guard and retained-store/timestamp
+  regressions passed. Production remains2.4.41/3.2.0. Fresh approval must name
+  exact source and accept retained17.09 binding boundary; no reprovision or
+  repeat deletion. Actual new images and live acceptance not_run, no SSH.
+  [Receipt](../docs/reports/2026-09-19-review-retry-candidate.md).
 - **Live acceptance19.09 22:34UTC, partial:** 5safe inputs/12real calls,
   37,462tokens, conservative upperUSD0.24941862; all HTTP200/complete and
   safety clean. Help/empty-ask/boundary bodies+footer checked. Website question

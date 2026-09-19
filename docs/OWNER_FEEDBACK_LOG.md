@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-19 — Local continuation of the earlier Review deployment request
+
+**Context:** following the previously requested Review release, the Moderator
+controller reminded root to prepare a safety-preserving successor locally.
+This was not a new Product Owner production approval.
+
+**Diagnosis / preparation:** the former7d99ae0 retry and2.4.39 rollback would
+remove the newer2.4.41 repair. Prepared exactebf0a8a/Assistant2.4.42 with that
+repair unchanged, updated activation/rollback and canonical timestamp plus
+retained-store tests. Final1452passed/5skips, migration9/9/source guard passed.
+Retained store policy fixes the boundary at17.09 11:48:07.284UTC; changing it
+fails closed even if empty. New delivery/edit eligibility was clarified rather
+than changing policy to match stale documentation.
+
+**Remaining:** fresh exact approval must cover retained boundary and both
+services; later cutoff requires a separately scoped transition, not reset.
+No new images/production checks, push, SSH, deploy, paid calls, Telegram writes,
+reprovision or repeat deletion. Public production remains2.4.41/Console3.2.0.
+
+**Status: prepared — local candidate only.**
+[Candidate receipt](reports/2026-09-19-review-retry-candidate.md).
+
 ## 2026-09-19 — Run the real paid acceptance test
 
 **Owner instruction:** «сделай живой прогон, зачем тогда тест, если его не делать?».

@@ -26,6 +26,12 @@ Native Telegram delivery/cleanup remains untested because the available actor
 is exempt. No new deploy; run closed.
 [Scope and evidence](docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
 
+**Local Review retry candidate:** Assistant2.4.42 / Console3.4.0, exactebf0a8a,
+lifecycle `prepared`. It preserves the deployed safety repair and passes the
+local gates; it is not pushed or deployed. Fresh approval must include the
+retained Review boundary and current rollback baseline.
+[Candidate and remaining gates](docs/reports/2026-09-19-review-retry-candidate.md).
+
 ## Architecture principle
 
 The Assistant uses a [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md),

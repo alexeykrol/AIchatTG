@@ -23,8 +23,11 @@ updated: 2026-09-19
       follow-up is partial as above; exact historical invalid field unknown.
       `docs/reports/2026-09-19-assistant-2.4.41-deployment.md`.
 - [ ] REVIEW-RELEASE-RETRY: old7d99ae0 same-source retry is superseded by2.4.41.
-      New candidate must include e523485, advance Assistant version, pass full
-      checks, and receive fresh exact PO approval/lease; do not remove this fix.
+      New local candidateebf0a8a is prepared: Assistant2.4.42/Console3.4.0,
+      retains e523485;1452passed/5skips, migration9/9/source guard passed.
+      Not pushed/deployed. Fresh exact PO approval must accept retained17.09
+      boundary; no supported rebind or reset. Remaining image/live gates in
+      `docs/reports/2026-09-19-review-retry-candidate.md`.
       First activation failed on helper's millisecond release timestamp;
       exact-image regression accepts seconds. Validate full composed config
       inside image before recreation. Baseline2.4.41/3.2.0 healthy; retained

@@ -45,6 +45,15 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 
 ## Position 1 — private Moderator review
 
+- **New candidate19.09, lifecycle `prepared`:** exact
+  `ebf0a8acd62974a49f0b99149709bcab196d8394`, Assistant2.4.42 / Console3.4.0,
+  local only. Preserves e523485 safety repair; final1452passed/5skips,
+  migration9/9, clean source guard and retained-store/timestamp regressions.
+  Fresh exact production approval still required. Retained binding boundary
+  stays17.09 11:48:07.284UTC and needs explicit acceptance; no rebind/reset or
+  reprovision. Rollback baseline is now2.4.41/e523485 + Console3.2.0/f650fe8.
+  Exact new images/production/live acceptance not_run; no SSH/push/deploy in
+  this local preparation. [Receipt](reports/2026-09-19-review-retry-candidate.md).
 - **19.09 update:** the7d99ae0/2.4.40 same-source retry below is superseded,
   not executable: production now includes the2.4.41 safety repair. Prepare a
   new candidate including e523485 with a higher Assistant version and fresh
