@@ -1,17 +1,25 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-17
+updated: 2026-09-19
 ---
 
 # Backlog
 
 ## Next
 
-- [ ] REVIEW-RELEASE-RETRY: same7d99ae0 retry requires fresh PO approval/lease.
+- [x] SAFETY-CONTRACT-ALIGNMENT: Assistant2.4.41/exacte523485 deployed and
+      production-verified19.09 22:07UTC. Strict schema/prompt alignment and safe
+      rejection diagnostics; approved irrelevant-question body preserved.
+      Isolated1164passed/5skips, integrated1450passed/5skips. New paid/live-model
+      acceptance remains not_run; exact historical invalid field unknown.
+      `docs/reports/2026-09-19-assistant-2.4.41-deployment.md`.
+- [ ] REVIEW-RELEASE-RETRY: old7d99ae0 same-source retry is superseded by2.4.41.
+      New candidate must include e523485, advance Assistant version, pass full
+      checks, and receive fresh exact PO approval/lease; do not remove this fix.
       First activation failed on helper's millisecond release timestamp;
       exact-image regression accepts seconds. Validate full composed config
-      inside image before recreation. Baseline2.4.39/3.2.0 healthy; retained
+      inside image before recreation. Baseline2.4.41/3.2.0 healthy; retained
       Review store empty, no owner/socket; do not reprovision or replay.
       Comment9709 deletion completed once, never repeat. See
       `docs/reports/2026-09-17-review-activation-rollback.md`.

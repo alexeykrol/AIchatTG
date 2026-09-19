@@ -1,9 +1,23 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-17 UTC
+**Last Updated:** 2026-09-19 UTC
 
 ## Текущее состояние
 
+- **Assistant2.4.41, lifecycle `production-verified`:** exact isolated runtime
+  e523485, image dc7585b6, started19.09 22:06:09UTC, healthy/restart0.
+  Strict safety schema, explicit clean target/context and sanitized terminal
+  diagnostics; no safety bypass or approved-copy changes. Isolated1164passed/
+  5skips, integrated1450passed/5skips, migration9/9,64source hashes/footer,
+  unchanged schema/config/Console and HTTPS/webhooks passed. Paid/live model
+  acceptance not_run; historical invalid field unknown. Source/main pushed;
+  main retains pending Review but was not deployed. One runtime activation,
+  0rollbacks; lease/master closed22:07:05UTC. Console remains3.2.0/f650fe8.
+  Review7d99ae0 retry is now superseded: rebase/integrate this fix, advance
+  version beyond2.4.41 and obtain a new exact release approval before activation.
+  [Receipt](../docs/reports/2026-09-19-assistant-2.4.41-deployment.md).
+- The checkpoints below are historical; the19September checkpoint above
+  overrides their current-version and next-release statements.
 - **Review deployment attempt17.09, lifecycle `pushed`:** exact7d99ae0 был
   утверждён PO, собран и проверен наVPS, Review store provisioned once.
   Включение Console остановлено11:48:29UTC: helper передал миллисекунды в

@@ -1,9 +1,19 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-17, local Review bridge implemented; production remains2.4.39/Console3.2.0. The root integrator owns shared integration
+Checkpoint: 2026-09-19, production2.4.41/Console3.2.0. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
+
+Assistant2.4.41, exact isolated runtime `e52348537f0445f285487a957e0b43f47bd0018d`,
+lifecycle `production-verified`; source/main pushed, one activation22:06:09UTC.
+Strict safety contract and content-free diagnostics, approved copy unchanged.
+1164passed/5skips isolated;1450passed/5skips integrated; migration9/9,
+64source hashes/footer, unchanged config/schema/Console, HTTPS/webhooks passed.
+Paid/live model acceptance not_run. Lease/master closed22:07:05UTC;0rollbacks.
+[Receipt](reports/2026-09-19-assistant-2.4.41-deployment.md).
+
+Historical completed checkpoints:
 
 Assistant2.4.39, exact runtime `2c72e01cb28452c640c033c91a2060a8eca57201`,
 lifecycle `production-verified`; source main-integrated/pushed, one runtime-only
@@ -32,6 +42,12 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 
 ## Position 1 — private Moderator review
 
+- **19.09 update:** the7d99ae0/2.4.40 same-source retry below is superseded,
+  not executable: production now includes the2.4.41 safety repair. Prepare a
+  new candidate including e523485 with a higher Assistant version and fresh
+  exact approval/lease. Retained Review store remains untouched/off; never
+  reprovision or repeat the completed comment deletion. Older entries below
+  describe the17September attempt, not current release authority.
 - Latest checkpoint17.09 11:51UTC: approved exact7d99ae0 attempt stopped on
   deployment-helper timestamp format; Console rolled back to3.2.0, runtime
   unchanged2.4.39. Both healthy/restart0. Fresh empty Review store/config retained;

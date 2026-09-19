@@ -19,6 +19,27 @@ Newest entries first.
 
 ---
 
+## 2026-09-19 — Irrelevant-question scenario must run, not a stray fallback
+
+**Owner instruction (relayed by Assistant task):** the existing irrelevant
+question scenario did not run; a fallback was followed by a correct reply.
+Requested: find, fix and deploy; preserve the approved copy.
+
+**Diagnosis/fix:** confirmed safety-router contract rejection happens before
+content routing. Strict output schemas and explicit clean-target/context rules
+now align the prompt with the existing validator; incomplete/refused responses
+still fail closed. Minimal rejection metadata survives in the existing terminal
+judgement column. No retries, safety bypass, copy rewrite or schema migration.
+The exact historical bad field and reported later normal reply remain
+inconclusive; locally reproduced ambiguity is not historical model evidence.
+
+**Status: deployed — Assistant2.4.41 / exacte523485.** One runtime activation
+19.09 22:06:09UTC; source/main pushed, healthy/restart0. Isolated1164passed/
+5skips, integrated1450passed/5skips, unchanged schema/config/Console and
+64source hashes/footer/webhooks verified. No additional paid/live-model tests.
+Pending Review excluded; lease/master closed22:07:05UTC.
+[Verified receipt](reports/2026-09-19-assistant-2.4.41-deployment.md).
+
 ## 2026-09-19 — Bot stopped answering or answers strangely
 
 **Owner report:** «посмотри, бот перестал отвечать или отвечает странно»;
@@ -47,6 +68,9 @@ master closed after20:41:44UTC; before/after application snapshots equal.
 
 **Status: partial — diagnosed, not fixed.**
 [Read-only evidence](reports/2026-09-19-assistant-reply-incident.md).
+This was the initial read-only checkpoint; the subsequent authorized repair
+and deployment are recorded in the newer entry above. Historical uncertainty
+was not retroactively removed.
 
 ## 2026-09-17 — Deploy now; the reported comment is still visible
 

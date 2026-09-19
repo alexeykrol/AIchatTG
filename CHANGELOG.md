@@ -3,6 +3,21 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.41 / runtime e523485] — 2026-09-19 — Safety contract alignment
+
+Lifecycle `production-verified`; started22:06:09UTC; source integrated/pushed.
+[Release receipt](docs/reports/2026-09-19-assistant-2.4.41-deployment.md).
+
+- Request strict safety output schemas and clarify clean target/context rules;
+  preserve semantic validation, sanctions, approved copy and no-retry fences.
+- Reject incomplete/refused responses explicitly; retain content-free rejection
+  diagnostics in the existing terminal judgement column, without schema change.
+- Isolated1164passed/5skips, integrated1450passed/5skips, migration9/9,
+  64deployed hashes/footer, unchanged config/schema/Console and HTTPS/webhooks
+  passed. Exact historical bad field and new real-model acceptance are not proven.
+- Runtime-only release; Console3.2.0 unchanged, pending Review excluded.
+  One activation,0rollbacks; lease/master closed22:07:05UTC.
+
 ## [Assistant 2.4.39 / runtime 2c72e01] — 2026-09-16 — Single-judge ask protocol
 
 Lifecycle `production-verified`; started06:57:40UTC. Source integrated and

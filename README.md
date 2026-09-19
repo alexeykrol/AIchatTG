@@ -11,11 +11,13 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
-**Production checkpoint17.09 11:51UTC:** Assistant2.4.39 / Console3.2.0 are
-healthy. Review candidate7d99ae0 is pushed, not deployed: the approved attempt
-was rolled back after an integrator deployment-timestamp error. Review data
-was preserved, but capture/notifications remain off. A corrected same-source
-retry awaits a fresh approval. [Receipt](docs/reports/2026-09-17-review-activation-rollback.md).
+**Production checkpoint19.09 22:07UTC:** Assistant2.4.41 / exacte523485 and
+Console3.2.0 / f650fe8 are healthy. The safety response contract is aligned;
+approved irrelevant-question copy is unchanged. Main is pushed but also
+contains pending Review code; only the isolated runtime candidate was deployed.
+Review remains off. Its old7d99ae0 retry is superseded: a future candidate must
+retain this fix and pass new release/approval gates.
+[Receipt](docs/reports/2026-09-19-assistant-2.4.41-deployment.md).
 
 ## Architecture principle
 
