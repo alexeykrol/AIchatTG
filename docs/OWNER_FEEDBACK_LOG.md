@@ -19,6 +19,35 @@ Newest entries first.
 
 ---
 
+## 2026-09-19 — Bot stopped answering or answers strangely
+
+**Owner report:** «посмотри, бот перестал отвечать или отвечает странно»;
+then «прочитай сообщения из чата - у тебя есть доступ». This authorized bounded
+diagnosis and reading relevant messages, not a fix/deploy/restart or paid tests.
+
+**Diagnosis:** current2.4.39/2c72e01 and Console3.2.0/f650fe8 healthy/restart0;
+both webhooks pending0/no last error. In the last24h, four addressed interactions
+were observed: two ordinary service replies and two confirmed operational
+fallbacks. The help command and a website-related question hit
+`provider_safety_router_invalid`; neither reached course retrieval or answer
+generation. No recent quota refusal, answer-provider timeout, stuck claim or
+legacy overlap explains these cases. Incoming question snapshots were read;
+fallback text is reconstructed from exact deployed code plus successful delivery
+receipts, not independently fetched Telegram response bodies.
+
+**Confidence / limitation:** rejected safety-router contract is confirmed, but
+the exact invalid field is unknown: the runtime dropped the specific reason and
+response metadata. The prompt's unspecified clean-target rule is a locally
+reproducible ambiguity, not proof of the historical response.
+
+**Recommendation:** add minimized specific rejection diagnostics and align/test
+the prompt/validator contract without bypassing safety; separately authorize any
+paid reproduction/deploy. No implementation or production changes made. Remote
+master closed after20:41:44UTC; before/after application snapshots equal.
+
+**Status: partial — diagnosed, not fixed.**
+[Read-only evidence](reports/2026-09-19-assistant-reply-incident.md).
+
 ## 2026-09-17 — Deploy now; the reported comment is still visible
 
 **Owner instruction:** «подтверждаю» accepted the exact Review activation;
