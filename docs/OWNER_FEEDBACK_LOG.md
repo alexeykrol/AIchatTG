@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-20 — Finish the last unanswered question, not only the test
+
+**Owner instruction (Assistant task):** «а почему деплоя не было? сделай, и на
+последний вопрос должен быть ответ. не ленись - реши задачу полностью».
+
+**Diagnosis:**2.4.41 was already deployed19September22:06UTC, but the earlier
+question still had only its2.4.39 operational fallback. That confirmed durable
+claim prevents automatic replay; deployment does not replace past messages.
+Native UI and exact read-only target state identified the unanswered question.
+
+**Completion:** one explicitly scoped operator edit replaced the old fallback
+with the unchanged approved out-of-coverage text and2.4.41 footer at03:45UTC.
+Telegram confirmed the exact target/body. Its response omitted the reply field;
+the raw receipt stayed uncertain and independent native UI confirmed the quote,
+complete answer, footer and absence of a duplicate. No retry or claim reset.
+Historical DB rows, runtime and Console remained unchanged; no paid calls or
+new deploy. This is not a full automatic native ingress/cleanup acceptance.
+
+**Status: partial — requested historical answer completed; broader native
+end-to-end acceptance remains not_run.**
+[Completion receipt](reports/2026-09-20-assistant-last-question-completion.md).
+
 ## 2026-09-19 — Local continuation of the earlier Review deployment request
 
 **Context:** following the previously requested Review release, the Moderator

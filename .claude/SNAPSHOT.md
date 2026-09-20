@@ -1,9 +1,17 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-19 UTC
+**Last Updated:** 2026-09-20 UTC
 
 ## Текущее состояние
 
+- **Last unanswered question completed20.09 03:45UTC:** one operator edit
+  replaced its historical fallback in place with approved out-of-coverage copy
+  and2.4.41 footer. Telegram target/body and native quoted reply/full rendering
+  verified; raw API reply-field omission reconciled in UI without retry.
+  Historical claims/judgement unchanged, no new send/paidcall/DBwrite/deploy.
+  Runtime2.4.41/Console3.2.0 unchanged healthy/restart0; lease/master closed.
+  This is not a new automatic-ingress E2E test.
+  [Receipt](../docs/reports/2026-09-20-assistant-last-question-completion.md).
 - **Review retry, lifecycle `prepared`:** local exactebf0a8a, Assistant2.4.42
   (planned19.09) / Console3.4.0, not pushed/deployed. Safety2.4.41 unchanged;
  1452passed/5skips, migration9/9, source guard and retained-store/timestamp
