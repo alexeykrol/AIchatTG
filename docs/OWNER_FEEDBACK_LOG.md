@@ -38,6 +38,7 @@ Models, output contract, sanction types and protected-author checks are unchange
 
 **Status: fixed — code-owned contract verified locally; candidate 2.4.43 is not
 deployed. Actual model recognition is not_run, not established by mock tests.**
+[Exact local candidate b891abf](reports/2026-09-23-advertising-primary-candidate.md).
 
 ## 2026-09-23 — Advertising requires deletion and author ban, not Review alone
 

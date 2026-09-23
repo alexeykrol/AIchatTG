@@ -1,7 +1,18 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-23 16:31UTC, production2.4.42/Console3.4.0 exact8a2b27f. The root integrator owns shared integration
+Checkpoint: 2026-09-23 23:23UTC, production2.4.42/Console3.4.0 exact8a2b27f. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
+
+## Prepared — primary advertising and complete enforcement receipts
+
+Exact `b891abfde3c176d389ab0cd19d3be9509405974d`, branch
+`codex/advertising-policy-20260923`, lifecycle `prepared`; local main-integrated,
+not pushed/deployed. Candidate2.4.43/23September, runtime-only release.
+1512passed/5fixture skips, migration9/9, scenario30/34, source guard and
+independent125/125 passed. Model recognition remains not_run; sanctions remain
+code-owned. Current9770 action is already completed and never repeated.
+[Report](reports/2026-09-23-advertising-primary-candidate.md).
+[Exact release decision](proposals/2026-09-23-advertising-primary-approval.md).
 
 ## Completed
 

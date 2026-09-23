@@ -4,6 +4,14 @@
 
 ## Текущее состояние
 
+- **Local candidate, lifecycle `prepared`:** exactb891abfde3c176d389ab0cd19d3be9509405974d,
+  branchcodex/advertising-policy-20260923, shared runtime2.4.43/23September.
+  Primary advertising recognition supplement + truthful ban/purge completion;
+  sanctions/exceptions/failures stay code-owned.1512passed/5fixture skips,
+  migration9/9, scenario30/34, sourceguard and independent125/125 passed.
+  No push/deploy/paid/SSH in preparation; model recognitionnot_run.
+  [Report](../docs/reports/2026-09-23-advertising-primary-candidate.md),
+  [exact gate](../docs/proposals/2026-09-23-advertising-primary-approval.md).
 - **Historical ad9770 completed23.09 23:09UTC:** exactly one delete and one
   exact-native-author ban acknowledged; readbackkicked/until0, independent native
   absence verified. No other author/chat/model/DBwrite/redeploy/replay. Fresh

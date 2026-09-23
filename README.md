@@ -36,6 +36,11 @@ full-advertising-protocol instruction; API readback and native absence verified.
 Permanent primary-classifier policy changes remain a separate local candidate,
 not part of the already deployed8a release. This is not a new porn-model fix.
 
+**Prepared, not deployed:** primary advertising recognition and complete
+ban/deletion receipts, exact`b891abf`, shared runtime2.4.43.1512passed/5fixture
+skips; actual model recognition not_run. Model supplies classification/evidence;
+the moderation protocol remains deterministic code. [Candidate report](docs/reports/2026-09-23-advertising-primary-candidate.md).
+
 ## Architecture principle
 
 The Assistant uses a [universal Markdown domain registry](docs/ASSISTANT_DOMAIN_REGISTRY_V1.md),
