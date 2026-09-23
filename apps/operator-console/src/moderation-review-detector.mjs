@@ -25,7 +25,7 @@ const AUDIO_ACCESS = /(?:(?:есть|доступн[а-яё]*|имеется|м�
 const SOFT_RECOMMENDATION = /(?:советую|рекомендую|могу\s+порекомендовать|стоит\s+(?:по)?читать|стоит\s+познакомиться|присмотритесь|может\s+оказаться\s+полезн[а-яё]*|\b(?:worth\s+a\s+look|would\s+recommend|recommend\s+exploring)\b)/iu;
 const REQUESTED_RECOMMENDATION = /(?:посоветуй(?:те)?|порекомендуй(?:те)?|(?:можете|можешь|могли\s+бы)(?:\s+(?:ли|вы|ты)){0,2}\s+(?:посоветовать|порекомендовать)|(?:какую|какой|какие|какая|какое|каких)[^.!?\n]{0,80}(?:посоветуете|порекомендуете)|\b(?:recommend\s+(?:me\s+)?(?:a|some|any)|which[^.!?\n]{0,80}(?:recommend|suggest))\b)/iu;
 const REPORTING = /^(?:(?:здравствуйте|добрый\s+день|привет|hello|hi)[,\s:!—-]+)?(?:спам\s*:|модератор[а-яё]*[,\s:!—-]*(?:проверьте|посмотрите|обратите\s+внимание)|(?:это|снова|опять)\s+(?:похоже\s+на\s+)?(?:спам|реклам[а-яё]*)|(?:сообщаю|жалуюсь)\s+о\s+спаме|\b(?:reporting\s+(?:spam|an?\s+advertisement)|moderators?[,\s:!—-]*please\s+(?:check|review))\b)/iu;
-const NEGATED_BENEFIT = /(?:не\s+(?:помог[а-яё]*|советую|рекомендую)|(?:рекомендовать|советовать)[^.!?\n]{0,20}не\s+могу|\b(?:did\s+not|didn't|does\s+not|doesn't|do\s+not|don't|(?:has|have|had)\s+not|hasn't|haven't|hadn't|never)\s+help(?:ed|s)?\b|\b(?:do\s+not|don't|cannot|can't)\s+recommend\b|\brecommend\s+(?:avoiding|against)\b)/iu;
+const NEGATED_BENEFIT = /(?:не\s+(?:(?:очень|особо|слишком|действительно|реально)\s+){0,2}(?:помог[а-яё]*|советую|рекомендую)|не\s+могу\s+(?:порекомендовать|рекомендовать|посоветовать|советовать)|советую\s+не\s+(?:читать|покупать)|(?:рекомендовать|советовать)[^.!?\n]{0,20}не\s+могу|\b(?:did\s+not|didn't|does\s+not|doesn't|do\s+not|don't|(?:has|have|had)\s+not|hasn't|haven't|hadn't|never|not)\s+(?:(?:really|actually|particularly|very\s+much)\s+){0,2}help(?:ed|s)?\b|\b(?:do\s+not|don't|cannot|can't)\s+recommend\b|\brecommend\s+(?:avoiding|against)\b)/iu;
 const HYPOTHETICAL = /^(?:(?:представим|допустим)[,\s:]+)?(?:если\s+бы|(?:я\s+)?(?:прочитал|порекомендовал)[аи]?\s+бы|if\s+I\s+(?:had|were\s+to)\s+read\b)/iu;
 const SPECIFIC_ANSWER = /(?:в\s+(?:третьей|первой|второй|\d+)[-\s]*главе|в\s+главе\s+[«"“]|на\s+странице\s+\d+|\bchapter\s+on\b)/iu;
 const ANSWER_REFERENCE = /(?:ваш[а-яё]*\s+(?:вопрос|построени[а-яё]*|задач[а-яё]*)|спросили|упражнени[а-яё]*|доказательств[а-яё]*|алгоритм[а-яё]*|\b(?:your\s+question|this\s+exercise|the\s+denominator)\b)/iu;
@@ -42,7 +42,11 @@ function testimonialCues(observation) {
   // Remove invisible separators only in cue recognition. Full-text hashes and
   // grouping preserve them, product names and URL identity unchanged.
   const text = normalizedText(observation.text).replace(/[\u200b-\u200d\u2060\ufeff]/gu, '');
-  const context = typeof observation.context?.text === 'string' ? observation.context.text : '';
+  // Apply the same recognition-only normalization to an explicit request in
+  // the supplied parent. Invisible separators must not turn a requested book
+  // recommendation into an unsolicited testimonial. Fingerprints stay exact.
+  const context = typeof observation.context?.text === 'string'
+    ? normalizedText(observation.context.text).replace(/[\u200b-\u200d\u2060\ufeff]/gu, '') : '';
   if (!OBJECT.test(text) || !hasTestimonialExperience(text) || !BENEFIT.test(text)
     || REPORTING.test(text) || NEGATED_BENEFIT.test(text) || HYPOTHETICAL.test(text)
     || (OBJECT.test(context) && REQUESTED_RECOMMENDATION.test(context))
