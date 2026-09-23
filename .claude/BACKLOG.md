@@ -22,7 +22,20 @@ updated: 2026-09-23
       Isolated1164passed/5skips, integrated1450passed/5skips. Paid/live-model
       follow-up is partial as above; exact historical invalid field unknown.
       `docs/reports/2026-09-19-assistant-2.4.41-deployment.md`.
-- [ ] REVIEW-RELEASE-RETRY: fresh23September book-promotion recurrence while
+- [x] REVIEW-RELEASE-RETRY: exact8a2b27f production-verified23September16:31UTC,
+      Assistant2.4.42/Console3.4.0, retained binding/store preserved.1470tests/
+      5skips, migration9/9, exact images/actualconfig/sourcehashes/footer,
+      schema/drafts/health/HTTPS/auth/webhooks passed. Oneactivation each,
+      0rollback/reprovision/paidcalls/deletions. Lease/master closed.
+      `docs/reports/2026-09-23-review-8a2b27f-deployment.md`.
+- [ ] REVIEW-LIVE-ACCEPTANCE: Review enabled, but0capture/cases at deployment;
+      real capture→private notice→manual decision/erase not_run, needs separately
+      scoped actor/input/write authority. Rendered browserQA blocked before
+      auth/render; HTML/API proofs passed, not a visual screenshot proof.
+- [ ] CURRENT-BOOK-POST-9770: exactnative/snapshotdigest matched; actualsnapshot
+      detected as review-only. Existing post predatesactivation, no replay.
+      One-off deletion/noauthorban question pending, no URL needed from PO.
+- Historical preparation: fresh23September book-promotion recurrence while
       Review remains off. Current candidate8a2b27f is prepared, replacingebf0a8a:
       Assistant2.4.42/Console3.4.0, planned23September, retains e523485;
       1470passed/5skips, migration9/9/source guard passed. Five local false
@@ -81,7 +94,9 @@ updated: 2026-09-23
       mean$0.0065898 over4. Runtime335a35a/config/drafts preserved.
       Lease/master closed23:13:28UTC; one recreation,0rollback.
       `docs/reports/2026-09-15-console-v32-deployment.md`.
-- [ ] MODERATOR-REVIEW-1: PO-start verified; local synthetic private review/
+- [x] MODERATOR-REVIEW-1: deployed in8a2b27f23September; real acceptance remains
+      separately open above. Historical implementation checkpoints follow:
+      PO-start verified; local synthetic private review/
       Admin verdict/pattern draft cycle chartered. Root owns shared entrypoints,
       storage integration and release; retention approved indefinite until
       manual removal, local erase/retained observation visibility contracts

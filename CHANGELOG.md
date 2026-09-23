@@ -3,6 +3,24 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.42 / Console 3.4.0 / source 8a2b27f] — 2026-09-23 — Private Review
+
+Lifecycle `production-verified`; both services deployed and source pushed.
+[Release receipt](docs/reports/2026-09-23-review-8a2b27f-deployment.md).
+
+- Activate the private suspected-promotion Review workflow: bounded live
+  capture, Console-owned cases, generic private alerts and manual decisions.
+  Preserve the independent primary moderation policy; no new automatic bans.
+- Recognize covert book testimonials; exclude qualified negative benefits,
+  withdrawn recommendations and explicitly requested recommendations with
+  invisible separators. Exact grouping fingerprints stay unchanged.
+- Preserve the17September private binding/store and validate actual image
+  configuration before recreation; no provisioning, replay or runtime migration.
+-1470passed/5explicit skips, migration9/9,58+43running-source hashes, footer,
+  health/config/schema/drafts/HTTPS/auth/webhooks passed. One recreation each,
+ 0rollbacks; lease/master closed. Actual alert-delivery E2E and browser-rendered
+  verification remain not_run, as does paid model evaluation.
+
 ## [Assistant 2.4.41 / runtime e523485] — 2026-09-19 — Safety contract alignment
 
 Lifecycle `production-verified`; started22:06:09UTC; source integrated/pushed.

@@ -1,7 +1,11 @@
 # Exact approval — Review activation23September
 
-Status: approval requested, not a production lease. Candidate lifecycle:
-`prepared`. The19September candidate/approval is superseded, not reusable.
+Historical approval card: the owner subsequently instructed completion of this
+presented scope; one lease was issued and consumed23September. Current candidate
+lifecycle: `production-verified`. See the
+[deployment receipt](../reports/2026-09-23-review-8a2b27f-deployment.md).
+This card is not reusable authority; the original request below is preserved.
+The19September candidate/approval is superseded, not reusable.
 
 ## One release decision
 

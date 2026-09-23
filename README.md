@@ -11,13 +11,14 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
-**Production checkpoint23.09 15:57UTC:** Assistant2.4.41 / exacte523485 and
-Console3.2.0 / f650fe8 are healthy. The safety response contract is aligned;
-approved irrelevant-question copy is unchanged. The deployed source is pushed; main also
-contains pending Review code; only the isolated runtime candidate was deployed.
-Review remains off. Its old7d99ae0 retry is superseded: a future candidate must
-retain this fix and pass new release/approval gates.
-[Receipt](docs/reports/2026-09-19-assistant-2.4.41-deployment.md).
+**Production checkpoint23.09 16:31UTC:** Assistant2.4.42 / Console3.4.0,
+exact8a2b27f for both services, lifecycle `production-verified`. Source pushed;
+both healthy/restart0. Private Review is live with retained17September binding:
+bounded collection, generic private notifications and manual decisions, no new
+automatic sanctions or backfill. Primary safety and approved copy preserved.
+1470tests passed/5explicit skips; exact images/footer/config/schema/HTTPS/auth
+and webhooks verified. Actual alert-delivery E2E and rendered-browser QA remain
+not_run. [Receipt](docs/reports/2026-09-23-review-8a2b27f-deployment.md).
 
 **Live acceptance follow-up19.09 22:34UTC:** five safe inputs and12 real model
 calls passed bounded technical checks. Website routing differs between legacy
@@ -26,13 +27,10 @@ Native Telegram delivery/cleanup remains untested because the available actor
 is exempt. No new deploy; run closed.
 [Scope and evidence](docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
 
-**Local Review retry candidate23.09:** Assistant2.4.42 / Console3.4.0, exact8a2b27f,
-lifecycle `prepared`. It preserves the deployed safety repair and passes1470
-tests/5explicit skips; it is not pushed or deployed. Fresh approval must include the
-retained Review boundary and current rollback baseline.
-[Candidate and remaining gates](docs/reports/2026-09-23-moderator-recurrence-candidate.md).
-The newly observed book-promotion example matches the offline detector, but
-Review remains off in production. This release is not a new porn-model fix.
+**Current incident:** the reported native book-promotion post was identified
+without asking for a URL; its actual snapshot matches the new detector.
+It predates activation and is not replayed into Review. One-off removal remains
+separately gated. This release is not a new porn-model fix.
 
 ## Architecture principle
 
@@ -97,7 +95,7 @@ disabled by default and is not wired into the live path. See
 [CHANGELOG 0.5.0](CHANGELOG.md). Rollback: previous image `5e67451` is kept on
 the host at that release point.
 
-**Current runtime: `2c72e01`, production-verified. Assistant2.4.39 — 16.09.2026.**
+**Historical runtime checkpoint: `2c72e01`, Assistant2.4.39 — 16.09.2026.**
 Started2026-09-16 06:57:40UTC; healthy/restart0. Every delivered Assistant
 reply ends with `Версия 2.4.39 от 16.09.2026`, once on its final part.
 One native-revision judge owner, fenced answer delivery and30-second idle
@@ -114,10 +112,10 @@ Legacy native messages, including their late edits, are quarantined against
 rejudgement. **No old-binary rollback:** a41518f on this database is unsafe;
 use identity-verified stop/preserved data/tested forward repair under a fresh
 lease. New paid or live Telegram acceptance was not run. See the
-[current release receipt](docs/reports/2026-09-16-assistant-2.4.39-deployment.md).
-The separate partial-knowledge answer-quality issue and private Review remain open.
+[historical release receipt](docs/reports/2026-09-16-assistant-2.4.39-deployment.md).
+The partial-knowledge answer-quality issue was separate; current Review status is above.
 
-**Current operator panel: Russian Console 3.2.0**, image `f650fe8`, released
+**Historical operator panel checkpoint: Russian Console3.2.0**, image `f650fe8`, released
 2026-09-15 23:12:03UTC. Seven pages share Russian navigation, an exact
 version/date/time header and detailed Help. Settings and Markdown editors
 save versioned drafts only, not changes to the running bot.

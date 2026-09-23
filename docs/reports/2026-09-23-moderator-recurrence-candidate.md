@@ -1,5 +1,9 @@
 # Moderator recurrence — exact Review candidate
 
+Historical preparation checkpoint. The later
+[deployment receipt](2026-09-23-review-8a2b27f-deployment.md) supersedes its
+production/approval/identity status; the observations below remain chronological.
+
 Candidate lifecycle: `prepared`. Source
 `8a2b27fb215a19d26cf35b6244dcd4151b7cac4d`, branch
 `codex/review-retry-20260923`, Assistant2.4.42 planned2026-09-23 /

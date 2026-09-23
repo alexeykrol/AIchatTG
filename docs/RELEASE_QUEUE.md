@@ -1,9 +1,21 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-23 15:57UTC, production2.4.41/Console3.2.0. The root integrator owns shared integration
+Checkpoint: 2026-09-23 16:31UTC, production2.4.42/Console3.4.0 exact8a2b27f. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
+
+Private Review, exact`8a2b27fb215a19d26cf35b6244dcd4151b7cac4d`, lifecycle
+`production-verified`; both services recreated once,0rollback. Source pushed;
+1470tests/5skips, migration9/9, exactimages/config/sourcehashes/footer/schema/
+drafts/health/HTTPS/auth/webhooks passed. Retained17September binding preserved,
+Reviewlive, no reprovision/replay/new sanctions. Leaseclosed16:31:32.762UTC,
+masterclosed16:32:12UTC. Real notificationE2E and renderedbrowserQA not_run.
+No pending deployment for this source; one-off9770 removal separately awaits
+PO and does not authorize replay or an author ban.
+[Receipt](reports/2026-09-23-review-8a2b27f-deployment.md).
+
+Earlier completed releases:
 
 Assistant2.4.41, exact isolated runtime `e52348537f0445f285487a957e0b43f47bd0018d`,
 lifecycle `production-verified`; source/main pushed, one activation22:06:09UTC.
@@ -43,9 +55,9 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
   Model recognition remains not_run. Private Review stays off.
 - [Deployment receipt](reports/2026-09-16-porn-spam-policy-deployment.md).
 
-## Position 1 — private Moderator review
+## Historical position 1 — private Moderator review, now deployed above
 
-- **Current23.09 candidate, lifecycle `prepared`:** exact
+- **Historical23.09 predeployment checkpoint:** exact
   `8a2b27fb215a19d26cf35b6244dcd4151b7cac4d`, Assistant2.4.42 planned23September /
   Console3.4.0.1470passed/5skips, migration9/9/source guard and independent
   regressions passed. Production still2.4.41/3.2.0, Reviewoff, retained binding

@@ -19,6 +19,37 @@ Newest entries first.
 
 ---
 
+## 2026-09-23 — Find the reported post and complete the presented release
+
+**Fresh owner instruction in task «Модератор», after the current exact release
+card was presented:** «никаких ссылок я присылать не буду. у тебя есть доступ -
+найди этот пост и доведи дело до конца».
+
+**Action:** root resumed the presented8a2b27f/b73d506 push and Review activation
+workflow, not another generic approval loop. Native screenshot text was
+reconciled with the narrowly scoped server snapshot by an exact normalized
+digest: the one-character manual transcription error was corrected in memory.
+Message9770 is identified; the actual snapshot triggers `covert-testimonial-bait`
+under exact8a source in a read-only, no-model check. No raw text/name is stored
+in Git. Asking the owner to provide a URL is not a remaining dependency.
+
+Both private-origin refs were pushed/read back. Fresh16:26UTC preflight verified
+the unchanged2.4.41/3.2.0 baseline, canonical retained paths, actual SQLite
+schema, binding and empty store. Lease`review-8a2b27f-20260923` runs
+16:27:13.975–17:27:13.975UTC for one activation/at most one rollback; root is
+the only remote writer. No paid evaluation, new automatic sanctions, replay,
+reprovision or message deletion is inferred from that release scope.
+
+**Status: partial — exact post identified; Review deployed and production-verified
+at16:31UTC; the old post's one-off deletion awaits its separate decision.**
+Both services on8a2b27f, Assistant2.4.42/Console3.4.0, Reviewlive, healthy/restart0;
+exact images/config/source/footer/schema/HTTPS/auth/webhooks passed. Real
+notification E2E and rendered-browser verification remain not_run. No paid
+tests/operatorTelegramwrites/reprovision/rollback. Lease/master closed.
+[Receipt](reports/2026-09-23-review-8a2b27f-deployment.md).
+Earlier transport interruption remains recorded;
+this fresh authorized run waits for each command before closing its master.
+
 ## 2026-09-23 — Scam recurrence; finish the outstanding protection
 
 **Fresh owner instruction in task «Модератор»:** «опять то же скам, ты не

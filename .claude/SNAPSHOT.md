@@ -4,7 +4,19 @@
 
 ## Текущее состояние
 
-- **Fresh Moderator recurrence23.09:** native read-only evidence is a book
+- **Review23.09, lifecycle `production-verified`:** exact8a2b27f,
+  Assistant2.4.42/23.09.2026 and Console3.4.0 live; source pushed. Runtime
+  started16:29:10UTC, Console16:29:03UTC, releasedAt16:28:58Z. Repeated16:31
+  bothhealthy/restart0,58+43sourcehashes/footer/7HTMLheaders/API/HTTPS/auth,
+  unchanged runtime schema/drafts/config/routes/logging and bothwebhooks passed.
+  Retained bindingc48/start17Sep unchanged, integrity/actualschema/owner/sockets
+  valid. Reviewlive/capture+delivery+manualdecisions on, sanctions/backfill off.
+ 0cases/capture: real notificationE2E not_run; browserUI blocked before render.
+  One recreation each/0rollback/reprovision/paidtest/operatorTelegramwrite.
+  Leaseclosed16:31:32.762, masterclosed16:32:12. Message9770 identified by
+  exactnative/snapshotdigest and actualdetector; deletion separately awaits PO.
+  [Receipt](../docs/reports/2026-09-23-review-8a2b27f-deployment.md).
+- **Historical predeployment recurrence checkpoint23.09:** native read-only evidence is a book
   promotion, detected by candidate offline, not a proved new porn-model miss.
   Production15:57UTC remains2.4.41/3.2.0 healthy/restart0, Reviewoff and retained
   binding/store intact/empty. Bounded14:08 message locator is a strong candidate,
