@@ -39,6 +39,34 @@ prohibited.
 - Never commit credentials, private user data, or production database files.
 - Classify evidence as `passed`, `failed`, `not_run`, or `inconclusive`.
 
+## Advertising moderation protocol
+
+Product Owner clarification, 23 September 2026: unsolicited advertising and
+advertising-bot promotion require the full existing spam response — delete
+the advertising message and ban its author in that chat. Covert promotion,
+including unsolicited book/testimonial bait, is not exempt merely because it
+has no URL, price or Telegram `is_bot` flag.
+
+Private Review may supplement this protocol; it is not a substitute for the
+primary `spam_or_scam` → `ban_purge` response once that classification is
+established. Do not invent a no-ban exception for a confirmed advertising case.
+Conversely, a book mention, requested recommendation, quotation/report or
+Review heuristic alone must not manufacture a spam verdict. Preserve semantic
+validation, protected-author checks, no-retry fences and fail-closed failures.
+
+Moderation regulations are executable, versioned code, not model discretion.
+The model classifies meaning and violation type and supplies validated evidence;
+it never chooses punishment, thresholds, warning stages, exceptions or recovery.
+Deterministic code owns those decisions, including the required delete + ban.
+Reject model-selected action fields; a prompt supplement describes recognition,
+not permission for the model to waive or replace the enforcement protocol.
+
+For a separately authorized historical action, bind deletion and ban to the
+exact native message and immutable author ID; never display names. Telegram
+supergroup bans inherently revoke that author's messages. Do not target other
+authors, replay earlier completed actions or call a one-off operator action a
+deployed source-policy fix. New source releases still need exact release gates.
+
 ## Shared-VPS diagnostic safety
 
 - The permanent integrator owns remote Docker diagnostics on the shared VPS.

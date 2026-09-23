@@ -1,5 +1,10 @@
 # Private Review — verified deployment23September
 
+Later incident completion: the historical9770 post was deleted and its author
+banned23:09UTC under a separate explicit operation; see its
+[receipt](2026-09-23-advertising-post-9770-enforcement.md). This deployment's
+original zero-deletion scope and checkpoints below remain historical facts.
+
 Candidate lifecycle: **`production-verified`**. Exact source
 `8a2b27fb215a19d26cf35b6244dcd4151b7cac4d` for both services. Assistant2.4.42 /
 2026-09-23 and Console3.4.0. Root was the sole remote writer.

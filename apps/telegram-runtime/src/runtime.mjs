@@ -752,17 +752,21 @@ export function createTelegramRuntime({
     receipt.purge.deleted = receipt.purge.items.filter((item) => item.ok).length;
     receipt.purge.failed = receipt.purge.total - receipt.purge.deleted;
     const uncertain = receipt.purge.items.some((item) => item.uncertain === true);
-    receipt.status = uncertain ? 'uncertain' : receipt.purge.failed ? 'guard_unproven' : 'completed';
+    // Deleting the known messages cannot complete a plan that also requires a
+    // ban. Definitive ban skips remain terminal, even when the permitted purge
+    // succeeds; an ambiguous purge still takes precedence over that skip.
+    const completed = banned.ok && receipt.purge.failed === 0;
+    receipt.status = uncertain ? 'uncertain' : completed ? 'completed' : 'guard_unproven';
     await completeEnforcement(
       claim,
-      uncertain ? 'uncertain' : receipt.purge.failed ? 'skipped' : 'completed',
+      uncertain ? 'uncertain' : completed ? 'completed' : 'skipped',
       receipt,
-      uncertain ? 'purge_uncertain' : receipt.purge.failed ? 'purge_unconfirmed' : null,
+      uncertain ? 'purge_uncertain' : receipt.purge.failed ? 'purge_unconfirmed' : banned.ok ? null : banned.error,
     );
     return {
       action: receipt.purge.failed
         ? 'purge_unconfirmed'
-        : banned.ok ? 'ban_purge' : 'delete_no_author',
+        : banned.ok ? 'ban_purge' : 'ban_unconfirmed',
       receipt,
       actions,
     };

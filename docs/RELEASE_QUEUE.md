@@ -11,9 +11,12 @@ Private Review, exact`8a2b27fb215a19d26cf35b6244dcd4151b7cac4d`, lifecycle
 drafts/health/HTTPS/auth/webhooks passed. Retained17September binding preserved,
 Reviewlive, no reprovision/replay/new sanctions. Leaseclosed16:31:32.762UTC,
 masterclosed16:32:12UTC. Real notificationE2E and renderedbrowserQA not_run.
-No pending deployment for this source; one-off9770 removal separately awaits
-PO and does not authorize replay or an author ban.
+No pending deployment for this source. The later one-off9770 deletion and
+native-author ban completed23:09UTC under fresh explicit authority, without a
+redeploy/replay. Primary advertising/receipt repair is a separate local2.4.43
+candidate, not yet released.
 [Receipt](reports/2026-09-23-review-8a2b27f-deployment.md).
+[One-off moderation](reports/2026-09-23-advertising-post-9770-enforcement.md).
 
 Earlier completed releases:
 

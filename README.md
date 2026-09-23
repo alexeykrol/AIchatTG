@@ -29,8 +29,12 @@ is exempt. No new deploy; run closed.
 
 **Current incident:** the reported native book-promotion post was identified
 without asking for a URL; its actual snapshot matches the new detector.
-It predates activation and is not replayed into Review. One-off removal remains
-separately gated. This release is not a new porn-model fix.
+It predates activation and was not replayed into Review. On23September23:09UTC,
+the post was deleted and its exact author banned under the owner's explicit
+full-advertising-protocol instruction; API readback and native absence verified.
+[One-off receipt](docs/reports/2026-09-23-advertising-post-9770-enforcement.md).
+Permanent primary-classifier policy changes remain a separate local candidate,
+not part of the already deployed8a release. This is not a new porn-model fix.
 
 ## Architecture principle
 

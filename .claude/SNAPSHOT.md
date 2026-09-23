@@ -4,6 +4,15 @@
 
 ## Текущее состояние
 
+- **Historical ad9770 completed23.09 23:09UTC:** exactly one delete and one
+  exact-native-author ban acknowledged; readbackkicked/until0, independent native
+  absence verified. No other author/chat/model/DBwrite/redeploy/replay. Fresh
+  operation lease closed23:09:44, masterclosed23:10:28;8a serviceshealthy0restart.
+  Owner explicitly corrected no-ban interpretation: advertising requires full
+  delete+authorban, Review alone is insufficient. Rule added toAGENTS; primary
+  semantic advertising supplement and completion-receipt repair are local
+  candidate work, not deployed. Production remains2.4.42/Console3.4.0.
+  [Receipt](../docs/reports/2026-09-23-advertising-post-9770-enforcement.md).
 - **Review23.09, lifecycle `production-verified`:** exact8a2b27f,
   Assistant2.4.42/23.09.2026 and Console3.4.0 live; source pushed. Runtime
   started16:29:10UTC, Console16:29:03UTC, releasedAt16:28:58Z. Repeated16:31
@@ -14,7 +23,7 @@
  0cases/capture: real notificationE2E not_run; browserUI blocked before render.
   One recreation each/0rollback/reprovision/paidtest/operatorTelegramwrite.
   Leaseclosed16:31:32.762, masterclosed16:32:12. Message9770 identified by
-  exactnative/snapshotdigest and actualdetector; deletion separately awaits PO.
+  exactnative/snapshotdigest and actualdetector; later one-off outcome is above.
   [Receipt](../docs/reports/2026-09-23-review-8a2b27f-deployment.md).
 - **Historical predeployment recurrence checkpoint23.09:** native read-only evidence is a book
   promotion, detected by candidate offline, not a proved new porn-model miss.

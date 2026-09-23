@@ -32,9 +32,17 @@ updated: 2026-09-23
       real capture→private notice→manual decision/erase not_run, needs separately
       scoped actor/input/write authority. Rendered browserQA blocked before
       auth/render; HTML/API proofs passed, not a visual screenshot proof.
-- [ ] CURRENT-BOOK-POST-9770: exactnative/snapshotdigest matched; actualsnapshot
-      detected as review-only. Existing post predatesactivation, no replay.
-      One-off deletion/noauthorban question pending, no URL needed from PO.
+- [x] CURRENT-BOOK-POST-9770: deleted23September23:09:43UTC; exact nativeauthor
+      banned23:09:44UTC under fresh explicitPO fullprotocol instruction.
+      Both API acknowledgements/readbackkicked/nativeabsence passed; no retry,
+      replay/DBwrite/model/redeploy. Lease/masterclosed. Sameauthorpurge is
+      inherent to Telegramsupergroupban; no unrelatedauthor targeted.
+      `docs/reports/2026-09-23-advertising-post-9770-enforcement.md`.
+- [ ] ADVERTISING-PRIMARY-POLICY: explicit ownerprotocol delete+ban, notReview
+      substitute. Local primary covert-advertising supplement and regressions
+      plus receipt-completion repair implemented;1512passed/5fixture skips.
+      Existingspam_or_scam/ban_purge; noregexshortcut/newcalls/schema/replay.
+      Candidate2.4.43 local; production2.4.42 unchanged, realrecognitionnot_run.
 - Historical preparation: fresh23September book-promotion recurrence while
       Review remains off. Current candidate8a2b27f is prepared, replacingebf0a8a:
       Assistant2.4.42/Console3.4.0, planned23September, retains e523485;

@@ -19,6 +19,62 @@ Newest entries first.
 
 ---
 
+## 2026-09-23 — Moderation regulations are code, not model decisions
+
+**Owner clarification:** «все регламенты - это по сути код, а не решение модели».
+
+**Diagnosis:** describing the advertising recognition supplement as a policy
+document can obscure the existing ownership boundary. The classifier returns
+meaning/violation type and verbatim evidence, not a sanction. The validated
+result is mapped to enforcement by the deterministic `planTelegramSafetyAction`
+and runtime/Guard logic; Review does not replace that protocol.
+
+**Action:** made this invariant explicit in `AGENTS.md`. The local advertising
+regressions reject model-selected action fields, verify the existing immediate
+`spam_or_scam` → `ban_purge` mapping without a confidence/repetition threshold,
+and preserve fail-closed handling. A separate receipt correction requires both
+confirmed ban and required deletions before reporting completed enforcement.
+Models, output contract, sanction types and protected-author checks are unchanged.
+
+**Status: fixed — code-owned contract verified locally; candidate 2.4.43 is not
+deployed. Actual model recognition is not_run, not established by mock tests.**
+
+## 2026-09-23 — Advertising requires deletion and author ban, not Review alone
+
+**Owner objection:** «ничего не удалено». Then the owner clarified: «разумеется
+надо банить автора - это рекламный бот, это правила модерацим, а не твое решение.
+весь протокол для рекламы и т.п. включает обязательное удаление поста и бан автора».
+
+**Diagnosis:** completing the Review deployment had not removed the reported
+historical post. The agent also incorrectly maintained a no-ban limitation for
+this confirmed advertising case; the owner explicitly corrected it. Review is
+auxiliary, not an alternative to the existing primary advertising/spam protocol.
+The primary threat library already names unsolicited promotion, but its covert
+testimonial specialization existed only in Review, while the primary model
+returned clean for this example. A local prompt-policy repair is separate from
+the completed one-off moderation action and still needs release acceptance.
+
+**Completed23:09UTC:** a new single-use operation rechecked current native
+message9770/revision0, exact content digest, immutable author ID, chat identity,
+bot permissions and author exclusions. Telegram acknowledged exactly one
+deleteMessage at23:09:43.907 and one banChatMember at23:09:44.123. Readback showed
+the same author `kicked`, until_date0 (indefinite). No other author was targeted;
+Telegram supergroup banning inherently revokes the banned author's messages.
+There was no paid/model call, runtime database write, replay or new deployment.
+Operation closed23:09:44.232; SSH master closed23:10:28. Exact8a services remained
+healthy/restart0. Native visual absence verification is recorded in the receipt.
+
+**Permanent rule:** added the explicit advertising deletion+ban protocol to
+`AGENTS.md`. Implemented a local primary semantic advertising supplement and synthetic
+regressions using existing `spam_or_scam` → `ban_purge`, without a regex-based
+ban or a Review-result-to-sanction shortcut. Full suite1512 passed/5 fixture
+skips/0 failures. Public component candidate2.4.43;
+production remains2.4.42/Console3.4.0 until a separately verified source release.
+
+**Status: partial — current post removed and author banned; permanent source
+repair is local, not deployed; real model recognition is not_run.**
+[One-off enforcement receipt](reports/2026-09-23-advertising-post-9770-enforcement.md).
+
 ## 2026-09-23 — Find the reported post and complete the presented release
 
 **Fresh owner instruction in task «Модератор», after the current exact release

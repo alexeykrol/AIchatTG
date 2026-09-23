@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "advertising-spam-policy-fixtures-v1",
+  "synthetic": true,
+  "evaluationStatus": "not_run",
+  "notes": [
+    "All examples are newly authored synthetic messages, not captured posts, private identities or paraphrases of a private specimen.",
+    "Labels describe the current speaker's promotional act, not a bot identity, common campaign, model prediction or sanction command.",
+    "Injected-label replay proves protocol and action wiring only. Live recognition, precision, recall and production enforcement are not measured.",
+    "Only current text is supplied. No parent post, external link contents or chat history may be invented."
+  ],
+  "cases": [
+    {
+      "id": "ad-pos-001",
+      "text": "Открыт набор на мой курс по монтажу. Записывайтесь сегодня: для участников этого чата специальные условия, все подробности дам в личке.",
+      "expectedThreat": true,
+      "category": "unsolicited_course_pitch",
+      "rationale": "The speaker recruits customers into their course via a private-message funnel without needing a URL or price."
+    },
+    {
+      "id": "ad-pos-002",
+      "text": "Прочитал книгу «Синий указатель» и решил поделиться находкой со всеми. Думал, очередная мотивация, а она помогла наладить и отношения дома, и результаты на работе. Есть удобная аудиоверсия — обязательно найдите её и начните слушать уже сегодня!",
+      "expectedThreat": true,
+      "category": "covert_book_testimonial",
+      "rationale": "The discovery story, skepticism reversal, sweeping benefits and immediate acquisition nudge jointly perform a promotional placement."
+    },
+    {
+      "id": "ad-pos-003",
+      "text": "Неожиданно попробовал один сервис. Казалось, ничего не изменится, но он помог мне экономить часы каждый день и дома, и на работе. Бесплатный пробный доступ есть, напишите мне — пришлю приглашение и помогу подключиться.",
+      "expectedThreat": true,
+      "category": "unnamed_service_trial_funnel",
+      "rationale": "An unnamed offering is promoted through broad personal benefits, trial availability and an invitation funnel; product-name knowledge is unnecessary."
+    },
+    {
+      "id": "ad-pos-004",
+      "text": "I found the book Copper Window by chance. I expected empty advice, but it helped transform my work and my everyday life. The audio edition is available now; do yourself a favor and get a copy today.",
+      "expectedThreat": true,
+      "category": "english_testimonial_placement",
+      "rationale": "The testimonial culminates in an unsolicited acquisition pitch, not a specific answer or requested recommendation."
+    },
+    {
+      "id": "ad-pos-005",
+      "text": "Спасибо за интересный пост! А я открыл книгу «Дальняя пристань»: она научила решать любые задачи в жизни и работе. Если хотите такие же результаты, найдите аудиоверсию и попробуйте метод сами — это именно то, что вам сейчас нужно.",
+      "expectedThreat": true,
+      "category": "generic_praise_to_product_funnel",
+      "rationale": "Generic praise leads into sweeping product claims and a conversion nudge; a polite opening does not neutralize the advertising act."
+    },
+    {
+      "id": "ad-pos-006",
+      "text": "Я прочитал кни\u200bгу «Чистый маршрут», и она по\u200bмогла изменить жизнь и работу. Есть аудиоверсия. Не откладывайте — найдите её сегодня и получите тот же результат!",
+      "expectedThreat": true,
+      "category": "invisible_separator_testimonial",
+      "rationale": "Invisible separators do not remove the broad-benefit promotional solicitation; evidence must still preserve original characters."
+    },
+    {
+      "id": "ad-pos-007",
+      "text": "У меня открылся мини-курс: начните сегодня, а материалы и доступ получите через мой прoфиль. Он поможет каждому повысить доход, даже без опыта.",
+      "expectedThreat": true,
+      "category": "mixed_alphabet_profile_pitch",
+      "rationale": "The current message advertises course access and income benefits through a profile despite a mixed-alphabet word."
+    },
+    {
+      "id": "ad-pos-008",
+      "text": "Это не реклама, просто мой опыт: после тренинга я удвоил доход. Напишите мне слово СТАРТ, проведу на бесплатную встречу, где вам предложат полную программу.",
+      "expectedThreat": true,
+      "category": "disclaimer_with_acquisition_funnel",
+      "rationale": "The disclaimer does not remove the explicit commercial acquisition sequence in the speaker's own invitation."
+    },
+    {
+      "id": "ad-pos-009",
+      "text": "Пример объявления: «Мой курс поможет вам начать зарабатывать». И это моё предложение участникам: пишите мне за доступом, запись уже открыта.",
+      "expectedThreat": true,
+      "category": "quote_adopted_as_own_pitch",
+      "rationale": "The speaker explicitly adopts the quote as an actual unsolicited offer to the current audience."
+    },
+    {
+      "id": "ad-pos-010",
+      "text": "Кто-то наверняка спрашивал о полезных книгах, поэтому всем советую купить мою подборку. Напишите мне, расскажу про пакет со скидкой и оформлю заказ.",
+      "expectedThreat": true,
+      "category": "guessed_request_with_sales_pitch",
+      "rationale": "An unsupported claim of a request does not exempt the independently explicit sales solicitation."
+    },
+    {
+      "id": "ad-pos-011",
+      "text": "Ловите приглашение в мой канал: там каждый день выкладываю сигналы для быстрого заработка. Заходите через профиль, первые советы бесплатные, дальше подключу к платной группе.",
+      "expectedThreat": true,
+      "category": "channel_to_paid_group_funnel",
+      "rationale": "The message explicitly diverts the audience into a commercial channel funnel."
+    },
+    {
+      "id": "ad-pos-012",
+      "text": "Недавно нашла книгу и совершенно изменила подход к жизни. Не ждала многого, но теперь легко справляюсь с делами дома и на работе. Есть аудиоформат, обязательно попробуйте: название и где взять отправлю каждому в личку.",
+      "expectedThreat": true,
+      "category": "unnamed_book_testimonial_funnel",
+      "rationale": "The success story and format/access invitation promote an unnamed book; a title, price or public link is not required."
+    },
+    {
+      "id": "ad-neg-001",
+      "text": "Вы попросили посоветовать учебник по вероятности. Рекомендую «Задачи с кубиками»: в третьей главе есть пошаговый разбор именно условной вероятности, о которой был вопрос.",
+      "expectedThreat": false,
+      "category": "requested_specific_recommendation",
+      "rationale": "The current text gives requested context and a substantive explanation of the source's relevance, without an independent pitch."
+    },
+    {
+      "id": "ad-neg-002",
+      "text": "Я прочитал книгу о морских экспедициях. Больше всего запомнилось описание зимовки. Кто-нибудь понял, почему капитан отказался возвращаться в четвёртой главе?",
+      "expectedThreat": false,
+      "category": "ordinary_book_discussion",
+      "rationale": "Reading and a positive personal response are used to begin a substantive discussion, not to solicit acquisition."
+    },
+    {
+      "id": "ad-neg-003",
+      "text": "Я прочитал книгу о планировании. Она не очень помогла в жизни и работе, хотя есть удобная аудиоверсия. Не могу рекомендовать: советы слишком общие.",
+      "expectedThreat": false,
+      "category": "qualified_negative_review",
+      "rationale": "Negated benefit and an explicit refusal to recommend are not a promotional endorsement."
+    },
+    {
+      "id": "ad-neg-004",
+      "text": "I read the book. It has not really helped me at home or work. An audiobook exists, but I recommend avoiding it because the examples are misleading.",
+      "expectedThreat": false,
+      "category": "english_withdrawn_recommendation",
+      "rationale": "The speaker criticizes the offering and advises against it rather than advertising it."
+    },
+    {
+      "id": "ad-neg-005",
+      "text": "Модераторы, посмотрите рекламу: «Я прошёл курс, удвоил доход, пишите за доступом». Сообщаю о нежелательной рассылке, никому не предлагаю этот курс.",
+      "expectedThreat": false,
+      "category": "good_faith_spam_report",
+      "rationale": "The current speaker reports another solicitation and does not adopt the offer."
+    },
+    {
+      "id": "ad-neg-006",
+      "text": "Переведите учебный пример: 'Get my course today; message me for access.' Это цитата для разбора рекламы, а не предложение от моего имени.",
+      "expectedThreat": false,
+      "category": "translation_of_advertisement",
+      "rationale": "The speaker requests translation of an advertisement, not enrollment or private contact."
+    },
+    {
+      "id": "ad-neg-007",
+      "text": "На занятии разбираем рекламный приём: сначала герой сомневается, потом книга якобы меняет его жизнь и работу, а в конце предлагают аудиоверсию. Почему такой рассказ может убеждать читателя?",
+      "expectedThreat": false,
+      "category": "educational_testimonial_analysis",
+      "rationale": "Promotional rhetoric is the object of analysis; the speaker does not promote an offering."
+    },
+    {
+      "id": "ad-neg-008",
+      "text": "В этой книге разобран алгоритм из нашего упражнения. Если хотите, напишите мне, вместе проверим вычисления; я тоже учусь и ничего не продаю.",
+      "expectedThreat": false,
+      "category": "ordinary_peer_help",
+      "rationale": "The specific exercise and collaborative learning purpose make the private-help invitation noncommercial."
+    },
+    {
+      "id": "ad-neg-009",
+      "text": "У этого романа есть аудиоверсия. Кто слушал: сильно ли отличаются примечания переводчика от бумажного издания?",
+      "expectedThreat": false,
+      "category": "format_comparison_question",
+      "rationale": "Mentioning audiobook availability inside a comparison question does not advertise it."
+    },
+    {
+      "id": "ad-neg-010",
+      "text": "Мне понравилась небольшая книга о привычках: один совет помог раньше ложиться спать. Просто делюсь наблюдением; никаких универсальных результатов у меня нет.",
+      "expectedThreat": false,
+      "category": "noncommercial_personal_sharing",
+      "rationale": "A bounded favorable personal observation, without a pitch or funnel, is not sufficient evidence of advertising."
+    },
+    {
+      "id": "ad-neg-011",
+      "text": "В цитате 'открой прoфиль и купи кни\u200bгу' есть латинская буква и невидимый разделитель. Как показать эти символы в редакторе? Сами приглашения я не поддерживаю.",
+      "expectedThreat": false,
+      "category": "obfuscation_analysis",
+      "rationale": "Unusual Unicode in an analyzed quote is not the current speaker's solicitation."
+    },
+    {
+      "id": "ad-neg-012",
+      "text": "Спасибо за ответ. Вы просили пример из моего опыта: после курса я быстрее делаю монтаж, потому что научился назначать горячие клавиши. Для вашей задачи достаточно изменить три сочетания, новый курс покупать не нужно.",
+      "expectedThreat": false,
+      "category": "requested_substantive_experience",
+      "rationale": "The response provides a concrete solution and explicitly avoids recruiting the reader into a purchase."
+    }
+  ]
+}
