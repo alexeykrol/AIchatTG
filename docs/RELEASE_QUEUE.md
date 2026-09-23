@@ -1,6 +1,6 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-19, production2.4.41/Console3.2.0. The root integrator owns shared integration
+Checkpoint: 2026-09-23 15:57UTC, production2.4.41/Console3.2.0. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
 ## Completed
@@ -45,7 +45,18 @@ Console3.2.0, exact source `f650fe87cabf5cf498a64d48907f7a924861cfd2`, lifecycle
 
 ## Position 1 — private Moderator review
 
-- **New candidate19.09, lifecycle `prepared`:** exact
+- **Current23.09 candidate, lifecycle `prepared`:** exact
+  `8a2b27fb215a19d26cf35b6244dcd4151b7cac4d`, Assistant2.4.42 planned23September /
+  Console3.4.0.1470passed/5skips, migration9/9/source guard and independent
+  regressions passed. Production still2.4.41/3.2.0, Reviewoff, retained binding
+  and empty store intact. New book-promotion example detected offline; narrow
+  DB locator is not exact-text proof. No new paidcall/deletion/ban/push/deploy.
+  Root owns next remote release; Moderator is read-only assurance, not a second
+  writer. New exact approval covers push/activation/retained privacy effects;
+  optional provider evaluation is separate, not executable and not a blocker.
+  [Report](reports/2026-09-23-moderator-recurrence-candidate.md).
+  [Exact gate](proposals/2026-09-23-review-8a2b27f-approval.md).
+- **Historical19.09 candidate, superseded:** exact
   `ebf0a8acd62974a49f0b99149709bcab196d8394`, Assistant2.4.42 / Console3.4.0,
   local only. Preserves e523485 safety repair; final1452passed/5skips,
   migration9/9, clean source guard and retained-store/timestamp regressions.

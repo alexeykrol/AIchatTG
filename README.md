@@ -11,9 +11,9 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
-**Production checkpoint19.09 22:07UTC:** Assistant2.4.41 / exacte523485 and
+**Production checkpoint23.09 15:57UTC:** Assistant2.4.41 / exacte523485 and
 Console3.2.0 / f650fe8 are healthy. The safety response contract is aligned;
-approved irrelevant-question copy is unchanged. Main is pushed but also
+approved irrelevant-question copy is unchanged. The deployed source is pushed; main also
 contains pending Review code; only the isolated runtime candidate was deployed.
 Review remains off. Its old7d99ae0 retry is superseded: a future candidate must
 retain this fix and pass new release/approval gates.
@@ -26,11 +26,13 @@ Native Telegram delivery/cleanup remains untested because the available actor
 is exempt. No new deploy; run closed.
 [Scope and evidence](docs/reports/2026-09-19-assistant-2.4.41-live-acceptance.md).
 
-**Local Review retry candidate:** Assistant2.4.42 / Console3.4.0, exactebf0a8a,
-lifecycle `prepared`. It preserves the deployed safety repair and passes the
-local gates; it is not pushed or deployed. Fresh approval must include the
+**Local Review retry candidate23.09:** Assistant2.4.42 / Console3.4.0, exact8a2b27f,
+lifecycle `prepared`. It preserves the deployed safety repair and passes1470
+tests/5explicit skips; it is not pushed or deployed. Fresh approval must include the
 retained Review boundary and current rollback baseline.
-[Candidate and remaining gates](docs/reports/2026-09-19-review-retry-candidate.md).
+[Candidate and remaining gates](docs/reports/2026-09-23-moderator-recurrence-candidate.md).
+The newly observed book-promotion example matches the offline detector, but
+Review remains off in production. This release is not a new porn-model fix.
 
 ## Architecture principle
 
@@ -133,7 +135,7 @@ and updated Help; bot behavior, rates and schema remain unchanged. At acceptance
 four of the last five questions had complete estimates averaging $0.0065898;
 the fifth full price remained unknown. Independent ordinary Chrome QA passed.
 
-**Pushed private Review candidate: Console 3.4.0 / Assistant 2.4.40 (`7d99ae0`).**
+**Historical17.09 private Review candidate, superseded: Console3.4.0 / Assistant2.4.40 (`7d99ae0`).**
 The previously pushed disabled Console3.3.0 slice is extended with a private
 runtime-to-Console collector, durable Review receipts, single-attempt private
 Telegram notifications and the covert book/testimonial detector. Primary
@@ -141,15 +143,16 @@ moderation continues on Review failure; gaps remain visible/unknown. Erasure
 removes linked identifiers without guaranteeing suppression on redelivery.
 The PO selected both policies; the private notification account was verified.
 Local tests use synthetic content and fake Telegram; this is not live delivery.
-Production remains2.4.39/Console3.2.0 until an exact activation lease covers the
-source, private binding, reviewer access, limits and rollback. See the
+At that checkpoint production remained2.4.39/Console3.2.0 pending a lease for
+the source, private binding, reviewer access, limits and rollback. See the
 [release queue](docs/RELEASE_QUEUE.md),
 [selected contract](docs/proposals/2026-09-17-moderation-live-bridge-selected-v3.md)
 and [activation procedure](docs/MODERATION_REVIEW_ACTIVATION.md).
 Root1427passed/5fixture-skips and migration9/9 passed. Exact local Linux images,
 source hashes, component versions/footer and image-local tests passed after
-isolating a stalled local Docker credential helper. Production activation is
-still pending. [Candidate receipt](docs/reports/2026-09-17-moderation-review-live-candidate.md).
+isolating a stalled local Docker credential helper. The later17September attempt
+rolled back; current candidate/production are at the top of this document.
+[Candidate receipt](docs/reports/2026-09-17-moderation-review-live-candidate.md).
 
 **Previous production image: `0b54148`** (started 2026-09-15 20:16:45 UTC;
 lifecycle `production-verified`). Menu-first Help and the owner's exact three-paragraph

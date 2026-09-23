@@ -5,11 +5,15 @@ approved attempt17.09 was rolled back on deployment-helper timestamp format;
 see [receipt](reports/2026-09-17-review-activation-rollback.md). Its lease is
 closed; the retained empty store must not be provisioned a second time.
 Current local candidate components: Console3.4.0 / Assistant2.4.42 (planned
-release date2026-09-19). Production baseline last verified19.09 22:34UTC:
+release date2026-09-23), exact8a2b27f, lifecycle `prepared`.
+Production baseline last verified23.09 15:57UTC:
 runtimee523485 / Assistant2.4.41, Consolef650fe8 /3.2.0. Refresh that baseline
 before any future approved remote operation. The old7d99ae0/2.4.40 candidate
 and its2.4.39 rollback are superseded: neither may remove the safety repair.
 This local procedure grants no SSH, deployment, notification or data authority.
+The [23September exact gate](proposals/2026-09-23-review-8a2b27f-approval.md)
+supersedes the expired19September source/date, not the retained17September
+binding. No paid test or new message deletion is included.
 
 ## Scope and boundaries
 

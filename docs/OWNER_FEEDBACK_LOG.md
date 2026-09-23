@@ -49,6 +49,17 @@ the expired19September proposal. No paid calls, new bans, deletion/replay9709,
 rebind, reprovision or backfill. Exact source/report and a single fresh release
 approval are required; Review activation must not be called a porn-model fix.
 
+**Follow-up23September16:10UTC:** controller native read-only inspection shows
+a fresh book-testimonial message; its transcription triggers the candidate
+Review detector. Narrow DB inspection found one matching-category14:08 entry
+with clean/resolved/provider-returned state, but transcription hashes differ:
+native identification remains provisional. Confirmed workflow gap is Reviewoff,
+not proof of a new porn-model failure. No private text/name is committed, no
+deletion/ban/replay performed. Current exact source8a2b27f is `prepared` with
+the [report](reports/2026-09-23-moderator-recurrence-candidate.md) and
+[new exact approval gate](proposals/2026-09-23-review-8a2b27f-approval.md).
+Optional paid recognition evaluation is not executable/included in that gate.
+
 ## 2026-09-20 — Finish the last unanswered question, not only the test
 
 **Owner instruction (Assistant task):** «а почему деплоя не было? сделай, и на

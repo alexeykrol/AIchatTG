@@ -1,9 +1,19 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-20 UTC
+**Last Updated:** 2026-09-23 UTC
 
 ## Текущее состояние
 
+- **Fresh Moderator recurrence23.09:** native read-only evidence is a book
+  promotion, detected by candidate offline, not a proved new porn-model miss.
+  Production15:57UTC remains2.4.41/3.2.0 healthy/restart0, Reviewoff and retained
+  binding/store intact/empty. Bounded14:08 message locator is a strong candidate,
+  not exact transcription-hash proof; no deletion/ban/backfill authorized.
+  Current source8a2b27f, lifecycle `prepared`, replaces19September retry;
+  planned23September,1470passed/5skips, migration9/9/source guard passed.
+  Private Review activation/push need the new exact gate; optional paid eval
+  remains not_run/not_executable and is excluded. Read-only master closed.
+  [Report](../docs/reports/2026-09-23-moderator-recurrence-candidate.md).
 - **Last unanswered question completed20.09 03:45UTC:** one operator edit
   replaced its historical fallback in place with approved out-of-coverage copy
   and2.4.41 footer. Telegram target/body and native quoted reply/full rendering
@@ -12,7 +22,7 @@
   Runtime2.4.41/Console3.2.0 unchanged healthy/restart0; lease/master closed.
   This is not a new automatic-ingress E2E test.
   [Receipt](../docs/reports/2026-09-20-assistant-last-question-completion.md).
-- **Review retry, lifecycle `prepared`:** local exactebf0a8a, Assistant2.4.42
+- **Historical19.09 Review retry, superseded:** local exactebf0a8a, Assistant2.4.42
   (planned19.09) / Console3.4.0, not pushed/deployed. Safety2.4.41 unchanged;
  1452passed/5skips, migration9/9, source guard and retained-store/timestamp
   regressions passed. Production remains2.4.41/3.2.0. Fresh approval must name

@@ -1,7 +1,7 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-19
+updated: 2026-09-23
 ---
 
 # Backlog
@@ -22,18 +22,24 @@ updated: 2026-09-19
       Isolated1164passed/5skips, integrated1450passed/5skips. Paid/live-model
       follow-up is partial as above; exact historical invalid field unknown.
       `docs/reports/2026-09-19-assistant-2.4.41-deployment.md`.
-- [ ] REVIEW-RELEASE-RETRY: old7d99ae0 same-source retry is superseded by2.4.41.
-      New local candidateebf0a8a is prepared: Assistant2.4.42/Console3.4.0,
-      retains e523485;1452passed/5skips, migration9/9/source guard passed.
+- [ ] REVIEW-RELEASE-RETRY: fresh23September book-promotion recurrence while
+      Review remains off. Current candidate8a2b27f is prepared, replacingebf0a8a:
+      Assistant2.4.42/Console3.4.0, planned23September, retains e523485;
+      1470passed/5skips, migration9/9/source guard passed. Five local false
+      positives fixed; exact new native identity still not reconciled.
       Not pushed/deployed. Fresh exact PO approval must accept retained17.09
       boundary; no supported rebind or reset. Remaining image/live gates in
-      `docs/reports/2026-09-19-review-retry-candidate.md`.
+      `docs/reports/2026-09-23-moderator-recurrence-candidate.md`.
       First activation failed on helper's millisecond release timestamp;
       exact-image regression accepts seconds. Validate full composed config
       inside image before recreation. Baseline2.4.41/3.2.0 healthy; retained
       Review store empty, no owner/socket; do not reprovision or replay.
       Comment9709 deletion completed once, never repeat. See
       `docs/reports/2026-09-17-review-activation-rollback.md`.
+- [ ] PORN-RECOGNITION-EVAL: optional provider-only8synthetic inputs/max8calls,
+      proposed ceilingUSD1. Offline helper9/9; dispatch marker/source/lease
+      wrapper not frozen. Not executable, not approved, not_run; excludes
+      Telegram/DB/sanctions and does not block the distinct Review release.
 - [x] CROSS-ROLE-JUDGEMENT-1: Assistant2.4.39/exact2c72e01,
       lifecycle `production-verified`; main integration762c251 pushed.
       Native-revision judge owner, strict verdict/enforcement/answer fences,
