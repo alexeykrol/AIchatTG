@@ -8,6 +8,17 @@ updated: 2026-09-24
 
 ## Next
 
+- [x] CURRENT-AD-9809:24September13:56UTC one delete+one immutable-author ban,
+      readbackkicked/until0 and native absence. No retries or earlier replays.
+- [ ] SOURCE-EVIDENCE-SELECTOR: real acceptance of approvedd8e stopped on3rd
+      case with threat_evidence_not_verbatim;2passed/17not_run,3calls,
+      upperUSD0.1778986. Replace provider-generated quotation with code-owned
+      source selection, preserving strict semantic/action gates. New source,
+      actual evaluation and deployment remain separate exact gates.
+      `docs/reports/2026-09-24-advertising-live-acceptance-stop.md`.
+      Local repair prepared as c019a35/2.4.45:1,542passed/5skips, exactsource
+      guard; no new actual-model call or deployment. New bounded decision:
+      `docs/proposals/2026-09-24-source-evidence-selector-approval.md`.
 - [x] CURRENT-PORN-9780-9799: exact owner-authorized deletion+ban24September
       11:09UTC, twoACKeach, readbackbothkicked/until0. No mutationretry;
       firstuncertainreceipt preserved and reconciled readonly. Production2.4.43

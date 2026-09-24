@@ -1,5 +1,12 @@
 # Short profile solicitation recurrence — 24 September 2026
 
+**Later checkpoint14:04UTC:** the exact conditional card was approved, but real
+acceptance failed on case3 (`threat_evidence_not_verbatim`); two porn inputs
+passed,17remaining not_run. No push/deploy. The additional advertisement9809
+was separately deleted and its author banned. See
+[closed execution](2026-09-24-advertising-live-acceptance-stop.md).
+The preparation statements below are historical, not the current test status.
+
 Lifecycle: `prepared`. Exact candidate
 `d8e5583eb7eef51659d627ed478e0cced3ae391c`, branch
 `codex/porn-profile-policy-v2-20260924`, component 2.4.44 / 2026-09-24.

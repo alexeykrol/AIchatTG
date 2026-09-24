@@ -1,8 +1,12 @@
 # Decision: actual-model acceptance then conditional runtime release
 
-Status: **proposed, not approved**. Candidate lifecycle: `prepared`.
-The 11:05UTC instruction to remove two current advertisements was executed
-separately; it is not authorization for the following paid test/deploy.
+Status: **approved, acceptance failed; execution closed**. Candidate lifecycle:
+`PO-approved`, not pushed or deployed. Approval arrived13:54UTC; the real test
+stopped on case3 at14:04UTC. Two passed, one invalid literal-evidence contract,
+17not_run. The all-pass release condition failed; no retry authority remains.
+[Execution evidence](../reports/2026-09-24-advertising-live-acceptance-stop.md).
+The earlier11:05UTC instruction to remove two current advertisements was
+executed separately and did not itself authorize this paid test/deploy.
 [Removal receipts](../reports/2026-09-24-two-porn-posts-enforcement.md).
 
 ## Exact candidate and baseline

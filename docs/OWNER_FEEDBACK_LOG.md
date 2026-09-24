@@ -19,6 +19,29 @@ Newest entries first.
 
 ---
 
+## 2026-09-24 UTC 13:54 — New advertising wave and repeated approval requests
+
+**Owner instruction in «Модератор»:** «давай, делай уже, там опятт новый скам,
+реклама. что ты тормозишь и по 20 раз просишь разрешение, когда я уже все дал.
+чтобы за 2 минуты все почистил»; then «там пошли сплошные боты - решай вопрос
+быстро». The exact30call/USD2 conditional candidate card was accepted, without
+asking the same approval again. This does not authorize indiscriminate bans.
+
+**Outcome:** the exact new advertisement9809 was removed13:56UTC and its author
+permanently banned; native absence and API readback verified. Earlier targets
+were not replayed. The subsequent paid acceptance stopped on case3: two actual
+porn examples passed, the actual book promotion failed strict verbatim-evidence
+validation. Three calls, upperUSD0.1778986,17cases not_run. The deployed job had
+the same rejection reason; exact rejected text was not retained. Do not claim
+a known Unicode/normalization cause or silently relax the evidence guard.
+
+**Repair:** local code-owned excerpt selection, followed by strict existing
+semantic validation and deterministic sanctions. Conditional deployment was
+not admitted after the failed test; runtime2.4.43 remains unchanged. No further
+paid retry under the closed lease. [Evidence](reports/2026-09-24-advertising-live-acceptance-stop.md).
+
+**Status:** partial — immediate cleanup passed; automatic repair not deployed.
+
 ## 2026-09-24 UTC 11:05 — Two current porn advertisements: remove immediately
 
 **Owner instruction in «Модератор»:** repeated the missed-ad report, then

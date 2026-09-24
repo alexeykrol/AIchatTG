@@ -14,8 +14,14 @@ publication to a Telegram channel — remain in the separate News Digest project
 **Open incident24.09:** confirmed short profile-solicitation false negative.
 Both current reported ads were separately removed and their authors banned
 at11:09UTC; this immediate action did not change the running source.
-Candidate2.4.44/d8e5583 is `prepared`, not pushed/deployed; real-model acceptance
-is still pending approval, not established by1,528passing local tests.
+Additional ad9809 was deleted and its author banned at13:56UTC.
+Candidate2.4.44/d8e5583 is `PO-approved`, not pushed/deployed: its authorized
+real-model test stopped on case3 with invalid literal evidence (2passed,
+17not_run). No retry/deployment admission remains. Local code repair2.4.45,
+exactc019a35, is `prepared`:1,542passed/5skips; source-derived evidence IDs,
+unchanged semantic enforcement. Actual evaluation and deployment not_run.
+[Candidate](docs/reports/2026-09-24-source-evidence-selector-candidate.md).
+[Real-test stop](docs/reports/2026-09-24-advertising-live-acceptance-stop.md).
 [Incident report](docs/reports/2026-09-24-porn-profile-recurrence.md).
 
 **Production checkpoint24.09 05:27UTC (unchanged at06:29UTC):** Assistant2.4.43, exactruntimeccea9af,

@@ -4,6 +4,19 @@
 
 ## Текущее состояние
 
+- **2.4.45 `prepared`:** exactc019a35a93ba46ebdf449e81b156a6043843b531.
+  Code-owned excerptIDs заменяют цитаты модели; неизменный semanticvalidator
+  проверяет исходные slices, санкции не выбирает модель.1,542passed/5skips,
+  selector9/9, scoped207/207, sourceguard. Новый реальный тест/push/deploy
+  not_run; [exact gate](../docs/proposals/2026-09-24-source-evidence-selector-approval.md).
+- **24.09 14:04UTC:** разрешённый реальный тест d8e/2.4.44 остановлен на
+  третьем случае: неточная цитата `threat_evidence_not_verbatim` (HTTP200/stop).
+  Два porn-примера passed,17not_run,3calls, upperUSD0.1778986. Lifecycle
+  `PO-approved`, но условие push/deploy не выполнено; повтор не разрешён.
+  Новая реклама9809 удалена13:56UTC, точный автор banned/kicked/until0;
+  прежние действия не повторялись. Runtime2.4.43/Console3.4.0 неизменны,
+  healthy/restart0. Leases/master закрыты. Ниже исторические checkpoints.
+  [Evidence](../docs/reports/2026-09-24-advertising-live-acceptance-stop.md).
 - **Срочная очистка24.09 11:09UTC завершена:** по отдельной прямой просьбеPO
   удалены9780/9799 и забанены их точные авторы.2delete+2banACK,
   readonly11:09:58bothkicked/until0; исходная uncertainквитанция сохранена,

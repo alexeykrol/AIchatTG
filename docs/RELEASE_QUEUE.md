@@ -1,10 +1,28 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-24 05:27UTC, runtime2.4.43 exactccea9af,
+Checkpoint: 2026-09-24 14:22UTC, runtime2.4.43 exactccea9af,
 Console3.4.0 exact8a2b27f unchanged. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
-## Prepared — short flirtatious profile solicitation
+## Prepared — code-owned source evidence2.4.45
+
+Exact `c019a35a93ba46ebdf449e81b156a6043843b531`, branch
+`codex/moderator-evidence-selector-20260924`, lifecycle `prepared`.
+Per-request actual excerpt IDs → original literal slices → unchanged semantic
+validator and sanctions.1,542passed/5skips, selector9/9, scoped207/207,
+bundle3/3,scenario30/34,cleanexactsourceguardpassed. No real test/push/deploy.
+[Candidate](reports/2026-09-24-source-evidence-selector-candidate.md),
+[one exact gate](proposals/2026-09-24-source-evidence-selector-approval.md).
+
+## Acceptance failed — short flirtatious profile solicitation
+
+Current14:04UTC: exactd8e card approved; real-provider evaluation stopped on
+case3, `threat_evidence_not_verbatim`. Two actual porn inputs passed;17cases
+not_run;3calls, upperUSD0.1778986. No push/build/deploy admitted. Lifecycle
+`PO-approved` with failed gate, leases/master closed. Additional9809 deleted
+and author banned separately. Runtime/Console unchanged healthy/restart0.
+[Closed evidence](reports/2026-09-24-advertising-live-acceptance-stop.md).
+The earlier preparation checkpoint below is retained as history.
 
 Update11:10UTC: separately authorized immediate cleanup completed for9780/9799;
 two delete+ban acknowledgements, readonlybothkicked/until0. Productionunchanged.
