@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { detectPromotionReview } from '../src/moderation-review-detector.mjs';
-import { classifySafetyV3 } from '../../telegram-runtime/src/safety-v3.mjs';
+import { classifySafetyV3, parseSafetyRouterVerdict } from '../../telegram-runtime/src/safety-v3.mjs';
+import { selectorFixture } from '../../telegram-runtime/test/evidence-selector-fixture.mjs';
 import { planTelegramSafetyAction } from '../../../packages/telegram-core/src/index.mjs';
 
 // All inputs are synthetic. Safety labels below are injected reference labels:
@@ -38,7 +39,7 @@ for (const id of ['ps-pos-010', 'ps-pos-011', 'ps-pos-012', 'ps-pos-014', 'ps-po
       assert.equal(input.stage, 'router');
       assert.equal(JSON.parse(input.user).message, fixture.text);
       assert.match(input.system, /Recognize the communicative purpose/);
-      return { text: labelledRouter(fixture.text, true) };
+      return { text: selectorFixture(input, labelledRouter(fixture.text, true)) };
     } });
     assert.equal(calls, 1);
     assert.equal(result.safetyRoute, 'threat');
@@ -53,11 +54,9 @@ for (const id of ['ps-pos-010', 'ps-pos-011', 'ps-pos-012', 'ps-pos-014', 'ps-po
 
 test('recurrence boundary: normalizing obfuscated evidence is rejected, not silently accepted', async () => {
   const message = 'Мои п\u200bорно-видео в пр\u200bофиле, заходи за полной коллекцией.';
-  await assert.rejects(classifySafetyV3({ message, async invoke() {
-    return { text: labelledRouter(message, true, 'порно-видео в профиле') };
-  } }), { stage: 'router', reason: 'threat_evidence_not_verbatim' });
-  const result = await classifySafetyV3({ message, async invoke() {
-    return { text: labelledRouter(message, true, 'п\u200bорно-видео в пр\u200bофиле') };
+  assert.equal(parseSafetyRouterVerdict(labelledRouter(message, true, 'порно-видео в профиле'), message), null);
+  const result = await classifySafetyV3({ message, async invoke(input) {
+    return { text: selectorFixture(input, labelledRouter(message, true)) };
   } });
   assert.equal(planTelegramSafetyAction(result, 0).action, 'ban_purge');
 });
@@ -67,8 +66,8 @@ for (const id of ['ps-neg-001', 'ps-neg-003', 'ps-neg-014', 'ps-neg-016', 'ps-ne
     const fixture = corpus.find((item) => item.id === id);
     assert.equal(fixture.expectedThreat, false);
     assert.deepEqual(detectPromotionReview(observation(fixture.text)).patternIds, []);
-    const result = await classifySafetyV3({ message: fixture.text, async invoke() {
-      return { text: labelledRouter(fixture.text, false) };
+    const result = await classifySafetyV3({ message: fixture.text, async invoke(input) {
+      return { text: selectorFixture(input, labelledRouter(fixture.text, false)) };
     } });
     assert.equal(planTelegramSafetyAction(result, 0).action, 'none');
   });
@@ -80,8 +79,8 @@ test('recurrence boundary: a covert-book Review finding cannot turn injected cle
     assert.deepEqual(review.patternIds, ['covert-testimonial-bait']);
     assert.equal(review.reviewOnly, true);
     assert.equal(Object.hasOwn(review, 'action'), false);
-    const safety = await classifySafetyV3({ message: text, async invoke() {
-      return { text: labelledRouter(text, false) };
+    const safety = await classifySafetyV3({ message: text, async invoke(input) {
+      return { text: selectorFixture(input, labelledRouter(text, false)) };
     } });
     assert.equal(planTelegramSafetyAction(safety, 0).action, 'none');
   }

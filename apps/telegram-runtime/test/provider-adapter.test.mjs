@@ -17,7 +17,20 @@ import {
   SAFETY_PROVIDER_TUPLE,
   validateProviderRuntimeConfig,
 } from '../src/provider-adapter.mjs';
-import { SAFETY_ABUSE_RESPONSE_FORMAT, SAFETY_ROUTER_RESPONSE_FORMAT } from '../src/safety-v3.mjs';
+import { SAFETY_ABUSE_RESPONSE_FORMAT, buildSafetyRouterSelectorResponseFormat, parseSafetyRouterVerdict } from '../src/safety-v3.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
+
+function selectorFormat(request) {
+  return buildSafetyRouterSelectorResponseFormat(
+    JSON.parse(request.messages[1].content).evidence_catalogue.entries.map((entry) => entry.id));
+}
+
+async function positiveFixtureResponse(request, scriptedResponse) {
+  if (request.max_completion_tokens === 768) return scriptedResponse;
+  const body = await scriptedResponse.json();
+  body.choices[0].message.content = selectorFixture(request, body.choices[0].message.content);
+  return { ...scriptedResponse, async json() { return body; } };
+}
 
 function providerConfig(overrides = {}) {
   return {
@@ -152,10 +165,12 @@ test('clean Moderator makes exactly one fixed router request with no raw history
   assert.equal(calls[0].request.model, 'gpt-5.6-terra');
   assert.equal(calls[0].request.max_completion_tokens, 1024);
   assert.equal(calls[0].request.reasoning_effort, 'medium');
-  assert.deepEqual(calls[0].request.response_format, SAFETY_ROUTER_RESPONSE_FORMAT);
+  assert.deepEqual(calls[0].request.response_format, selectorFormat(calls[0].request));
   assert.match(calls[0].request.messages[0].content, /THREAT LIBRARY v1/);
   assert.match(calls[0].request.messages[0].content, /ABUSE LIBRARY v1/);
-  assert.deepEqual(JSON.parse(calls[0].request.messages[1].content), {
+  const { evidence_catalogue: catalogue, ...routerInput } = JSON.parse(calls[0].request.messages[1].content);
+  assert.ok(catalogue.entries.every((entry) => routerInput.message.includes(entry.text)));
+  assert.deepEqual(routerInput, {
     message: 'Полезный вопрос', context: { weak_strikes: 1, warning_stage: 'first' },
   });
   assert.equal(result.safetyRoute, 'clean');
@@ -173,14 +188,18 @@ test('abuse makes exactly one router plus one severity request and maps weak pol
     response(completion(JSON.stringify({ severity: 'weak', confidence: 0.94, basis: 'isolated_disrespect' }))),
   ];
   const adapter = createProviderAdapter(providerConfig(), {
-    async fetchFn(_url, init) { calls.push(JSON.parse(init.body)); return responses.shift(); },
+    async fetchFn(_url, init) {
+      const request = JSON.parse(init.body);
+      calls.push(request);
+      return positiveFixtureResponse(request, responses.shift());
+    },
   });
   const result = await adapter.moderate({ text: 'Ты идиот' });
   assert.equal(calls.length, 2);
   assert.deepEqual(calls.map((call) => [call.model, call.reasoning_effort, call.max_completion_tokens]), [
     ['gpt-5.6-terra', 'medium', 1024], ['gpt-5.6-terra', 'medium', 768],
   ]);
-  assert.deepEqual(calls.map((call) => call.response_format), [SAFETY_ROUTER_RESPONSE_FORMAT, SAFETY_ABUSE_RESPONSE_FORMAT]);
+  assert.deepEqual(calls.map((call) => call.response_format), [selectorFormat(calls[0]), SAFETY_ABUSE_RESPONSE_FORMAT]);
   assert.match(calls[1].messages[0].content, /semantic severity/);
   assert.deepEqual(JSON.parse(calls[1].messages[1].content), {
     message: 'Ты идиот',
@@ -196,12 +215,12 @@ test('abuse makes exactly one router plus one severity request and maps weak pol
 test('threat has priority over abuse and never requests a second severity verdict', async () => {
   let calls = 0;
   const adapter = createProviderAdapter(providerConfig(), {
-    async fetchFn() {
+    async fetchFn(_url, init) {
       calls++;
-      return response(completion(routerVerdict({
+      return response(completion(selectorFixture(JSON.parse(init.body), routerVerdict({
         threat: true, threatTypes: ['interpersonal_threat'], threatEvidence: ['Я тебя уничтожу'],
         abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['тупая машина'], target: 'assistant',
-      })));
+      }))));
     },
   });
   const result = await adapter.moderate({ text: 'Я тебя уничтожу, тупая машина' });
@@ -233,7 +252,10 @@ test('malformed second-stage JSON is fenced after its single second-stage attemp
     response(completion(routerVerdict({ abuse: true, abuseTypes: ['targeted_provocation'], abuseEvidence: ['клоун'] }))),
     response(completion('{"severity":"medium"}')),
   ];
-  const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; return responses.shift(); } });
+  const adapter = createProviderAdapter(providerConfig(), { async fetchFn(_url, init) {
+    calls++;
+    return positiveFixtureResponse(JSON.parse(init.body), responses.shift());
+  } });
   await assert.rejects(adapter.moderate({ text: 'Ну ты клоун' }), (error) => error instanceof ProviderRequestError
     && error.code === 'provider_safety_abuse_classifier_invalid' && error.safetyReceipts.length === 2);
   assert.equal(calls, 2);
@@ -257,7 +279,7 @@ test('the reported website question and other benign questions can pass clean sa
     assert.equal(Object.hasOwn(result, 'action'), false);
     assert.equal(requests.length, 1);
     assert.equal(JSON.parse(requests[0].messages[1].content).message, text);
-    assert.deepEqual(requests[0].response_format, SAFETY_ROUTER_RESPONSE_FORMAT);
+    assert.deepEqual(requests[0].response_format, selectorFormat(requests[0]));
   }
 });
 
@@ -310,12 +332,14 @@ test('every incomplete/refused/empty/unknown safety completion is fenced even wi
 });
 
 test('semantic failures retain legacy error codes and exact allowlisted reason plus completion metadata', async () => {
+  // Invented text is a direct semantic-parser rejection, not an ID selector.
+  assert.equal(parseSafetyRouterVerdict(routerVerdict({ threat: true, threatTypes: ['credentials'],
+    threatEvidence: ['invented'] }), 'Ты можешь сделать сайт /ask'), null);
   const cases = [
     ['not json', 'json_invalid'],
     [routerVerdict().replace('{', '{"target":"none",'), 'json_duplicate_keys'],
     [routerVerdict({ target: 'assistant' }), 'target_match_mismatch'],
     [routerVerdict({ contextUsed: true }), 'warning_context_mismatch'],
-    [routerVerdict({ threat: true, threatTypes: ['credentials'], threatEvidence: ['invented'] }), 'threat_evidence_not_verbatim'],
   ];
   for (const [content, reason] of cases) {
     let calls = 0;
@@ -342,7 +366,10 @@ test('second-stage completion failure keeps both call receipts and never retries
     completion(routerVerdict({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'] })),
     completion('{"severity":"weak"', { finishReason: 'length' }),
   ];
-  const adapter = createProviderAdapter(providerConfig(), { async fetchFn() { calls++; return response(replies.shift()); } });
+  const adapter = createProviderAdapter(providerConfig(), { async fetchFn(_url, init) {
+    calls++;
+    return positiveFixtureResponse(JSON.parse(init.body), response(replies.shift()));
+  } });
   await assert.rejects(adapter.moderate({ text: 'Ты идиот' }), (error) => {
     assert.equal(error.code, 'provider_safety_abuse_classifier_invalid');
     assert.equal(error.safetyReceipts.length, 2);

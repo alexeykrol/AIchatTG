@@ -19,6 +19,7 @@ import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
 import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from '../src/assistant-release.mjs';
 import { classifySafetyV3 } from '../src/safety-v3.mjs';
 import { safetyVerdict } from './safety-fixture.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 function config(overrides = {}) {
   return {
@@ -1616,11 +1617,11 @@ test('suspected porn spam with low confidence immediately bans and purges once w
         modelCalls++;
         assert.equal(input.stage, 'router');
         assert.match(input.system, /PORN-SPAM POLICY v2/);
-        return { text: JSON.stringify({
+        return { text: selectorFixture(input, JSON.stringify({
           threat: { match: true, types: ['spam_or_scam'], confidence: 0.35, evidence: ['adult-only private gallery'] },
           abuse: { match: false, types: [], confidence: 0.99, evidence: [] },
           target: 'group', context_used: false,
-        }) };
+        })) };
       } });
     },
   };

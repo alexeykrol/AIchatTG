@@ -9,6 +9,7 @@ import {
   SAFETY_MODEL,
   SAFETY_REASONING_EFFORT,
   SAFETY_ROUTER_RESPONSE_FORMAT,
+  buildSafetyRouterSelectorResponseFormat,
   SAFETY_TARGETS,
   SAFETY_VENDOR,
   SafetyV3ContractError,
@@ -19,6 +20,7 @@ import {
   parseAbuseSeverityVerdict,
   parseSafetyRouterVerdict,
 } from '../src/safety-v3.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 function routerJson({
   threat = false, threatTypes = [], threatConfidence = 0.99, threatEvidence = [],
@@ -85,6 +87,20 @@ test('wire schemas are strict closed objects with the same keys and enums as sem
   assert.throws(() => { router.properties.target.enum.push('unknown'); }, TypeError);
 });
 
+test('selector schema exposes only current IDs and leaves canonical evidence schema unchanged', () => {
+  const ids = ['E0000', 'E0001'];
+  const selected = buildSafetyRouterSelectorResponseFormat(ids);
+  assert.equal(selected.json_schema.name, 'telegram_safety_router_selector_v1');
+  assert.equal(selected.json_schema.strict, true);
+  for (const domain of ['threat', 'abuse']) {
+    assert.deepEqual(selected.json_schema.schema.properties[domain].properties.evidence.items,
+      { type: 'string', enum: ids });
+    assert.deepEqual(SAFETY_ROUTER_RESPONSE_FORMAT.json_schema.schema.properties[domain].properties.evidence.items,
+      { type: 'string', minLength: 1, maxLength: 240 });
+  }
+  assert.equal(JSON.stringify(selected).includes('private message'), false);
+});
+
 test('router parser rejects wrappers, duplicate keys, unknown enums and invented evidence', () => {
   const clean = routerJson();
   assert.equal(parseSafetyRouterVerdict(`\`\`\`json\n${clean}\n\`\`\``, ''), null);
@@ -109,13 +125,16 @@ test('classification uses exact Terra/OpenAI/medium and routes clean in one call
     message: 'Полезный вопрос по теме', context: { currentWeakStrikes: 1, rawHistory: 'do not admit' },
     async invoke(input) {
       calls.push(input);
-      return { text: routerJson(), receipt: receipt(input.stage, 100, 10) };
+      return { text: selectorFixture(input, routerJson()), receipt: receipt(input.stage, 100, 10) };
     },
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].maxOutputTokens, 1024);
-  assert.deepEqual(calls[0].responseFormat, SAFETY_ROUTER_RESPONSE_FORMAT);
-  assert.deepEqual(JSON.parse(calls[0].user), {
+  assert.deepEqual(calls[0].responseFormat, buildSafetyRouterSelectorResponseFormat(
+    JSON.parse(calls[0].user).evidence_catalogue.entries.map((entry) => entry.id)));
+  const { evidence_catalogue: catalogue, ...routerInput } = JSON.parse(calls[0].user);
+  assert.ok(catalogue.entries.every((entry) => routerInput.message.includes(entry.text)));
+  assert.deepEqual(routerInput, {
     message: 'Полезный вопрос по теме', context: { weak_strikes: 1, warning_stage: 'first' },
   });
   assert.equal(calls[0].user.includes('do not admit'), false);
@@ -136,7 +155,10 @@ test('the abuse route bills both stages, and a stage without a receipt leaves nu
     { text: routerJson({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'], abuseConfidence: 0.96 }), receipt: receipt('router', 120, 20) },
     { text: '{"severity":"weak","confidence":0.94,"basis":"isolated_disrespect"}', receipt: receipt('abuse_classifier', 80, 12) },
   ];
-  const billed = await classifySafetyV3({ message: 'Ты идиот', async invoke() { return replies.shift(); } });
+  const billed = await classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+    const reply = replies.shift();
+    return { ...reply, text: selectorFixture(input, reply.text) };
+  } });
   assert.deepEqual({
     calls: billed.safetyTrace.usage.calls,
     inputTokens: billed.safetyTrace.usage.inputTokens,
@@ -147,7 +169,7 @@ test('the abuse route bills both stages, and a stage without a receipt leaves nu
   // Провайдер не назвал расход ни на одной ступени: вызовы были, цена
   // неизвестна. Ноль здесь сделал бы пробел учёта неотличимым от бесплатной
   // модерации.
-  const silent = await classifySafetyV3({ message: 'Полезный вопрос', async invoke() { return { text: routerJson() }; } });
+  const silent = await classifySafetyV3({ message: 'Полезный вопрос', async invoke(input) { return { text: selectorFixture(input, routerJson()) }; } });
   assert.deepEqual({
     calls: silent.safetyTrace.usage.calls,
     inputTokens: silent.safetyTrace.usage.inputTokens,
@@ -162,9 +184,14 @@ test('abuse calls the 768-token classifier exactly once and validates basis agai
     { text: routerJson({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'], abuseConfidence: 0.96 }), receipt: receipt('router', 120, 20) },
     { text: '{"severity":"weak","confidence":0.94,"basis":"isolated_disrespect"}', receipt: receipt('abuse_classifier', 80, 12) },
   ];
-  const result = await classifySafetyV3({ message: 'Ты идиот', async invoke(input) { calls.push(input); return replies.shift(); } });
+  const result = await classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+    calls.push(input);
+    const reply = replies.shift();
+    return { ...reply, text: selectorFixture(input, reply.text) };
+  } });
   assert.deepEqual(calls.map((input) => input.maxOutputTokens), [1024, 768]);
-  assert.deepEqual(calls.map((input) => input.responseFormat), [SAFETY_ROUTER_RESPONSE_FORMAT, SAFETY_ABUSE_RESPONSE_FORMAT]);
+  assert.deepEqual(calls.map((input) => input.responseFormat), [buildSafetyRouterSelectorResponseFormat(
+    JSON.parse(calls[0].user).evidence_catalogue.entries.map((entry) => entry.id)), SAFETY_ABUSE_RESPONSE_FORMAT]);
   assert.deepEqual({ route: result.safetyRoute, level: result.abuseLevel, confidence: result.confidence, quote: result.quote }, {
     route: 'abuse', level: 'weak', confidence: 0.94, quote: 'идиот',
   });
@@ -172,7 +199,10 @@ test('abuse calls the 768-token classifier exactly once and validates basis agai
     { text: routerJson({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'] }), receipt: receipt('router') },
     { text: '{"severity":"strong","confidence":0.8,"basis":"sexual_harassment"}', receipt: receipt('abuse_classifier') },
   ];
-  await assert.rejects(classifySafetyV3({ message: 'Ты идиот', async invoke() { return invalid.shift(); } }),
+  await assert.rejects(classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+    const reply = invalid.shift();
+    return { ...reply, text: selectorFixture(input, reply.text) };
+  } }),
     (error) => error instanceof SafetyV3ContractError && error.stage === 'abuse_classifier');
 });
 
@@ -180,12 +210,12 @@ test('threat wins priority and warning disputes require code-owned prior warning
   let calls = 0;
   const threat = await classifySafetyV3({
     message: 'Я тебя уничтожу, тупая машина',
-    async invoke() {
+    async invoke(input) {
       calls++;
-      return { text: routerJson({
+      return { text: selectorFixture(input, routerJson({
         threat: true, threatTypes: ['interpersonal_threat'], threatEvidence: ['Я тебя уничтожу'],
         abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['тупая машина'], target: 'assistant',
-      }), receipt: receipt('router') };
+      })), receipt: receipt('router') };
     },
   });
   assert.equal(calls, 1);
@@ -193,11 +223,11 @@ test('threat wins priority and warning disputes require code-owned prior warning
   const warning = routerJson({
     abuse: true, abuseTypes: ['warning_dispute'], abuseEvidence: ['предупреждение'], target: 'author', contextUsed: true,
   });
-  await assert.rejects(classifySafetyV3({ message: 'Я обсуждаю предупреждение вообще', async invoke() { return { text: warning, receipt: receipt('router') }; } }),
+  await assert.rejects(classifySafetyV3({ message: 'Я обсуждаю предупреждение вообще', async invoke(input) { return { text: selectorFixture(input, warning), receipt: receipt('router') }; } }),
     (error) => error instanceof SafetyV3ContractError && error.stage === 'router');
 });
 
-test('semantic checks remain fail-closed with exact content-free rejection categories', async () => {
+test('unchanged semantic parser rejects every original malformed semantic fixture directly', () => {
   const mutate = (change) => {
     const parsed = JSON.parse(routerJson());
     change(parsed);
@@ -210,9 +240,6 @@ test('semantic checks remain fail-closed with exact content-free rejection categ
     ['target_invalid', mutate((v) => { v.target = 'private value'; })],
     ['target_match_mismatch', routerJson({ target: 'assistant' })],
     ['context_used_invalid', mutate((v) => { v.context_used = 'private value'; })],
-    ['warning_context_mismatch', routerJson({ contextUsed: true })],
-    ['warning_context_mismatch', routerJson({ abuse: true, abuseTypes: ['warning_dispute'], abuseEvidence: ['идиот'] })],
-    ['warning_context_unavailable', routerJson({ abuse: true, abuseTypes: ['warning_dispute'], abuseEvidence: ['идиот'], contextUsed: true })],
     ['overlapping_evidence', routerJson({ threat: true, threatTypes: ['interpersonal_threat'], threatEvidence: ['идиот'], abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'] })],
   ];
   for (const [domain, type] of [['threat', 'interpersonal_threat'], ['abuse', 'targeted_insult']]) {
@@ -229,18 +256,76 @@ test('semantic checks remain fail-closed with exact content-free rejection categ
     );
   }
   for (const [reason, text] of cases) {
+    assert.equal(parseSafetyRouterVerdict(text, 'Ты идиот'), null, reason);
+    assert.ok(SAFETY_CONTRACT_REJECTION_REASONS.includes(reason));
+  }
+});
+
+test('selector pipeline preserves warning-context rejection and one-call fence', async () => {
+  for (const [reason, text] of [
+    ['warning_context_mismatch', routerJson({ contextUsed: true })],
+    ['warning_context_mismatch', routerJson({ abuse: true, abuseTypes: ['warning_dispute'], abuseEvidence: ['идиот'] })],
+    ['warning_context_unavailable', routerJson({ abuse: true, abuseTypes: ['warning_dispute'], abuseEvidence: ['идиот'], contextUsed: true })],
+  ]) {
     let calls = 0;
-    await assert.rejects(classifySafetyV3({
-      message: 'Ты идиот', async invoke() { calls++; return { text }; },
-    }), (error) => {
-      assert.ok(error instanceof SafetyV3ContractError);
-      assert.equal(error.stage, 'router');
-      assert.equal(error.reason, reason);
-      assert.ok(SAFETY_CONTRACT_REJECTION_REASONS.includes(error.reason));
-      assert.equal(error.message.includes('private'), false);
-      return true;
-    });
-    assert.equal(calls, 1, reason);
+    await assert.rejects(classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+      calls++;
+      return { text: selectorFixture(input, text) };
+    } }), (error) => error instanceof SafetyV3ContractError && error.reason === reason && error.stage === 'router');
+    assert.equal(calls, 1);
+  }
+});
+
+test('selector pipeline rejects raw text, absent IDs, duplicate IDs and malformed lists without retry', async () => {
+  for (const domain of ['threat', 'abuse']) {
+    for (const [reason, evidence] of [
+      ['selector_evidence_id_unknown', ['private invented excerpt']],
+      ['selector_evidence_id_unknown', ['идиот']], // Even a verbatim raw quote is no longer wire evidence.
+      ['selector_evidence_id_unknown', ['E0127']], // Static ID, absent from this short request.
+      ['selector_evidence_id_unknown', [null]],
+      ['selector_evidence_id_duplicate', ['E0000', 'E0000']],
+      ['selector_evidence_ids_invalid', null],
+      ['selector_evidence_ids_invalid', 'E0000'],
+      ['selector_evidence_ids_invalid', ['E0000', 'E0000', 'E0000', 'E0000']],
+    ]) {
+      let calls = 0;
+      await assert.rejects(classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+        calls++;
+        const wire = JSON.parse(selectorFixture(input, routerJson()));
+        wire[domain].evidence = evidence;
+        return { text: JSON.stringify(wire) };
+      } }), (error) => {
+        assert.ok(error instanceof SafetyV3ContractError);
+        assert.equal(error.stage, 'router');
+        assert.equal(error.reason, reason);
+        assert.ok(SAFETY_CONTRACT_REJECTION_REASONS.includes(reason));
+        assert.equal(error.message.includes('private'), false);
+        assert.equal(error.message.includes('идиот'), false);
+        return true;
+      });
+      assert.equal(calls, 1);
+    }
+  }
+});
+
+test('resolved selectors still pass through cross-field semantic rejection', async () => {
+  for (const [reason, change] of [
+    ['target_match_mismatch', (wire) => { wire.target = 'none'; }],
+    ['threat_types_invalid', (wire) => { wire.threat.types = ['private unknown type']; }],
+    ['threat_match_types_mismatch', (wire) => { wire.threat.types = []; }],
+    ['threat_match_evidence_mismatch', (wire) => { wire.threat.evidence = []; }],
+    ['overlapping_evidence', (wire) => { wire.abuse = { ...wire.threat, types: ['targeted_insult'] }; }],
+  ]) {
+    let calls = 0;
+    await assert.rejects(classifySafetyV3({ message: 'Ты идиот', async invoke(input) {
+      calls++;
+      const wire = JSON.parse(selectorFixture(input, routerJson({
+        threat: true, threatTypes: ['interpersonal_threat'], threatEvidence: ['идиот'],
+      })));
+      change(wire);
+      return { text: JSON.stringify(wire) };
+    } }), (error) => error instanceof SafetyV3ContractError && error.reason === reason && error.stage === 'router');
+    assert.equal(calls, 1);
   }
 });
 
@@ -258,7 +343,7 @@ test('severity schema still requires cross-field and router-type semantic valida
     const replies = [routerJson({ abuse: true, abuseTypes: ['targeted_insult'], abuseEvidence: ['идиот'] }), JSON.stringify(severity)];
     let calls = 0;
     await assert.rejects(classifySafetyV3({
-      message: 'Ты идиот', async invoke() { calls++; return { text: replies.shift() }; },
+      message: 'Ты идиот', async invoke(input) { calls++; return { text: selectorFixture(input, replies.shift()) }; },
     }), (error) => {
       assert.ok(error instanceof SafetyV3ContractError);
       assert.equal(error.stage, 'abuse_classifier');

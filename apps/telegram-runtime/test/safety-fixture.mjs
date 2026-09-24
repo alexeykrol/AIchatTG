@@ -1,4 +1,5 @@
 import { classifySafetyV3 } from '../src/safety-v3.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 function routerJson({
   threat = false, threatTypes = [], threatEvidence = [],
@@ -59,6 +60,6 @@ export async function safetyVerdict({
   return classifySafetyV3({
     message,
     context,
-    async invoke() { return { text: replies.shift() }; },
+    async invoke(input) { return { text: selectorFixture(input, replies.shift()) }; },
   });
 }

@@ -8,8 +8,10 @@ import {
   SAFETY_REASONING_EFFORT, SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
   buildSafetyRouterSystem, classifySafetyV3,
 } from '../src/safety-v3.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 const policy = readFileSync(new URL('../src/safety-artifacts/porn-spam-policy-v2.md', import.meta.url), 'utf8').trim();
+const selectorPolicy = readFileSync(new URL('../src/safety-artifacts/evidence-selector-v1.md', import.meta.url), 'utf8').trim();
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/porn-spam-policy-v1.json', import.meta.url), 'utf8'));
 const cases = Array.isArray(fixture) ? fixture : fixture.cases;
 const funnels = JSON.parse(readFileSync(new URL('./fixtures/porn-profile-funnels-v2.json', import.meta.url), 'utf8'));
@@ -26,7 +28,8 @@ function labelledVerdict(text, expectedThreat, confidence = 0.35) {
 test('the semantic porn-spam supplement is loaded verbatim without changing provider settings', () => {
   const system = buildSafetyRouterSystem();
   assert.equal(PORN_SPAM_POLICY_VERSION, 'porn-spam-policy-v2');
-  assert.ok(system.endsWith(policy));
+  assert.ok(system.includes(policy));
+  assert.ok(system.endsWith(selectorPolicy));
   assert.equal(system.split('--- PORN-SPAM POLICY v2 ---').length, 2);
   assert.match(policy, /spam_or_scam/);
   assert.match(policy, /Suspicion is sufficient/);
@@ -73,7 +76,7 @@ test('labelled corpus replays through the existing action contract (mocked, not 
         assert.equal(input.stage, 'router');
         assert.ok(input.system.includes(policy));
         assert.equal(JSON.parse(input.user).message, item.text);
-        return { text: labelledVerdict(item.text, item.expectedThreat) };
+        return { text: selectorFixture(input, labelledVerdict(item.text, item.expectedThreat)) };
       } });
       assert.equal(calls, 1);
       assert.equal(result.safetyRoute, item.expectedThreat ? 'threat' : 'clean');
@@ -88,8 +91,8 @@ test('labelled corpus replays through the existing action contract (mocked, not 
 test('valid suspected-spam verdicts have no hidden confidence or warning threshold', async () => {
   const message = 'Synthetic unsolicited adult-gallery invitation.';
   for (const confidence of [0, 0.35, 1]) {
-    const result = await classifySafetyV3({ message, async invoke() {
-      return { text: labelledVerdict(message, true, confidence) };
+    const result = await classifySafetyV3({ message, async invoke(input) {
+      return { text: selectorFixture(input, labelledVerdict(message, true, confidence)) };
     } });
     for (const strikes of [0, 1, 2]) {
       const plan = planTelegramSafetyAction(result, strikes);
@@ -123,9 +126,10 @@ test('v2 injected labels preserve the action contract, not proof of model recogn
       const result = await classifySafetyV3({ message: item.text, async invoke(input) {
         calls++;
         assert.equal(input.stage, 'router');
-        assert.ok(input.system.endsWith(policy));
+        assert.ok(input.system.includes(policy));
+        assert.ok(input.system.endsWith(selectorPolicy));
         assert.equal(JSON.parse(input.user).message, item.text);
-        return { text: labelledVerdict(item.text, item.expectedThreat) };
+        return { text: selectorFixture(input, labelledVerdict(item.text, item.expectedThreat)) };
       } });
       assert.equal(calls, 1);
       assert.equal(result.safetyRoute, item.expectedThreat ? 'threat' : 'clean');

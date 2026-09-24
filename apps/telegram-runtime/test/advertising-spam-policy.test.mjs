@@ -12,8 +12,9 @@ import {
   ADVERTISING_SPAM_POLICY_VERSION, SAFETY_MODEL, SAFETY_VENDOR,
   SAFETY_REASONING_EFFORT, SAFETY_ROUTER_MAX_OUTPUT_TOKENS,
   SAFETY_ROUTER_RESPONSE_FORMAT, THREAT_TYPES, buildSafetyRouterSystem,
-  classifySafetyV3,
+  classifySafetyV3, parseSafetyRouterVerdict,
 } from '../src/safety-v3.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 const artifact = (name) => readFileSync(new URL(`../src/safety-artifacts/${name}.md`, import.meta.url), 'utf8').trim();
 const policy = artifact('advertising-spam-policy-v1');
@@ -36,7 +37,8 @@ test('advertising supplement is loaded verbatim under the existing primary safet
   assert.equal(system.split('--- ADVERTISING-SPAM POLICY v1 ---').length, 2);
   assert.ok(system.includes(policy));
   assert.ok(system.includes(artifact('threat-library-v1')));
-  assert.ok(system.endsWith(artifact('porn-spam-policy-v2')));
+  assert.ok(system.includes(artifact('porn-spam-policy-v2')));
+  assert.ok(system.endsWith(artifact('evidence-selector-v1')));
   assert.match(policy, /unsolicited advertising/);
   assert.match(policy, /Do not require a URL, explicit price/);
   assert.match(policy, /A single current message can establish advertising spam/);
@@ -77,7 +79,7 @@ test('advertising labelled corpus uses immediate existing actions and fingerprin
         assert.ok(input.system.includes(policy));
         assert.equal(JSON.parse(input.user).message, item.text);
         assert.equal(input.maxOutputTokens, 1024);
-        return { text: labelledVerdict(item.text, item.expectedThreat) };
+        return { text: selectorFixture(input, labelledVerdict(item.text, item.expectedThreat)) };
       } });
       assert.equal(calls, 1);
       assert.equal(result.safetyRoute, item.expectedThreat ? 'threat' : 'clean');
@@ -98,8 +100,8 @@ test('advertising labelled corpus uses immediate existing actions and fingerprin
 
 test('valid advertising threat does not acquire a confidence, repeat or Review wait threshold', async () => {
   for (const confidence of [0, 0.35, 1]) {
-    const result = await classifySafetyV3({ message: sample, async invoke() {
-      return { text: labelledVerdict(sample, true, confidence) };
+    const result = await classifySafetyV3({ message: sample, async invoke(input) {
+      return { text: selectorFixture(input, labelledVerdict(sample, true, confidence)) };
     } });
     assert.equal(planTelegramSafetyAction(result, 0).action, 'ban_purge');
     assert.equal(Object.hasOwn(result, 'action'), false);
@@ -112,7 +114,7 @@ test('Review hints and unseen parent context cannot replace the current-message 
     context: { review: { patternIds: ['covert-testimonial-bait'] }, parentText: 'A different topic.' },
     async invoke(input) {
       assert.deepEqual(JSON.parse(input.user).context, { weak_strikes: 0, warning_stage: 'none' });
-      return { text: labelledVerdict(sample, false) };
+      return { text: selectorFixture(input, labelledVerdict(sample, false)) };
     },
   });
   assert.equal(planTelegramSafetyAction(result, 0).action, 'none');
@@ -122,12 +124,10 @@ test('advertising evidence remains verbatim and additional model action fields a
   const message = 'Купите кни\u200bгу; доступ через пр\u200bофиль.';
   const changedEvidence = JSON.parse(labelledVerdict(message, true));
   changedEvidence.threat.evidence = ['Купите книгу'];
-  await assert.rejects(classifySafetyV3({ message, async invoke() {
-    return { text: JSON.stringify(changedEvidence) };
-  } }), { stage: 'router', reason: 'threat_evidence_not_verbatim' });
+  assert.equal(parseSafetyRouterVerdict(JSON.stringify(changedEvidence), message), null);
   const extraAction = { ...JSON.parse(labelledVerdict(message, true)), action: 'ban' };
-  await assert.rejects(classifySafetyV3({ message, async invoke() {
-    return { text: JSON.stringify(extraAction) };
+  await assert.rejects(classifySafetyV3({ message, async invoke(input) {
+    return { text: selectorFixture(input, JSON.stringify(extraAction)) };
   } }), { stage: 'router', reason: 'router_keys_invalid' });
 });
 
@@ -178,7 +178,7 @@ test('injected advertising verdict bans and deletes once for a non-bot without R
   const h = runtimeHarness(t, async (_url, options) => {
     calls++;
     assert.ok(JSON.parse(options.body).messages[0].content.includes(policy));
-    return response(labelledVerdict(sample, true));
+    return response(selectorFixture(JSON.parse(options.body), labelledVerdict(sample, true)));
   });
   const result = await h.runtime.handleUpdate('moderator', update());
   assert.equal(result.action, 'ban_purge');

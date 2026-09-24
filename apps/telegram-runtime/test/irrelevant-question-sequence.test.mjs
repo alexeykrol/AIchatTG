@@ -13,6 +13,7 @@ import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
 import { createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
+import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 // Exercise the actual provider parser, runtime, durable fences and Telegram
 // rendering with scripted transport responses. These tests prove plumbing and
@@ -92,7 +93,9 @@ function harness(t, scriptedResponses) {
         async json() {
           return {
             model: request.model,
-            choices: [{ finish_reason: 'stop', message: { content: next.content } }],
+            choices: [{ finish_reason: 'stop', message: {
+              content: stage === 'safety' ? selectorFixture(request, next.content) : next.content,
+            } }],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
           };
         },

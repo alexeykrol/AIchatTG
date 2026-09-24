@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createEvidenceSelector, EvidenceSelectorError, EVIDENCE_SELECTOR_IDS } from './safety-evidence-selector.mjs';
 
 // These are code-owned safety invariants inherited from the deployed Moderator
 // policy. Environment configuration can enable the provider transport, but it
@@ -63,6 +64,20 @@ export const SAFETY_ROUTER_RESPONSE_FORMAT = deepFreeze({
     }),
   },
 });
+// Provider wire is distinct from the retained canonical semantic/trace format.
+// Static IDs only: no private user text is inserted into JSON Schema.
+export function buildSafetyRouterSelectorResponseFormat(ids) {
+  if (!Array.isArray(ids) || !ids.length || ids.some(id => !EVIDENCE_SELECTOR_IDS.includes(id))
+    || new Set(ids).size !== ids.length) throw new TypeError('selector_ids_invalid');
+  const selectorFormat = structuredClone(SAFETY_ROUTER_RESPONSE_FORMAT);
+  selectorFormat.json_schema.name = 'telegram_safety_router_selector_v1';
+  for (const domain of ['threat', 'abuse']) {
+    selectorFormat.json_schema.schema.properties[domain].properties.evidence.items = {
+      type: 'string', enum: [...ids],
+    };
+  }
+  return deepFreeze(selectorFormat);
+}
 export const SAFETY_ABUSE_RESPONSE_FORMAT = deepFreeze({
   type: 'json_schema',
   json_schema: {
@@ -78,6 +93,9 @@ export const SAFETY_ABUSE_RESPONSE_FORMAT = deepFreeze({
 // Only these content-free categories may leave the validator. Never report a
 // rejected key, enum value or evidence span received from the provider.
 export const SAFETY_CONTRACT_REJECTION_REASONS = Object.freeze([
+  'selector_source_invalid', 'selector_source_unicode_invalid', 'selector_source_grapheme_limit',
+  'selector_source_coverage_limit', 'selector_internal_interval_invalid',
+  'selector_evidence_ids_invalid', 'selector_evidence_id_unknown', 'selector_evidence_id_duplicate',
   'request_invalid', 'json_invalid', 'json_duplicate_keys', 'router_keys_invalid',
   ...['threat', 'abuse'].flatMap((domain) => [
     'keys_invalid', 'match_invalid', 'confidence_invalid', 'types_invalid', 'types_duplicate',
@@ -130,6 +148,7 @@ export function buildSafetyRouterSystem() {
     '--- ABUSE LIBRARY v1 ---', artifact('abuse-library-v1.md'),
     '--- ADVERTISING-SPAM POLICY v1 ---', artifact(`${ADVERTISING_SPAM_POLICY_VERSION}.md`),
     '--- PORN-SPAM POLICY v2 ---', artifact(`${PORN_SPAM_POLICY_VERSION}.md`),
+    '--- EVIDENCE SELECTOR v1 ---', artifact('evidence-selector-v1.md'),
   ].join('\n\n');
 }
 
@@ -334,7 +353,6 @@ export class SafetyV3ContractError extends Error {
   }
 }
 
-function routerPayload(message, context) { return JSON.stringify({ message, context }); }
 function abusePayload(message, router, context) {
   return JSON.stringify({
     message,
@@ -397,12 +415,32 @@ export async function classifySafetyV3({ message, context = {}, invoke }) {
   }
   const safeContext = normalizeSafetyContext(context);
   const results = [];
+  let selector;
+  try { selector = createEvidenceSelector(message); } catch (error) {
+    if (error instanceof EvidenceSelectorError) throw new SafetyV3ContractError('router', error.reason);
+    throw error;
+  }
+  const responseFormat = buildSafetyRouterSelectorResponseFormat(selector.entries.map(entry => entry.id));
   const routerResult = await invoke({
-    stage: 'router', system: buildSafetyRouterSystem(), user: routerPayload(message, safeContext),
-    maxOutputTokens: SAFETY_ROUTER_MAX_OUTPUT_TOKENS, responseFormat: SAFETY_ROUTER_RESPONSE_FORMAT,
+    stage: 'router', system: buildSafetyRouterSystem(),
+    user: JSON.stringify({ message, context: safeContext, evidence_catalogue: selector.catalogue }),
+    maxOutputTokens: SAFETY_ROUTER_MAX_OUTPUT_TOKENS, responseFormat,
   });
   results.push(routerResult);
-  const router = classifyVerdict('router', results, () => validatedSafetyRouterVerdict(routerResult?.text, message));
+  const router = classifyVerdict('router', results, () => {
+    const parsed = strictJsonObject(routerResult?.text);
+    if (!exactKeys(parsed, SAFETY_ROUTER_RESPONSE_FORMAT.json_schema.schema.required)) rejectVerdict('router_keys_invalid');
+    for (const domain of ['threat', 'abuse']) {
+      if (!exactKeys(parsed[domain], SAFETY_ROUTER_RESPONSE_FORMAT.json_schema.schema.properties[domain].required)) {
+        rejectVerdict(`${domain}_keys_invalid`);
+      }
+      try { parsed[domain].evidence = selector.resolve(parsed[domain].evidence); } catch (error) {
+        if (error instanceof EvidenceSelectorError) rejectVerdict(error.reason);
+        throw error;
+      }
+    }
+    return validatedSafetyRouterVerdict(JSON.stringify(parsed), message);
+  });
   if (router.context_used !== router.abuse.types.includes('warning_dispute')) {
     throw new SafetyV3ContractError('router', 'warning_context_mismatch', results);
   }
@@ -444,7 +482,10 @@ export async function classifySafetyV3({ message, context = {}, invoke }) {
     policyVersion: SAFETY_POLICY_VERSION,
     safetyTrace: {
       routePriority: ['threat', 'abuse', 'clean'], router, abuseClassifier: abuse,
+      evidenceSelector: selector.metadata,
       artifactSha256: {
+        evidenceSelectorPolicy: sha256(artifact('evidence-selector-v1.md')),
+        routerWireSchema: sha256(JSON.stringify(responseFormat)),
         routerSystem: sha256(routerSystem), abuseSystem: sha256(abuseSystem),
         threatLibrary: sha256(artifact('threat-library-v1.md')), abuseLibrary: sha256(artifact('abuse-library-v1.md')),
         advertisingSpamPolicy: sha256(artifact(`${ADVERTISING_SPAM_POLICY_VERSION}.md`)),
