@@ -6,6 +6,12 @@ and this queue. No active production lease or SSH master remains.
 
 ## Prepared — short flirtatious profile solicitation
 
+Update11:10UTC: separately authorized immediate cleanup completed for9780/9799;
+two delete+ban acknowledgements, readonlybothkicked/until0. Productionunchanged.
+The source/evaluation gate below remains open; cleanup is not model proof.
+[Action receipt](reports/2026-09-24-two-porn-posts-enforcement.md),
+[exact remaining decision](proposals/2026-09-24-porn-profile-approval.md).
+
 Exact `d8e5583eb7eef51659d627ed478e0cced3ae391c`, branch
 `codex/porn-profile-policy-v2-20260924`, lifecycle `prepared`, planned2.4.44.
 New incident confirmed: intact input → actual-model clean → no sanction.

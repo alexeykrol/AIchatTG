@@ -19,6 +19,28 @@ Newest entries first.
 
 ---
 
+## 2026-09-24 UTC 11:05 — Two current porn advertisements: remove immediately
+
+**Owner instruction in «Модератор»:** repeated the missed-ad report, then
+«уже дае рекламы порно - пусть модератор удалит немедленно.»
+
+**Diagnosis:** fresh snapshots identify the earlier9780 and new9799. Both
+actual model decisions were clean→none. Removal is separately authorized by
+this instruction plus the mandatory advertising delete/author-ban protocol;
+it does not wait for the candidate release or paid evaluation.
+
+**Outcome:** two exact deletes and two exact-author bans acknowledged
+11:09:24–25UTC. First helper's final second-author readback failed; original
+uncertain receipt preserved, no mutation retried. Separate readonly11:09:58
+checks verified both kicked/until0. Latest-message native absence confirmed;
+earlier-message nativevisual not_run. Runtime/Console unchanged healthy0restart;
+lease/master closed. No prior9770/9709 action repeated.
+
+**Status: partial — immediate cleanup completed; automatic recognition repair
+2.4.44/d8e5583 remains prepared, not pushed/deployed, paid test not_run.**
+[Removal report](reports/2026-09-24-two-porn-posts-enforcement.md).
+[Remaining exact decision](proposals/2026-09-24-porn-profile-approval.md).
+
 ## 2026-09-24 UTC — Another missed pornographic advertisement reported
 
 **Owner report:** «опять пропущена реклама порно - модератор не работает -

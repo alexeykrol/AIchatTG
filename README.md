@@ -12,6 +12,8 @@ News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
 **Open incident24.09:** confirmed short profile-solicitation false negative.
+Both current reported ads were separately removed and their authors banned
+at11:09UTC; this immediate action did not change the running source.
 Candidate2.4.44/d8e5583 is `prepared`, not pushed/deployed; real-model acceptance
 is still pending approval, not established by1,528passing local tests.
 [Incident report](docs/reports/2026-09-24-porn-profile-recurrence.md).

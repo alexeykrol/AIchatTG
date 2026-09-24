@@ -8,6 +8,10 @@ updated: 2026-09-24
 
 ## Next
 
+- [x] CURRENT-PORN-9780-9799: exact owner-authorized deletion+ban24September
+      11:09UTC, twoACKeach, readbackbothkicked/until0. No mutationretry;
+      firstuncertainreceipt preserved and reconciled readonly. Production2.4.43
+      unchanged. `docs/reports/2026-09-24-two-porn-posts-enforcement.md`.
 - [ ] PORN-PROFILE-RECURRENCE: actual clean false negative confirmed24September.
       Candidate d8e5583/2.4.44, lifecycleprepared; v2profile-funnel supplement,
       14synthetic controls,1,528passed/5skips,migration9/9/sourceguard.

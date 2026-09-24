@@ -4,6 +4,12 @@
 
 ## Текущее состояние
 
+- **Срочная очистка24.09 11:09UTC завершена:** по отдельной прямой просьбеPO
+  удалены9780/9799 и забанены их точные авторы.2delete+2banACK,
+  readonly11:09:58bothkicked/until0; исходная uncertainквитанция сохранена,
+  повтора действий не было. Latestnativeabsenceподтверждена, ранняяnot_run.
+  Runtime/Console/source/configне менялись;lease/masterзакрыты.
+  [Receipt](../docs/reports/2026-09-24-two-porn-posts-enforcement.md).
 - **Новый пропуск24.09; кандидат `prepared`:** exactd8e5583,
   planned2.4.44. Сообщение дошло целиком; модель вернула clean0.93,
   поэтому удаления/бана не было. Подготовлен porn-spam-policy-v2 для коротких

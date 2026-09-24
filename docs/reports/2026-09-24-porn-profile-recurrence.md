@@ -61,7 +61,7 @@ supplement, its selected version/heading and public release metadata.
 - `inconclusive`: whether the proposed v2 wording solves the actual model miss
   until the separately authorized live evaluation succeeds.
 
-The 14 additional synthetic minimal pairs are contract fixtures, not measured
+The 14 additional synthetic contrast cases (6positive,8negative) are contract fixtures, not measured
 precision/recall. A bounded real-provider test (maximum 30 calls / USD2 /
 30 minutes, no Telegram or production writes) was requested, not authorized
 or executed at this checkpoint.
@@ -87,3 +87,12 @@ separately tested forward repair; no blind database restore or old-protocol
 downgrade. Deployment does not retroactively moderate the accepted old message.
 Any one-off historical delete/ban must have separate exact-target authority,
 fresh protected-author/right checks and no replay of prior completed actions.
+
+### Later11:05–11:10UTC update
+
+The owner separately requested immediate removal of two current advertisements.
+Fresh diagnosis matched the original9780 and new9799; both were deleted and
+their exact authors permanently banned, without replay or a source deployment.
+See [separate action receipt](2026-09-24-two-porn-posts-enforcement.md).
+The candidate remains unchanged and the paid-test/conditional-release decision
+is [proposed, not approved](../proposals/2026-09-24-porn-profile-approval.md).
