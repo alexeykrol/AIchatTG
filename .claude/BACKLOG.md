@@ -8,6 +8,12 @@ updated: 2026-09-24
 
 ## Next
 
+- [ ] PORN-PROFILE-RECURRENCE: actual clean false negative confirmed24September.
+      Candidate d8e5583/2.4.44, lifecycleprepared; v2profile-funnel supplement,
+      14synthetic controls,1,528passed/5skips,migration9/9/sourceguard.
+      Real-model test pending approval (max30calls/USD2/30min), not_run.
+      No push/deploy/historical action; currentproduction2.4.43 unchanged.
+      `docs/reports/2026-09-24-porn-profile-recurrence.md`.
 - [ ] NATIVE-ACCEPTANCE-2.4.41: provider-only follow-up passed5safe inputs/
       12real calls/37,462tokens, upperUSD0.24941862. Native delivery/repeat/
       cleanup still not_run: needs authorized ordinary test actor, no exempt

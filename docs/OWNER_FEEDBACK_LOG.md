@@ -19,6 +19,26 @@ Newest entries first.
 
 ---
 
+## 2026-09-24 UTC — Another missed pornographic advertisement reported
+
+**Owner report:** «опять пропущена реклама порно - модератор не работает -
+исправь немедленно» after the 2.4.43 deployment.
+
+**Diagnosis:** the new short flirtatious profile invitation arrived intact.
+The actual model returned `clean` (0.93), so deterministic enforcement selected
+`none`; no delete/ban was attempted. Runtime2.4.43 and webhook were healthy.
+This is a semantic miss, not a transport/exemption/enforcement failure.
+
+**Candidate:** preserved-version porn-spam v2 clarifies short profile funnels,
+with 14 synthetic positive/negative controls. No model, sanction, schema,
+protected-author or no-retry changes. Exact d8e5583, planned2.4.44/24September;
+1,528 local tests passed, 5 fixture skips, migration9/9/source guard passed.
+
+**Status: prepared — not pushed/deployed. Actual model recognition remains
+inconclusive; paid evaluation not_run, approval requested. No new historical
+action or production mutation.**
+[Incident and evidence](reports/2026-09-24-porn-profile-recurrence.md).
+
 ## 2026-09-24 UTC — Complete the renewed push and deployment
 
 **Owner instruction:** «давай, уж наконец - пуш и деплой!» after the exact

@@ -4,6 +4,14 @@
 
 ## Текущее состояние
 
+- **Новый пропуск24.09; кандидат `prepared`:** exactd8e5583,
+  planned2.4.44. Сообщение дошло целиком; модель вернула clean0.93,
+  поэтому удаления/бана не было. Подготовлен porn-spam-policy-v2 для коротких
+  зазываний в профиль с флиртом, без бана за эмодзи/язык/профиль отдельно.
+  1,528tests passed/5skips, migration9/9, sourceguard; живое распознавание
+  not_run, запрошено разрешение до30calls/USD2/30min. Не pushed/deployed;
+  production06:29UTC остаётся2.4.43/3.4.0 healthy/restart0. SSH закрыт.
+  [Report](../docs/reports/2026-09-24-porn-profile-recurrence.md).
 - **Production24.09 05:27UTC, lifecycle `production-verified`:**
   exactruntimeccea9af5652250c159169c986f7e531ee1ac1522,2.4.43/24September,
   started05:26:16.674829016UTC. Source pushed; Console3.4.0/8a unchanged.

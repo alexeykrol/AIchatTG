@@ -4,6 +4,18 @@ Checkpoint: 2026-09-24 05:27UTC, runtime2.4.43 exactccea9af,
 Console3.4.0 exact8a2b27f unchanged. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
+## Prepared — short flirtatious profile solicitation
+
+Exact `d8e5583eb7eef51659d627ed478e0cced3ae391c`, branch
+`codex/porn-profile-policy-v2-20260924`, lifecycle `prepared`, planned2.4.44.
+New incident confirmed: intact input → actual-model clean → no sanction.
+Porn-spam v2 clarification, 14 additional synthetic minimal pairs;
+1,528passed/5skips, migration9/9, exact detached source guard passed.
+No push/deploy/paid evaluation/new historical action. Live-model test approval
+requested; release must not be called a recognition fix until that passes.
+Production rechecked06:29UTC: same2.4.43/3.4.0, healthy/restart0, webhookpending0.
+[Report](reports/2026-09-24-porn-profile-recurrence.md).
+
 ## Completed — primary advertising and complete enforcement receipts
 
 Exact `ccea9af5652250c159169c986f7e531ee1ac1522`, branch

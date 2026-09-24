@@ -11,7 +11,12 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
-**Production checkpoint24.09 05:27UTC:** Assistant2.4.43, exactruntimeccea9af,
+**Open incident24.09:** confirmed short profile-solicitation false negative.
+Candidate2.4.44/d8e5583 is `prepared`, not pushed/deployed; real-model acceptance
+is still pending approval, not established by1,528passing local tests.
+[Incident report](docs/reports/2026-09-24-porn-profile-recurrence.md).
+
+**Production checkpoint24.09 05:27UTC (unchanged at06:29UTC):** Assistant2.4.43, exactruntimeccea9af,
 lifecycle `production-verified`; source pushed. Console3.4.0 remains on8a2b27f
 without recreation. Both healthy/restart0; primary advertising recognition and
 truthful ban/deletion completion are deployed. Sanctions stay code-owned.
