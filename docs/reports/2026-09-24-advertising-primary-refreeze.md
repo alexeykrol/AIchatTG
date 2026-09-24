@@ -1,6 +1,11 @@
 # Advertising release 2.4.43 — date-only refreeze
 
-Candidate lifecycle: **`prepared`**. Exact source
+Historical preparation evidence. After fresh exact approval, this candidate
+was pushed and deployed24September05:26UTC; current lifecycle is
+**`production-verified`**. [Deployment receipt](2026-09-24-advertising-2.4.43-deployment.md).
+The not_run states below describe the earlier preparation checkpoint.
+
+Prepared exact source:
 `ccea9af5652250c159169c986f7e531ee1ac1522`, branch
 `codex/advertising-policy-20260924`, integrated into local main.
 Public component: **2.4.43 / 2026-09-24**. Not pushed or deployed.

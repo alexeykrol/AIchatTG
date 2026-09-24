@@ -1,6 +1,12 @@
 # Exact approval — advertising 2.4.43, 24 September UTC
 
-Decision pending. Candidate lifecycle: **`prepared`**.
+Historical approval card, now consumed. The owner explicitly approved
+«давай, уж наконец - пуш и деплой!»; exactccea9af was pushed and activated once
+24September05:26UTC. Candidate lifecycle: **`production-verified`**.
+Lease/master closed; this card is not reusable authority.
+[Deployment receipt](../reports/2026-09-24-advertising-2.4.43-deployment.md).
+
+The original proposed scope below is preserved.
 This replaces the expired23September execution date and source identity, not
 the already completed Review deployment or historical moderation operation.
 

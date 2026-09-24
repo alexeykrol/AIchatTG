@@ -1,7 +1,7 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # Backlog
@@ -38,14 +38,15 @@ updated: 2026-09-23
       replay/DBwrite/model/redeploy. Lease/masterclosed. Sameauthorpurge is
       inherent to Telegramsupergroupban; no unrelatedauthor targeted.
       `docs/reports/2026-09-23-advertising-post-9770-enforcement.md`.
-- [ ] ADVERTISING-PRIMARY-POLICY: explicit ownerprotocol delete+ban, notReview
-      substitute. Local primary covert-advertising supplement and regressions
-      plus receipt-completion repair implemented;1512passed/5fixture skips.
-      Existingspam_or_scam/ban_purge; noregexshortcut/newcalls/schema/replay.
-      Candidate2.4.43 local; production2.4.42 unchanged, realrecognitionnot_run.
-      Exactccea9af, lifecycleprepared,24Septemberdate-only refreeze after oldUTC
-      windowexpired; fullreport and changedexactreleasegate:
-      `docs/reports/2026-09-24-advertising-primary-refreeze.md`.
+- [x] ADVERTISING-PRIMARY-POLICY: exactccea9af/2.4.43 deployed24September05:26UTC,
+      lifecycleproduction-verified. Primaryrecognition supplement +truthful
+      ban/purgecompletion; sanctionsremaincode-owned.1512passed/5fixture skips,
+      migration9/9,62sourcehashes/footer/config/schema/ReviewIPC/HTTPS/webhooks.
+      Consoleunchanged;1runtimeactivation/0rollback/paidtests/historicalactions.
+      Lease/masterclosed. `docs/reports/2026-09-24-advertising-2.4.43-deployment.md`.
+- [ ] ADVERTISING-MODEL-ACCEPTANCE: real semantic recognition/precision/recall
+      stillnot_run. Injected24syntheticlabels are contract evidence only;
+      no paid evaluation or new native test action authorized by completedlease.
 - Historical preparation: fresh23September book-promotion recurrence while
       Review remains off. Current candidate8a2b27f is prepared, replacingebf0a8a:
       Assistant2.4.42/Console3.4.0, planned23September, retains e523485;

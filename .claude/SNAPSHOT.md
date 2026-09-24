@@ -1,10 +1,20 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-23 UTC
+**Last Updated:** 2026-09-24 UTC
 
 ## Текущее состояние
 
-- **Local candidate, lifecycle `prepared`:** exactccea9af5652250c159169c986f7e531ee1ac1522,
+- **Production24.09 05:27UTC, lifecycle `production-verified`:**
+  exactruntimeccea9af5652250c159169c986f7e531ee1ac1522,2.4.43/24September,
+  started05:26:16.674829016UTC. Source pushed; Console3.4.0/8a unchanged.
+  Bothhealthy/restart0;1512tests/5skips,migration9/9,62liveimagehashes/footer,
+  config/schema/HTTPS/auth/webhooks and freshReviewIPC passed. Primaryad
+  recognition +completeban/purge receipts deployed; sanctionsremaincode-owned.
+  One runtime recreation/0rollback/paidtests/manualhistoricalactions.
+  Leaseclosed05:26:58.344, mastersocketabsenceverified05:27:52. Realmodel
+  recognition/nativealertE2E not_run. No remaining deployment for thissource.
+  [Receipt](../docs/reports/2026-09-24-advertising-2.4.43-deployment.md).
+- **Historical preparation:** exactccea9af5652250c159169c986f7e531ee1ac1522,
   branchcodex/advertising-policy-20260924, shared runtime2.4.43/24September.
   Date-only refreeze after prior23SeptemberUTC execution window expired;
   fresh PO push/deploy request did not silently change that exact boundary.
@@ -20,8 +30,9 @@
   operation lease closed23:09:44, masterclosed23:10:28;8a serviceshealthy0restart.
   Owner explicitly corrected no-ban interpretation: advertising requires full
   delete+authorban, Review alone is insufficient. Rule added toAGENTS; primary
-  semantic advertising supplement and completion-receipt repair are local
-  candidate work, not deployed. Production remains2.4.42/Console3.4.0.
+  semantic advertising supplement and completion-receipt repair were then local;
+  they subsequently shipped in2.4.43 above. At that checkpoint production was
+  still2.4.42/Console3.4.0.
   [Receipt](../docs/reports/2026-09-23-advertising-post-9770-enforcement.md).
 - **Review23.09, lifecycle `production-verified`:** exact8a2b27f,
   Assistant2.4.42/23.09.2026 and Console3.4.0 live; source pushed. Runtime

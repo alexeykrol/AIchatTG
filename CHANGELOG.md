@@ -3,6 +3,23 @@
 All notable changes to AIchatTG are documented here. The project follows
 semantic versioning for repository-level architecture releases.
 
+## [Assistant 2.4.43 / runtime ccea9af] — 2026-09-24 — Advertising protocol
+
+Lifecycle `production-verified`; runtime started05:26:16UTC, source pushed.
+[Release receipt](docs/reports/2026-09-24-advertising-2.4.43-deployment.md).
+
+- Recognize unsolicited/covert advertising within the existing primary semantic
+  spam classification, without requiring links, prices or bot identity.
+- Keep sanctions and exceptions code-owned; reject model-selected actions.
+  Preserve legitimate discussion, recommendations, reports and quotations.
+- Report full enforcement only after confirmed ban and required deletions;
+  preserve terminal uncertainty and prevent automatic retries.
+-1512passed/5fixture skips, migration9/9,62running-image hashes, renderedfooter,
+  config/schema/health/HTTPS/auth/webhooks and liveReviewIPC passed.
+- Runtime-only recreation; Console3.4.0 and Review configuration unchanged.
+  Zero rollbacks, paid tests or repeated historical sanctions. Lease/master
+  closed. Real model recognition and native alert-delivery E2E remain not_run.
+
 ## [Assistant 2.4.42 / Console 3.4.0 / source 8a2b27f] — 2026-09-23 — Private Review
 
 Lifecycle `production-verified`; both services deployed and source pushed.

@@ -19,6 +19,23 @@ Newest entries first.
 
 ---
 
+## 2026-09-24 UTC — Complete the renewed push and deployment
+
+**Owner instruction:** «давай, уж наконец - пуш и деплой!» after the exact
+24September ccea9af source /6734a2c documentation decision.
+
+**Completion:** pushed both refs and verified GitHub readback. Fresh baseline,
+exact archive/image/config/footer checks passed. One runtime-only activation
+started05:26:16UTC; public component2.4.43/24.09.2026. Console3.4.0 stayed on
+its existing container. Repeated health/restart0,62source hashes, schema/config,
+live Review IPC, HTTPS/auth and both webhook checks passed.0rollback/paidtests/
+operator-triggered historical actions. Leaseclosed05:26:58.344UTC; master/socket
+closure confirmed locally05:27:52UTC.
+
+**Status: deployed — exactccea9af production-verified; real model recognition
+and native alert-delivery E2E remain not_run.**
+[Receipt](reports/2026-09-24-advertising-2.4.43-deployment.md).
+
 ## 2026-09-24 UTC — Push and deploy requested after the exact date window
 
 **Owner instruction:** «давай, пуш и деплой» for advertising2.4.43.

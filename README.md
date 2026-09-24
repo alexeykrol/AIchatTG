@@ -11,14 +11,15 @@ specialised bots over one product core:
 News intake, digest generation, editorial review, and publication — including
 publication to a Telegram channel — remain in the separate News Digest project.
 
-**Production checkpoint23.09 16:31UTC:** Assistant2.4.42 / Console3.4.0,
-exact8a2b27f for both services, lifecycle `production-verified`. Source pushed;
-both healthy/restart0. Private Review is live with retained17September binding:
-bounded collection, generic private notifications and manual decisions, no new
-automatic sanctions or backfill. Primary safety and approved copy preserved.
-1470tests passed/5explicit skips; exact images/footer/config/schema/HTTPS/auth
-and webhooks verified. Actual alert-delivery E2E and rendered-browser QA remain
-not_run. [Receipt](docs/reports/2026-09-23-review-8a2b27f-deployment.md).
+**Production checkpoint24.09 05:27UTC:** Assistant2.4.43, exactruntimeccea9af,
+lifecycle `production-verified`; source pushed. Console3.4.0 remains on8a2b27f
+without recreation. Both healthy/restart0; primary advertising recognition and
+truthful ban/deletion completion are deployed. Sanctions stay code-owned.
+1512tests passed/5fixture skips;62image-source hashes, renderedfooter, config,
+schema, HTTPS/auth and webhooks verified. Review remains live with the retained
+17September binding and a verified fresh runtime IPC peer. Lease/master closed.
+Real model recognition and native alert-delivery E2E remain not_run.
+[Receipt](docs/reports/2026-09-24-advertising-2.4.43-deployment.md).
 
 **Live acceptance follow-up19.09 22:34UTC:** five safe inputs and12 real model
 calls passed bounded technical checks. Website routing differs between legacy
@@ -33,14 +34,10 @@ It predates activation and was not replayed into Review. On23September23:09UTC,
 the post was deleted and its exact author banned under the owner's explicit
 full-advertising-protocol instruction; API readback and native absence verified.
 [One-off receipt](docs/reports/2026-09-23-advertising-post-9770-enforcement.md).
-Permanent primary-classifier policy changes remain a separate local candidate,
-not part of the already deployed8a release. This is not a new porn-model fix.
-
-**Prepared, not deployed:** primary advertising recognition and complete
-ban/deletion receipts, exact`ccea9af`, shared runtime2.4.43/24September.1512passed/5fixture
-skips; actual model recognition not_run. Model supplies classification/evidence;
-the moderation protocol remains deterministic code. The prior UTC execution
-date expired before the requested deployment. [Candidate report](docs/reports/2026-09-24-advertising-primary-refreeze.md).
+The permanent primary-classifier supplement and complete-enforcement receipt
+repair subsequently shipped in2.4.43 above, under fresh exact approval. The
+one-off post removal is not evidence of automatic model recognition; no repeat
+of that historical action was performed. This is not a new porn-model fix.
 
 ## Architecture principle
 

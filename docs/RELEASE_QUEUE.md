@@ -1,20 +1,22 @@
 # AIchatTG release queue
 
-Checkpoint: 2026-09-24UTC, last verified production23September23:10UTC:
-2.4.42/Console3.4.0 exact8a2b27f. The root integrator owns shared integration
+Checkpoint: 2026-09-24 05:27UTC, runtime2.4.43 exactccea9af,
+Console3.4.0 exact8a2b27f unchanged. The root integrator owns shared integration
 and this queue. No active production lease or SSH master remains.
 
-## Prepared — primary advertising and complete enforcement receipts
+## Completed — primary advertising and complete enforcement receipts
 
 Exact `ccea9af5652250c159169c986f7e531ee1ac1522`, branch
-`codex/advertising-policy-20260924`, lifecycle `prepared`; local main-integrated,
-not pushed/deployed. Candidate2.4.43/24September, runtime-only release.
-Date-only refreeze after the23SeptemberUTC window expired; logic unchanged.
+`codex/advertising-policy-20260924`, lifecycle `production-verified`;
+main-integrated/pushed,2.4.43/24September, runtime-only activation05:26:16UTC.
+Consoleunchanged, bothhealthy/restart0,62sourcehashes/renderedfooter/config/
+schema/ReviewliveIPC/HTTPS/auth/webhooks passed.0rollback/paidtests/manualactions;
+leaseclosed05:26:58.344, mastersocketabsence05:27:52. No pendingdeployment.
 1512passed/5fixture skips, migration9/9, scenario30/34, source guard and
 independent125/125 passed. Model recognition remains not_run; sanctions remain
 code-owned. Current9770 action is already completed and never repeated.
-[Report](reports/2026-09-24-advertising-primary-refreeze.md).
-[Exact release decision](proposals/2026-09-24-advertising-primary-approval.md).
+[Receipt](reports/2026-09-24-advertising-2.4.43-deployment.md).
+[Consumed exact release decision](proposals/2026-09-24-advertising-primary-approval.md).
 
 ## Completed
 
@@ -26,8 +28,8 @@ Reviewlive, no reprovision/replay/new sanctions. Leaseclosed16:31:32.762UTC,
 masterclosed16:32:12UTC. Real notificationE2E and renderedbrowserQA not_run.
 No pending deployment for this source. The later one-off9770 deletion and
 native-author ban completed23:09UTC under fresh explicit authority, without a
-redeploy/replay. Primary advertising/receipt repair is a separate local2.4.43
-candidate, not yet released.
+redeploy/replay. Primary advertising/receipt repair subsequently shipped as
+2.4.43 above, without repeating historical actions.
 [Receipt](reports/2026-09-23-review-8a2b27f-deployment.md).
 [One-off moderation](reports/2026-09-23-advertising-post-9770-enforcement.md).
 
