@@ -1615,7 +1615,7 @@ test('suspected porn spam with low confidence immediately bans and purges once w
       return classifySafetyV3({ message: text, async invoke(input) {
         modelCalls++;
         assert.equal(input.stage, 'router');
-        assert.match(input.system, /PORN-SPAM POLICY v1/);
+        assert.match(input.system, /PORN-SPAM POLICY v2/);
         return { text: JSON.stringify({
           threat: { match: true, types: ['spam_or_scam'], confidence: 0.35, evidence: ['adult-only private gallery'] },
           abuse: { match: false, types: [], confidence: 0.99, evidence: [] },

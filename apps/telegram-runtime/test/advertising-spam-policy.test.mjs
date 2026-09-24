@@ -36,7 +36,7 @@ test('advertising supplement is loaded verbatim under the existing primary safet
   assert.equal(system.split('--- ADVERTISING-SPAM POLICY v1 ---').length, 2);
   assert.ok(system.includes(policy));
   assert.ok(system.includes(artifact('threat-library-v1')));
-  assert.ok(system.endsWith(artifact('porn-spam-policy-v1')));
+  assert.ok(system.endsWith(artifact('porn-spam-policy-v2')));
   assert.match(policy, /unsolicited advertising/);
   assert.match(policy, /Do not require a URL, explicit price/);
   assert.match(policy, /A single current message can establish advertising spam/);
@@ -84,7 +84,7 @@ test('advertising labelled corpus uses immediate existing actions and fingerprin
       assert.equal(result.safetyTrace.router.context_used, false);
       assert.equal(result.safetyTrace.artifactSha256.advertisingSpamPolicy, hash(policy));
       assert.equal(result.safetyTrace.artifactSha256.routerSystem, hash(buildSafetyRouterSystem()));
-      assert.equal(result.safetyTrace.artifactSha256.pornSpamPolicy, hash(artifact('porn-spam-policy-v1')));
+      assert.equal(result.safetyTrace.artifactSha256.pornSpamPolicy, hash(artifact('porn-spam-policy-v2')));
       assert.equal(result.safetyTrace.usage.inputTokens, null);
       for (const strikes of [0, 1, 2]) {
         const plan = planTelegramSafetyAction(result, strikes);

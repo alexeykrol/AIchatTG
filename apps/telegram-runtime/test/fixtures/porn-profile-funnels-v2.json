@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "porn-profile-funnels-fixtures-v2",
+  "synthetic": true,
+  "evaluationStatus": "not_run",
+  "notes": [
+    "New synthetic examples only; no captured message bodies or private identities.",
+    "Labels are expected policy outcomes, not real model results. Model recognition requires a separately recorded paid evaluation.",
+    "No claimed verified Kyrgyz translation. The exact incident is retained only in ignored private diagnostic evidence.",
+    "A profile reference, missing context or affectionate emoji alone is insufficient; evaluate the whole current communicative act."
+  ],
+  "cases": [
+    {"id":"pf-pos-01","text":"Come see me in my profile 💋💕","expectedThreat":true,"category":"minimal_flirt_funnel"},
+    {"id":"pf-pos-02","text":"Загляни ко мне в профиль, жду тебя 😘💞","expectedThreat":true,"category":"russian_flirt_funnel"},
+    {"id":"pf-pos-03","text":"Tap my avatar, I'm waiting for you there 💋","expectedThreat":true,"category":"avatar_flirt_funnel"},
+    {"id":"pf-pos-04","text":"Come to my pr\u200bofile, kisses are waiting for you 💋","expectedThreat":true,"category":"obfuscated_flirt_funnel"},
+    {"id":"pf-pos-05","text":"Не реклама: заходи в мой профиль, целую и жду тебя там 😘","expectedThreat":true,"category":"disclaimer_flirt_funnel"},
+    {"id":"pf-pos-06","text":"Example: 'Come see me in my profile 💋💕'. That's my invitation to everyone here: come see me there now!","expectedThreat":true,"category":"adopted_quote"},
+    {"id":"pf-neg-01","text":"Our study timetable is in my profile; please check it 😘💕","expectedThreat":false,"category":"study_with_affection"},
+    {"id":"pf-neg-02","text":"Вы просили портфолио: в профиле учебные проекты. Буду рада замечаниям по композиции 💋❤️","expectedThreat":false,"category":"requested_portfolio"},
+    {"id":"pf-neg-03","text":"Tap my avatar and tell me whether the club logo is readable 😘","expectedThreat":false,"category":"design_feedback"},
+    {"id":"pf-neg-04","text":"Обещанные семейные фото с нашего праздника — в профиле. Обнимаю вас 💋❤️","expectedThreat":false,"category":"family_photos"},
+    {"id":"pf-neg-05","text":"Спасибо за помощь с заданием 💋❤️❤️","expectedThreat":false,"category":"affection_without_diversion"},
+    {"id":"pf-neg-06","text":"Посмотрите мой профиль.","expectedThreat":false,"category":"neutral_profile_invitation"},
+    {"id":"pf-neg-07","text":"Please translate this example: 'Come see me in my profile 💋💕'.","expectedThreat":false,"category":"translation"},
+    {"id":"pf-neg-08","text":"Модератору: пришла фраза «Загляни ко мне в профиль, жду тебя 😘💞». Сообщаю о спаме, никуда не переходите.","expectedThreat":false,"category":"spam_report"}
+  ]
+}

@@ -9,9 +9,10 @@ import {
   buildSafetyRouterSystem, classifySafetyV3,
 } from '../src/safety-v3.mjs';
 
-const policy = readFileSync(new URL('../src/safety-artifacts/porn-spam-policy-v1.md', import.meta.url), 'utf8').trim();
+const policy = readFileSync(new URL('../src/safety-artifacts/porn-spam-policy-v2.md', import.meta.url), 'utf8').trim();
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/porn-spam-policy-v1.json', import.meta.url), 'utf8'));
 const cases = Array.isArray(fixture) ? fixture : fixture.cases;
+const funnels = JSON.parse(readFileSync(new URL('./fixtures/porn-profile-funnels-v2.json', import.meta.url), 'utf8'));
 
 function labelledVerdict(text, expectedThreat, confidence = 0.35) {
   return JSON.stringify({
@@ -24,15 +25,18 @@ function labelledVerdict(text, expectedThreat, confidence = 0.35) {
 
 test('the semantic porn-spam supplement is loaded verbatim without changing provider settings', () => {
   const system = buildSafetyRouterSystem();
-  assert.equal(PORN_SPAM_POLICY_VERSION, 'porn-spam-policy-v1');
+  assert.equal(PORN_SPAM_POLICY_VERSION, 'porn-spam-policy-v2');
   assert.ok(system.endsWith(policy));
-  assert.equal(system.split('--- PORN-SPAM POLICY v1 ---').length, 2);
+  assert.equal(system.split('--- PORN-SPAM POLICY v2 ---').length, 2);
   assert.match(policy, /spam_or_scam/);
   assert.match(policy, /Suspicion is sufficient/);
   assert.match(policy, /One current message can suffice/);
-  assert.match(policy, /not a rule to classify every ambiguous or unfamiliar message/);
+  assert.match(policy, /not a rule to classify every ambiguous or\s+unfamiliar message/);
   assert.match(policy, /Good-faith reporting/);
-  assert.match(policy, /does not set `context_used=true`/);
+  assert.match(policy, /does not set\s+`context_used=true`/);
+  assert.match(policy, /Short flirtatious profile funnels/);
+  assert.match(policy, /absence of an explanation or missing chat history is not itself evidence/);
+  assert.match(policy, /neutral profile invitation without flirtatious or sexual\s+bait remains insufficient/);
   assert.deepEqual([SAFETY_MODEL, SAFETY_VENDOR, SAFETY_REASONING_EFFORT, SAFETY_ROUTER_MAX_OUTPUT_TOKENS],
     ['gpt-5.6-terra', 'openai', 'medium', 1024]);
 });
@@ -93,5 +97,41 @@ test('valid suspected-spam verdicts have no hidden confidence or warning thresho
       assert.equal(plan.warning, null);
       assert.equal(plan.strikeAfter, strikes);
     }
+  }
+});
+
+test('v2 profile-funnel corpus includes hard negatives and remains explicitly unevaluated', () => {
+  assert.equal(funnels.synthetic, true);
+  assert.equal(funnels.evaluationStatus, 'not_run');
+  assert.equal(funnels.cases.length, 14);
+  assert.equal(new Set(funnels.cases.map(item => item.id)).size, 14);
+  assert.equal(funnels.cases.filter(item => item.expectedThreat).length, 6);
+  for (const category of ['study_with_affection', 'requested_portfolio', 'design_feedback',
+    'family_photos', 'affection_without_diversion', 'neutral_profile_invitation', 'translation', 'spam_report']) {
+    assert.ok(funnels.cases.some(item => item.category === category && item.expectedThreat === false));
+  }
+  for (const item of funnels.cases) {
+    assert.equal(typeof item.expectedThreat, 'boolean');
+    assert.ok(item.text.length > 0 && item.text.length <= 1000);
+  }
+});
+
+test('v2 injected labels preserve the action contract, not proof of model recognition', async t => {
+  for (const item of funnels.cases) {
+    await t.test(item.id, async () => {
+      let calls = 0;
+      const result = await classifySafetyV3({ message: item.text, async invoke(input) {
+        calls++;
+        assert.equal(input.stage, 'router');
+        assert.ok(input.system.endsWith(policy));
+        assert.equal(JSON.parse(input.user).message, item.text);
+        return { text: labelledVerdict(item.text, item.expectedThreat) };
+      } });
+      assert.equal(calls, 1);
+      assert.equal(result.safetyRoute, item.expectedThreat ? 'threat' : 'clean');
+      assert.equal(planTelegramSafetyAction(result, 0).action, item.expectedThreat ? 'ban_purge' : 'none');
+      assert.equal(result.safetyTrace.artifactSha256.pornSpamPolicy,
+        createHash('sha256').update(policy).digest('hex'));
+    });
   }
 });

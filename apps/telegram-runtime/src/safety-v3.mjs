@@ -11,7 +11,7 @@ export const SAFETY_VENDOR = 'openai';
 export const SAFETY_REASONING_EFFORT = 'medium';
 export const SAFETY_POLICY_VERSION = 'telegram-safety-v1';
 export const ADVERTISING_SPAM_POLICY_VERSION = 'advertising-spam-policy-v1';
-export const PORN_SPAM_POLICY_VERSION = 'porn-spam-policy-v1';
+export const PORN_SPAM_POLICY_VERSION = 'porn-spam-policy-v2';
 export const SAFETY_ROUTER_MAX_OUTPUT_TOKENS = 1024;
 export const SAFETY_ABUSE_MAX_OUTPUT_TOKENS = 768;
 
@@ -129,7 +129,7 @@ export function buildSafetyRouterSystem() {
     '--- THREAT LIBRARY v1 ---', artifact('threat-library-v1.md'),
     '--- ABUSE LIBRARY v1 ---', artifact('abuse-library-v1.md'),
     '--- ADVERTISING-SPAM POLICY v1 ---', artifact(`${ADVERTISING_SPAM_POLICY_VERSION}.md`),
-    '--- PORN-SPAM POLICY v1 ---', artifact(`${PORN_SPAM_POLICY_VERSION}.md`),
+    '--- PORN-SPAM POLICY v2 ---', artifact(`${PORN_SPAM_POLICY_VERSION}.md`),
   ].join('\n\n');
 }
 
