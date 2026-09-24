@@ -43,8 +43,9 @@ updated: 2026-09-23
       plus receipt-completion repair implemented;1512passed/5fixture skips.
       Existingspam_or_scam/ban_purge; noregexshortcut/newcalls/schema/replay.
       Candidate2.4.43 local; production2.4.42 unchanged, realrecognitionnot_run.
-      Exactb891abf, lifecycleprepared; fullreport and exactreleasegate:
-      `docs/reports/2026-09-23-advertising-primary-candidate.md`.
+      Exactccea9af, lifecycleprepared,24Septemberdate-only refreeze after oldUTC
+      windowexpired; fullreport and changedexactreleasegate:
+      `docs/reports/2026-09-24-advertising-primary-refreeze.md`.
 - Historical preparation: fresh23September book-promotion recurrence while
       Review remains off. Current candidate8a2b27f is prepared, replacingebf0a8a:
       Assistant2.4.42/Console3.4.0, planned23September, retains e523485;

@@ -1,5 +1,9 @@
 # Primary advertising recognition and enforcement completion
 
+Historical prepared candidate; superseded only for the release date by
+[ccea9af /24September](2026-09-24-advertising-primary-refreeze.md).
+Its expired execution date was not reused; no push/deploy occurred.
+
 Candidate lifecycle: **`prepared`**. Exact source:
 `b891abfde3c176d389ab0cd19d3be9509405974d`, branch
 `codex/advertising-policy-20260923`, integrated into local main.

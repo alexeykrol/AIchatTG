@@ -19,6 +19,24 @@ Newest entries first.
 
 ---
 
+## 2026-09-24 UTC — Push and deploy requested after the exact date window
+
+**Owner instruction:** «давай, пуш и деплой» for advertising2.4.43.
+
+**Execution check:** before external action the clock was24September05:07:52UTC
+(23September in the owner's timezone). The presented approval card required
+activation23SeptemberUTC and a date/source refreeze with changed exact approval
+after that day. No server action, push, paid call or new lease was performed.
+
+**Local action:** refroze2.4.43 as ccea9af with24September metadata and two test
+expectations only. Runtime, advertising recognition and code-owned enforcement
+logic remain byte-identical to b891abf. Repeated1512passed/5skips, migration9/9,
+scenario30/34 and clean exact source guard passed.
+
+**Status: prepared — changed exact candidate needs the renewed release decision;
+production was not changed or freshly checked in this turn.**
+[Report](reports/2026-09-24-advertising-primary-refreeze.md).
+
 ## 2026-09-23 — Moderation regulations are code, not model decisions
 
 **Owner clarification:** «все регламенты - это по сути код, а не решение модели».

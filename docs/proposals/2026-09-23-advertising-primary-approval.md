@@ -1,5 +1,10 @@
 # Exact approval — advertising primary policy 2.4.43
 
+Historical card, execution date expired. The owner's subsequent push/deploy
+request was received after the23SeptemberUTC activation boundary. No push,
+deployment or lease ran. See the [new24September card](2026-09-24-advertising-primary-approval.md).
+The original scope below is preserved, not reusable execution authority.
+
 Decision pending. Candidate lifecycle: **`prepared`**.
 The previous Review release and historical moderation operation are complete;
 their consumed approvals are not reused here.

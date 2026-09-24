@@ -37,9 +37,10 @@ Permanent primary-classifier policy changes remain a separate local candidate,
 not part of the already deployed8a release. This is not a new porn-model fix.
 
 **Prepared, not deployed:** primary advertising recognition and complete
-ban/deletion receipts, exact`b891abf`, shared runtime2.4.43.1512passed/5fixture
+ban/deletion receipts, exact`ccea9af`, shared runtime2.4.43/24September.1512passed/5fixture
 skips; actual model recognition not_run. Model supplies classification/evidence;
-the moderation protocol remains deterministic code. [Candidate report](docs/reports/2026-09-23-advertising-primary-candidate.md).
+the moderation protocol remains deterministic code. The prior UTC execution
+date expired before the requested deployment. [Candidate report](docs/reports/2026-09-24-advertising-primary-refreeze.md).
 
 ## Architecture principle
 
