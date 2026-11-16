@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "status": "draft",
+  "note": "All texts, questions, acceptance rules and keyword lists below are agent-written draft placeholders pending Product Owner approval (JOINGATE-2). Enforce mode refuses to start while status is draft.",
+  "messages": {
+    "greeting": "Здравствуйте! Вы подали заявку на вступление в группу. Группа открыта для всех, кто хочет общаться: обсуждать ИИ, делиться опытом и задавать вопросы. Чтобы отсечь спам-ботов, задам пару коротких вопросов — это займёт минуту.",
+    "q_purpose": "Вопрос 1 из 3. Что вас привело в группу? Выберите вариант кнопкой.",
+    "q_about": "Вопрос 2 из 3. Расскажите в 1–2 предложениях, чем занимаетесь и о чём хотели бы поговорить в группе.",
+    "q_rules": "Вопрос 3 из 3. В группе нельзя размещать рекламу, продавать услуги и рассылать спам. Согласны соблюдать эти правила?",
+    "retry": "Пожалуйста, ответьте чуть подробнее — своими словами, без ссылок. Если в вопросе есть кнопки, можно просто нажать нужную.",
+    "approved": "Спасибо! Заявка одобрена — добро пожаловать в группу. Рады видеть вас среди участников.",
+    "declined_answers": "Спасибо за ответы. К сожалению, сейчас мы не можем одобрить заявку. Если захотите, позже можно подать её ещё раз.",
+    "manual_review": "Спасибо за ответы! Заявку посмотрит администратор группы — обычно это занимает немного времени.",
+    "timeout": "Время на ответы истекло, и заявка закрыта. Если захотите вступить, просто подайте заявку ещё раз."
+  },
+  "questions": [
+    {
+      "id": "purpose",
+      "type": "choice",
+      "prompt": "q_purpose",
+      "options": [
+        { "id": "discuss", "label": "Хочу обсуждать ИИ и делиться опытом" },
+        { "id": "course", "label": "Учусь на курсе" },
+        { "id": "look", "label": "Просто посмотреть" },
+        { "id": "ads", "label": "Реклама/предложение услуг" }
+      ],
+      "accepted": ["discuss", "course", "look"]
+    },
+    {
+      "id": "about",
+      "type": "free_text",
+      "prompt": "q_about",
+      "rule": {
+        "minWords": 5,
+        "minChars": 25,
+        "forbidLinks": true,
+        "anyOf": []
+      }
+    },
+    {
+      "id": "rules",
+      "type": "choice",
+      "prompt": "q_rules",
+      "options": [
+        { "id": "agree", "label": "Согласен(на)", "aliases": ["согласен", "согласна", "да", "да, согласен", "да, согласна"] },
+        { "id": "disagree", "label": "Не согласен(на)", "aliases": ["не согласен", "не согласна", "нет"] }
+      ],
+      "accepted": ["agree"]
+    }
+  ],
+  "screening": {
+    "spamKeywords": [
+      "crypto", "крипт", "заработ", "earn", "casino", "казино", "ставк", "bet", "18+",
+      "интим", "escort", "xxx", "porn", "порн", "onlyfans", "инвест", "invest", "сигнал",
+      "forex", "форекс", "раскрут", "продвижен", "подписчик"
+    ],
+    "linkPatterns": [
+      "https?://",
+      "\\bwww\\.",
+      "\\bt\\.me/",
+      "\\btelegram\\.(?:me|dog)/",
+      "\\btg://",
+      "\\bjoinchat\\b",
+      "\\b[a-z0-9-]+\\.(?:com|ru|net|org|io|me|xyz|top|link|click|site|online|shop|info|biz|pro|cc|su)\\b"
+    ]
+  },
+  "limits": {
+    "answerTimeoutSeconds": 1800,
+    "dmWindowSeconds": 300,
+    "maxApplicationsPerUserPerDay": 3,
+    "retentionDays": 30
+  }
+}

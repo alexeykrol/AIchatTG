@@ -4,6 +4,14 @@
 
 ## Текущее состояние
 
+- **15.11.2026 — сценарий C, привратник по заявкам (локальный кандидат):**
+  по просьбе PO сценарии A/B Gatekeeper на паузе; новый изолированный
+  `apps/join-gatekeeper/` (заявка → проверка аккаунта → диалог в личке →
+  решение; режимы shadow/enforce). Ветка
+  `claude/join-request-gatekeeper-20261115`. Тексты — черновик агента до
+  утверждения PO (JOINGATE-2). Push в main, deploy, webhook, настройки
+  группы — not_run, нужны решения PO (JOINGATE-1/3).
+  [Контракт](../docs/proposals/2026-11-15-join-request-gatekeeper-v1.md).
 - **2.4.45 `prepared`:** exactc019a35a93ba46ebdf449e81b156a6043843b531.
   Code-owned excerptIDs заменяют цитаты модели; неизменный semanticvalidator
   проверяет исходные slices, санкции не выбирает модель.1,542passed/5skips,

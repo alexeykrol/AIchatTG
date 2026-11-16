@@ -19,6 +19,34 @@ Newest entries first.
 
 ---
 
+## 2026-11-15 — Join requests instead of an open invite link
+
+**Owner saw / asked:** bots periodically got into the group through the
+invite link and posted ads, porn and junk the Moderator did not catch. Two
+groups are being merged into one open, visible group where joining requires a
+request. Wanted: a classic gatekeeper — on a request the bot starts a dialogue
+with the person, asks questions, admits only if the answers fit, checks the
+account within Telegram's limits, and notifies the person if the timer runs
+out. Goal: admit motivated people who want to talk. Scenarios A (Tribute) and
+B (site) go on pause; the new scenario must be fully separate so the flows
+cannot affect each other.
+
+**Diagnosis:** nothing in the repository handled `chat_join_request`. Telegram
+supports the pattern natively: the bot may message the applicant for 5 minutes
+via `user_chat_id` without the person pressing Start, then approve or decline
+the request; pending requests remain visible to admins for manual review.
+
+**Recommendation / fix:** new isolated app `apps/join-gatekeeper/` (own DB,
+env, routes; no imports from other apps), deterministic account screening and
+answer rules, `shadow` mode before `enforce`, never writes into the group.
+Contract: `docs/proposals/2026-11-15-join-request-gatekeeper-v1.md`;
+backlog JOINGATE-1…5. Texts are agent drafts pending owner approval.
+
+**Status:** prepared (local candidate on branch
+`claude/join-request-gatekeeper-20261115`; not deployed).
+
+---
+
 ## 2026-09-24 UTC 13:54 — New advertising wave and repeated approval requests
 
 **Owner instruction in «Модератор»:** «давай, делай уже, там опятт новый скам,

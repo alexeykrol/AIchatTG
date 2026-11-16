@@ -244,9 +244,31 @@ updated: 2026-09-24
 - [ ] QUALITY-1: добавить отдельную content-grounding acceptance leg, которая
       проверяет ответ на верность выданным фрагментам знания. Нынешний judge
       проверяет поведение, но сознательно не оценивает фактическую опору.
-- [ ] GATEKEEPER-1: получить Product Owner copy, две HTTPS-ссылки и решение по
-      placement в Operator Console; только затем готовить отдельный activation
-      candidate/lease. Исторический import запрещён по умолчанию.
+- [ ] GATEKEEPER-1 (**на паузе с 15.11.2026, слово PO**): сценарии A
+      (Tribute → Telegram) и B (сайт → email) не развиваются и не активируются;
+      код и тесты `apps/gatekeeper/` не трогаются. Прежнее условие: Product
+      Owner copy, две HTTPS-ссылки и placement в Operator Console; исторический
+      import запрещён по умолчанию.
+- [ ] JOINGATE-1: сценарий C — привратник по заявкам на вступление в открытую
+      объединённую группу (`apps/join-gatekeeper/`, контракт
+      `docs/proposals/2026-11-15-join-request-gatekeeper-v1.md`). Решение PO:
+      какой бот (существующий бот Gatekeeper — A/B на паузе, вебхук свободен —
+      или новый) и id объединённой группы.
+- [ ] JOINGATE-2: PO утверждает тексты, вопросы, правила приёма и списки
+      стоп-слов в `apps/join-gatekeeper/JOIN_SCENARIO.json` (сейчас черновик
+      агента, `status: draft`); после этого — `ready`.
+- [ ] JOINGATE-3: activation candidate + lease: Compose-сервис и маршрут,
+      env, регистрация webhook с `chat_join_request`, бот — админ группы только
+      с `can_invite_users`, включить «одобрение новых участников». Сначала
+      `shadow` на несколько дней, разбор решений проверки аккаунтов, затем
+      `enforce`. Проверить на staging, что после первого ответа человека бот
+      пишет ему дольше 5-минутного окна (`inconclusive` до наблюдения).
+- [ ] JOINGATE-4 (Later): смысловая оценка ответов дешёвой моделью как
+      дополнительный голос к детерминированным правилам — только после
+      решения PO по политике платных вызовов.
+- [ ] JOINGATE-5 (Later): вариант через Mini App (`query_id` +
+      `sendChatJoinRequestWebApp` / `answerChatJoinRequestQuery`) — нужен
+      размещённый HTTPS Mini App.
 
 ## Later
 

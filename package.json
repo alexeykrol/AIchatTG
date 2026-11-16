@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test:gatekeeper": "npm --prefix apps/gatekeeper test",
+    "test:join-gatekeeper": "npm --prefix apps/join-gatekeeper test",
     "check:gatekeeper": "npm --prefix apps/gatekeeper run scenario:check",
     "test:runtime": "npm --prefix apps/telegram-runtime test && npm --prefix packages/telegram-core test",
     "test:routing-history": "node apps/telegram-runtime/scripts/verify-frozen-routing-v1.mjs",
@@ -18,6 +19,6 @@
     "test:ops": "node --test scripts/aichattg/test/docker-logs-safe.test.mjs",
     "test:assistant-acceptance": "node --test scripts/aichattg/test/assistant-acceptance-live.test.mjs",
     "test:operator-console": "npm --prefix apps/operator-console test",
-    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:infra && npm run test:release && npm run test:ops && npm run test:assistant-acceptance && npm run test:operator-console"
+    "test": "npm run test:gatekeeper && npm run test:runtime && npm run test:knowledge-snapshot && npm run test:infra && npm run test:release && npm run test:ops && npm run test:assistant-acceptance && npm run test:operator-console && npm run test:join-gatekeeper"
   }
 }
