@@ -6,6 +6,7 @@ import { JoinStore } from '../src/store.mjs';
 import { generateToken, hashToken } from '../src/tokens.mjs';
 import { runTriageCli } from '../src/triage-cli.mjs';
 import { classifyExport, executeTriage, sha256 } from '../src/triage.mjs';
+import { TelegramApiError } from '../src/telegram-api.mjs';
 import {
   ambiguousError, authError, CHAT_ID, FakeTelegram, noRequestError, scenario, T0, tempDir, TOKEN,
 } from './helpers.mjs';
@@ -269,6 +270,31 @@ describe('triage execute', () => {
     assert.equal(receipt.stopped.user_id, 2);
     assert.equal(receipt.stopped.state, 'auth');
     assert.equal(telegram.calls.length, 2);
+  });
+
+  test('403 "user is deactivated" is skipped_deleted, not a stop; rerun goes on', async () => {
+    const { files, telegram } = setup([request(1, { is_scam: true }), request(2, { is_scam: true }), request(3, { is_scam: true })]);
+    telegram.failNext('declineChatJoinRequest', new TelegramApiError(
+      'declineChatJoinRequest failed: Forbidden: user is deactivated', { method: 'declineChatJoinRequest', status: 403 },
+    ));
+    const { receipt } = await run(files['reject.json'], 'reject', { telegram });
+    assert.equal(receipt.completed, true);
+    assert.equal(receipt.stopped, null);
+    assert.deepEqual(receipt.counts, { skipped_deleted: 1, declined: 2 });
+    assert.match(receipt.results[0].error, /deactivated/);
+    assert.equal(telegram.calls.length, 3);
+    const again = await run(files['reject.json'], 'reject', { telegram });
+    assert.deepEqual(again.receipt.counts, { skipped_already_processed: 3 });
+  });
+
+  test('a real 403 (bot was kicked) still stops the batch', async () => {
+    const { files, telegram } = setup([request(1, { is_scam: true }), request(2, { is_scam: true })]);
+    telegram.failNext('declineChatJoinRequest', new TelegramApiError(
+      'declineChatJoinRequest failed: Forbidden: bot was kicked from the supergroup chat', { method: 'declineChatJoinRequest', status: 403 },
+    ));
+    const { receipt } = await run(files['reject.json'], 'reject', { telegram });
+    assert.equal(receipt.stopped.state, 'auth');
+    assert.equal(telegram.calls.length, 1);
   });
 
   test('CLI execute: dry run by default, confirm writes a 0600 receipt', async () => {
