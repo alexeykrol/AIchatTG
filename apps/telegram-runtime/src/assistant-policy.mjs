@@ -73,6 +73,14 @@ export const ASSISTANT_EMPTY_ASK_TEXT = '✍️ Теперь напишите в
  * детерминированный — ни модели, ни трат.
  */
 export const ASSISTANT_RETIRED_COMMAND_TEXT = 'Команда /ai больше не поддерживается. Используйте /ask ваш вопрос.';
+/**
+ * Stub mode (Product Owner decision, 2026-11-18): the course is being
+ * reworked and model answers are outdated. While
+ * `TELEGRAM_RUNTIME_ASSISTANT_STUB_MODE=true`, every assistant question gets
+ * exactly this code-owned text — no provider, no knowledge, no hints.
+ */
+export const ASSISTANT_STUB_TEXT = 'Ассистент сейчас обновляется вместе с курсом и временно не отвечает на вопросы.'
+  + ' По организационным вопросам пишите на почту курса.';
 export const ASSISTANT_UNAVAILABLE_TEXT = [
   'Подключённые учебные материалы сейчас проходят отдельную проверку, поэтому я не буду угадывать ответ или ссылку.',
   'Пока могу помочь со способом обращения ко мне: используйте /ask ваш вопрос или /help.',

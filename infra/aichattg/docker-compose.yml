@@ -159,6 +159,10 @@ services:
       # только при включённом синтетическом тестировании.
       TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER: "${TELEGRAM_RUNTIME_ASSISTANT_SYNTHETIC_DAILY_PER_USER:-200}"
       TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED: "${TELEGRAM_RUNTIME_ASSISTANT_KNOWLEDGE_ENABLED:-false}"
+      # Заглушка ассистента: true — один фиксированный ответ из кода на любой
+      # вопрос, без модели и базы знаний; модератор не затрагивается.
+      # false по умолчанию — выкат ничего не меняет, пока env не переключён.
+      TELEGRAM_RUNTIME_ASSISTANT_STUB_MODE: "${TELEGRAM_RUNTIME_ASSISTANT_STUB_MODE:-false}"
       # Анализатор запроса. off по умолчанию: выкат не меняет ни одного чата,
       # пока чат не назван явно. observe — вердикт только журналируется;
       # dispatch (этап Ф4) — в чатах из списка домен и форму ответа задаёт
