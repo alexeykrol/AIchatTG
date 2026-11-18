@@ -4,6 +4,22 @@
 
 ## Текущее состояние
 
+- **18.11.2026 02:18 UTC — анкета v2 (A0-bis) в проде в shadow.**
+  - Релиз `49db56d` (push в main), образ sha256:74c89c74…; откат — релиз
+    0ddf07c. За время работы заявок 0.
+  - B9: классифицировано 153 старые заявки — reject 32 (R_DELETED 22,
+    R_PROFILE_AD 10), accept_restricted 121. Списки в
+    `~/.local/share/aichattg-joingate/triage-2026-11-18/`, хеши отправлены
+    координатору. Исполнение ждёт «да» PO.
+  - B8: кандидат на approve — 8908799403, ждёт «да» вместе с B9.
+  - Заглушка ассистента 2.4.46:
+    - локальный main `c4f4915` = merge; не пушить без «да» PO.
+    - В нём же d8e5583 и c019a35 — модерация, ни разу не выкаченная.
+    - Рекомендованный кандидат — локальная ветка
+      `claude/assistant-stub-on-prod-ccea9af` = `fcda6a6` (ccea9af +
+      заглушка), worktree в scratchpad/stub-wt. Тесты 1520/0/5,
+      verify-release-source passed.
+    - Ждём выбор PO.
 - **18.11.2026 01:45 UTC — сценарий C в проде, режим shadow.** Подтверждено
   координатором aichattg-33 (он говорит от лица PO). Пункты B1–B4 и B6 passed:
   - бот @krolkeeper_bot (id 8991694910), группа @aialexekrol
