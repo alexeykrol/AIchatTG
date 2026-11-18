@@ -1,9 +1,27 @@
 # Project Snapshot — AIchatTG
 
-**Last Updated:** 2026-09-24 UTC
+**Last Updated:** 2026-11-18 UTC
 
 ## Текущее состояние
 
+- **18.11.2026 01:45 UTC — сценарий C в проде, режим shadow.** Подтверждено
+  координатором aichattg-33 (он говорит от лица PO). Пункты B1–B4 и B6 passed:
+  - бот @krolkeeper_bot (id 8991694910), группа @aialexekrol
+    (-1001381692730, join_by_request);
+  - релиз `releases/0ddf07c…` (source.tar = git archive; runtime.env = копия
+    ccea9af + JOIN-переменные; токен — отдельный файл
+    `/home/agent/aichattg/secrets/join-gatekeeper.env`, 0600);
+  - образ `aichattg/join-gatekeeper:0ddf07c…` (sha256:8c7bb300…), контейнер
+    healthy;
+  - данные в `data/d1ec1e63…/join-gatekeeper` (1000:1000, 0700); каталог data
+    принадлежит ubuntu, поэтому создавался через docker run;
+  - webhook `https://aikrol.questtales.com/join-gatekeeper/webhooks/telegram`;
+  - runtime и console не тронуты.
+
+  B8 (approve одной старой заявки + `/start` с тестовым токеном
+  b8-test-20261118) ждёт user_id от координатора и нажатия Start от PO.
+  B7 (enforce) и B9 (исполнение списков) не подтверждены.
+  Откат: deleteWebhook; `compose --profile join-gatekeeper stop`.
 - **17.11.2026 — сценарий C v2 (локальный кандидат, ветка выше):** токены
   платных студентов, «принят без права писать», разбор старых заявок,
   Compose-профиль `join-gatekeeper` (выключен, shadow). Тесты: join 105/105,
