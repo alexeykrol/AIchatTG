@@ -30,11 +30,21 @@ export function ambiguousError(method = 'sendMessage') {
   return new TelegramApiError(`${method} outcome is unknown: timeout`, { method, ambiguous: true });
 }
 
+export const READ_METHODS = new Set(['getUserProfilePhotos', 'getChat']);
+
+export function memoryLogger() {
+  const lines = [];
+  const log = (level) => (event, data = {}) => { lines.push({ level, event, ...data }); };
+  return { lines, info: log('info'), warn: log('warn'), error: log('error') };
+}
+
 export class FakeTelegram {
   constructor() {
     this.calls = [];
     this.failures = {};
     this.photoCount = 3;
+    // getChat(user) result; set personal_chat to simulate a profile channel.
+    this.chatInfo = { type: 'private' };
   }
 
   failNext(method, error) {
@@ -55,11 +65,13 @@ export class FakeTelegram {
   restrictChatMember(payload) { return this.record('restrictChatMember', payload, true); }
   banChatMember(payload) { return this.record('banChatMember', payload, true); }
   unbanChatMember(payload) { return this.record('unbanChatMember', payload, true); }
+  editMessageReplyMarkup(payload) { return this.record('editMessageReplyMarkup', payload, true); }
   getUserProfilePhotos(payload) { return this.record('getUserProfilePhotos', payload, { total_count: this.photoCount, photos: [] }); }
+  getChat(payload) { return this.record('getChat', payload, { id: payload.chat_id, ...this.chatInfo }); }
   setWebhook(payload) { return this.record('setWebhook', payload, true); }
 
   byMethod(method) { return this.calls.filter((call) => call.method === method); }
-  writes() { return this.calls.filter((call) => call.method !== 'getUserProfilePhotos'); }
+  writes() { return this.calls.filter((call) => !READ_METHODS.has(call.method)); }
 }
 
 export function tempDir() {
@@ -74,14 +86,18 @@ export function authError(method = 'declineChatJoinRequest') {
   return new TelegramApiError(`${method} failed: Bad Request: not enough rights`, { method, status: 400 });
 }
 
-export function harness({ mode = 'enforce', scenarioEdit, targetChatIds = [String(CHAT_ID)], groupLink = '' } = {}) {
+export function harness({
+  mode = 'enforce', scenarioEdit, targetChatIds = [String(CHAT_ID)], groupLink = '', logger,
+} = {}) {
   const dir = tempDir();
   const store = new JoinStore(path.join(dir, 'join-gatekeeper.sqlite'));
   const telegram = new FakeTelegram();
   const clock = { now: T0 };
   const sc = scenario(scenarioEdit);
   const config = { mode, targetChatIds, webhookSecret: SECRET, scenario: sc, groupLink };
-  const service = new JoinGatekeeperService({ config, store, telegram, scenario: sc, now: () => clock.now });
+  const service = new JoinGatekeeperService({
+    config, store, telegram, scenario: sc, now: () => clock.now, ...(logger ? { logger } : {}),
+  });
   let updateId = 1000;
   const h = {
     dir, store, telegram, clock, service, scenario: sc, config,
@@ -115,13 +131,13 @@ export function harness({ mode = 'enforce', scenarioEdit, targetChatIds = [Strin
         },
       });
     },
-    press(questionId, optionId, { userId = 555001 } = {}) {
+    press(questionId, optionId, { userId = 555001, messageId = 1 } = {}) {
       return service.handleUpdate({
         update_id: h.nextUpdateId(),
         callback_query: {
           id: `cb-${h.nextUpdateId()}`,
           from: { id: userId, is_bot: false, first_name: 'Мария' },
-          message: { message_id: 1, chat: { id: userId, type: 'private' } },
+          message: { message_id: messageId, chat: { id: userId, type: 'private' } },
           data: `jg:${questionId}:${optionId}`,
         },
       });
@@ -130,7 +146,13 @@ export function harness({ mode = 'enforce', scenarioEdit, targetChatIds = [Strin
   return h;
 }
 
-export const GOOD_ABOUT = 'Я продуктовый менеджер, внедряю ИИ в команде и хочу обсуждать практические кейсы с коллегами.';
+// Passes the whole questionnaire from Q1 (participate → agree → one topic → done).
+export async function passAll(h, { userId = 555001, topic = 'agents' } = {}) {
+  await h.press('participate', 'yes', { userId });
+  await h.press('rules', 'agree', { userId });
+  await h.press('topics', topic, { userId });
+  return h.press('topics', 'done', { userId });
+}
 
 export function readyScenarioFile(dir) {
   const raw = rawScenario();

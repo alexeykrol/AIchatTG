@@ -1,12 +1,18 @@
-import { evaluateAnswer } from './answers.mjs';
-import { parseCallbackData } from './scenario.mjs';
-import { screenApplicant } from './screening.mjs';
+import {
+  decideAnswers, evaluateChoice, evaluateCustomTopic, TOPIC_ROW, topicState,
+} from './answers.mjs';
+import { parseCallbackData, reasonText } from './scenario.mjs';
+import { precheckApplicant } from './screening.mjs';
 import { isAmbiguousTelegramError, isNoRequestError, permissions } from './telegram-api.mjs';
 import { hashToken, isTokenFormat } from './tokens.mjs';
 
 const SILENT_LOGGER = Object.freeze({ info() {}, warn() {}, error() {} });
 const MAX_STORED_ANSWER_CHARS = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Marker row in join_answers: answers before it belong to an earlier run of
+// the questionnaire (e.g. a probation questionnaire restarted via /start).
+const QUESTIONNAIRE_START = 'questionnaire_start';
+const SELECTED_MARK = '✅ ';
 const START_RE = /^\/start(?:@[A-Za-z0-9_]{1,64})?(?:\s+(\S+))?\s*$/;
 
 // Returns the /start payload ('' for bare /start) or null if not /start.
@@ -159,14 +165,33 @@ export class JoinGatekeeperService {
     }
   }
 
-  questionPayload(question) {
-    const payload = { text: question.promptText };
+  // Inline keyboard of a question. For multi_choice, `selected` topic ids are
+  // marked; "add your own" and "done" go last.
+  questionKeyboard(question, selected = []) {
     if (question.type === 'choice') {
-      payload.reply_markup = {
-        inline_keyboard: question.options.map((option) => [{ text: option.label, callback_data: option.callbackData }]),
-      };
+      return { inline_keyboard: question.options.map((option) => [{ text: option.label, callback_data: option.callbackData }]) };
     }
-    return payload;
+    return {
+      inline_keyboard: [
+        ...question.options.map((option) => [{
+          text: `${selected.includes(option.id) ? SELECTED_MARK : ''}${option.label}`, callback_data: option.callbackData,
+        }]),
+        [{ text: question.custom.label, callback_data: question.custom.callbackData }],
+        [{ text: question.done.label, callback_data: question.done.callbackData }],
+      ],
+    };
+  }
+
+  questionPayload(question, selected = []) {
+    return { text: question.promptText, reply_markup: this.questionKeyboard(question, selected) };
+  }
+
+  // Answers of the current questionnaire run (after the last start marker).
+  currentAnswers(applicationId) {
+    const rows = this.store.listAnswers(applicationId);
+    let from = 0;
+    rows.forEach((row, index) => { if (row.reason === QUESTIONNAIRE_START) from = index + 1; });
+    return rows.slice(from);
   }
 
   // Sends a sequence of DMs; stops at the first failure.
@@ -270,66 +295,56 @@ export class JoinGatekeeperService {
     const verified = this.store.getVerifiedMember(userId);
     if (verified && from.is_bot !== true) return this.approveVerifiedRequest(snapshot, verified, now);
 
-    // Rate limit: repeated requests per user per day.
-    if (this.store.countApplicationsLastDay(userId, now) >= limits.maxApplicationsPerUserPerDay) {
-      if (!this.enforce) {
-        const app = this.store.createApplication({
-          ...snapshot, state: 'shadow_logged', now, decidedAt: now, decisionReason: 'would_decline_rate_limit',
-        });
-        this.logger.info('shadow_decision', { application_id: app.id, decision: 'would_decline_rate_limit' });
-        return { action: 'shadow_logged', decision: 'would_decline_rate_limit', applicationId: app.id };
-      }
-      const app = this.store.createApplication({
-        ...snapshot, state: 'declined_rate_limit', now, decidedAt: now, decisionReason: 'rate_limit',
-      });
-      const actionState = await this.mutateRequest('declineChatJoinRequest', app);
-      this.store.updateApplication(app.id, { telegram_action_state: actionState });
-      this.logger.info('declined_rate_limit', { application_id: app.id, telegram_action_state: actionState });
-      return { action: 'declined_rate_limit', applicationId: app.id, telegramActionState: actionState };
-    }
+    const userChatId = request.user_chat_id ?? null;
 
-    const photoCount = await this.profilePhotoCount(from.id);
-    const screening = screenApplicant({ from, bio: request.bio ?? null, photoCount }, this.scenario);
+    // Pre-questionnaire checks (A0-bis). Precedence:
+    // R_RATE → R_SCAM → R_PROFILE_AD → R_STOPWORD.
+    if (this.store.countApplicationsLastDay(userId, now) >= limits.maxApplicationsPerUserPerDay) {
+      return this.declineBeforeQuestionnaire(snapshot, userChatId, 'R_RATE', 'declined_rate_limit', null, now);
+    }
+    let precheck = from.is_bot === true ? precheckApplicant({ from }, this.scenario) : null;
+    if (!precheck) {
+      // Best-effort reads (allowed in shadow mode); failure = unknown.
+      const profile = await this.profileInfo(from.id);
+      const photoCount = await this.profilePhotoCount(from.id);
+      precheck = precheckApplicant({
+        from,
+        bio: typeof request.bio === 'string' ? request.bio : profile.bio,
+        personalChat: profile.personalChat,
+        photoCount,
+      }, this.scenario);
+    }
+    if (precheck.reason) {
+      return this.declineBeforeQuestionnaire(snapshot, userChatId, precheck.reason, 'declined_screening', precheck, now);
+    }
+    const reasons = [...precheck.signals, ...precheck.info];
 
     if (!this.enforce) {
-      const decision = screening.verdict === 'block' ? 'would_decline_screening' : `would_ask_${screening.verdict}`;
+      const decision = 'would_start_questionnaire';
       const app = this.store.createApplication({
         ...snapshot,
         state: 'shadow_logged',
-        screeningVerdict: screening.verdict,
-        screeningReasons: screening.reasons,
-        userChatId: request.user_chat_id ?? null,
+        screeningVerdict: 'clean',
+        screeningReasons: reasons,
+        userChatId,
         now,
         decidedAt: now,
         decisionReason: decision,
       });
-      this.logger.info('shadow_decision', {
-        application_id: app.id, verdict: screening.verdict, reasons: screening.reasons, decision,
-      });
-      return { action: 'shadow_logged', decision, verdict: screening.verdict, applicationId: app.id };
+      this.logger.info('shadow_decision', { application_id: app.id, decision, info: precheck.info });
+      return { action: 'shadow_logged', decision, applicationId: app.id };
     }
 
     const app = this.store.createApplication({
       ...snapshot,
       state: 'screening',
-      screeningVerdict: screening.verdict,
-      screeningReasons: screening.reasons,
-      userChatId: request.user_chat_id ?? null,
+      screeningVerdict: 'clean',
+      screeningReasons: reasons,
+      userChatId,
       now,
     });
     if (!app) return { action: 'duplicate_application' };
-    this.logger.info('screened', { application_id: app.id, verdict: screening.verdict, reasons: screening.reasons });
-
-    if (screening.verdict === 'block') {
-      const actionState = await this.mutateRequest('declineChatJoinRequest', app);
-      this.store.updateApplication(app.id, {
-        state: 'declined_screening',
-        decided_at: this.now(),
-        decision_reason: 'screening_block',
-        telegram_action_state: actionState,
-      });
-      return { action: 'declined_screening', applicationId: app.id, telegramActionState: actionState };
-    }
+    this.logger.info('screened', { application_id: app.id, reason: null, info: precheck.info });
 
     if (!Number.isSafeInteger(request.user_chat_id) || request.user_chat_id <= 0) {
       return this.onDmFailure(app, { ambiguous: false }, { missingChat: true });
@@ -349,7 +364,51 @@ export class JoinGatekeeperService {
       dm_state: 'sent',
       deadline_at: now + limits.answerTimeoutSeconds * 1000,
     });
-    return { action: 'asking', applicationId: app.id, verdict: screening.verdict };
+    return { action: 'asking', applicationId: app.id, verdict: 'clean' };
+  }
+
+  // Pre-check decline (R_RATE / R_SCAM / R_PROFILE_AD / R_STOPWORD): no
+  // questionnaire. Shadow: record + log only. Enforce: reason DM first, then
+  // decline (user_chat_id stops working once the request is processed).
+  async declineBeforeQuestionnaire(snapshot, userChatId, code, state, precheck, now) {
+    const signals = precheck ? precheck.signals : [];
+    const screening = precheck
+      ? { screeningVerdict: 'block', screeningReasons: [...precheck.signals, ...precheck.info] }
+      : {};
+    if (!this.enforce) {
+      const app = this.store.createApplication({
+        ...snapshot, ...screening, state: 'shadow_logged', userChatId, now, decidedAt: now, decisionReason: code,
+      });
+      this.logger.info('shadow_decision', { application_id: app.id, decision: 'would_decline', reason: code, signals });
+      return { action: 'shadow_logged', decision: 'would_decline', reason: code, applicationId: app.id };
+    }
+    const app = this.store.createApplication({
+      ...snapshot, ...screening, state, userChatId, now, decidedAt: now, decisionReason: code,
+    });
+    this.logger.info('screened', { application_id: app.id, reason: code, signals });
+    return this.declineWithReason(app, code, state);
+  }
+
+  // Decline with exactly one reason code. The reason DM goes BEFORE
+  // declineChatJoinRequest: an unopened private chat (user_chat_id) can no
+  // longer be written to once the request is processed.
+  async declineWithReason(app, code, state) {
+    const update = {};
+    if (Number.isSafeInteger(Number(app.user_chat_id)) && Number(app.user_chat_id) > 0) {
+      const sent = await this.sendDm(app.user_chat_id, { text: reasonText(this.scenario, code) });
+      if (app.dm_state === 'none') update.dm_state = sent.ok ? 'sent' : 'failed';
+    }
+    const actionState = await this.mutateRequest('declineChatJoinRequest', app);
+    this.store.updateApplication(app.id, {
+      ...update,
+      state,
+      decided_at: this.now(),
+      decision_reason: code,
+      telegram_action_state: actionState,
+      questionnaire_state: 'none',
+    });
+    this.logger.info('declined', { application_id: app.id, reason: code, state, telegram_action_state: actionState });
+    return { action: state, reason: code, applicationId: app.id, telegramActionState: actionState };
   }
 
   async approveVerifiedRequest(snapshot, verified, now) {
@@ -357,7 +416,7 @@ export class JoinGatekeeperService {
       const app = this.store.createApplication({
         ...snapshot, state: 'shadow_logged', now, decidedAt: now, decisionReason: 'would_approve_token',
       });
-      this.logger.info('shadow_decision', { application_id: app.id, decision: 'would_approve_token' });
+      this.logger.info('shadow_decision', { application_id: app.id, decision: 'would_approve', reason: 'token' });
       return { action: 'shadow_logged', decision: 'would_approve_token', applicationId: app.id };
     }
     const app = this.store.createApplication({
@@ -372,6 +431,22 @@ export class JoinGatekeeperService {
     const reason = actionState === 'failed' ? 'token_approve_failed' : 'token_approve_inconclusive';
     this.store.updateApplication(app.id, { state: 'manual_review', decision_reason: reason, telegram_action_state: actionState });
     return { action: 'manual_review', reason, applicationId: app.id };
+  }
+
+  // getChat(user_id) → { personalChat: true|false|null, bio: string|null }.
+  // Failure or absence = unknown, never a signal.
+  async profileInfo(userId) {
+    try {
+      const chat = await this.telegram.getChat({ chat_id: userId });
+      if (!chat || typeof chat !== 'object') return { personalChat: null, bio: null };
+      return {
+        personalChat: chat.personal_chat && typeof chat.personal_chat === 'object' ? true : false,
+        bio: typeof chat.bio === 'string' ? chat.bio : null,
+      };
+    } catch (error) {
+      this.logger.warn('profile_info_unknown', { error: error.message });
+      return { personalChat: null, bio: null };
+    }
   }
 
   async profilePhotoCount(userId) {
@@ -409,29 +484,44 @@ export class JoinGatekeeperService {
     if (!this.enforce) return { action: 'ignored_shadow' };
     const from = query?.from;
     if (!from || !Number.isSafeInteger(from.id)) return { action: 'ignored_sender' };
-    try {
-      await this.telegram.answerCallbackQuery({ callback_query_id: String(query.id) });
-    } catch (error) {
-      this.logger.warn('answer_callback_failed', { error: error.message });
-    }
     const parsed = parseCallbackData(query.data);
-    if (!parsed) return { action: 'ignored_callback' };
-    return this.withUserLock(from.id, async () => {
-      const app = this.store.findAskingByUser(from.id);
-      if (!app) return { action: 'ignored_no_application' };
-      const question = this.scenario.questions[app.question_index];
-      if (!question || question.id !== parsed.questionId) return { action: 'ignored_stale_callback' };
-      return this.processAnswer(app, { optionId: parsed.optionId }, `option:${parsed.optionId}`);
-    });
+    let result = { action: 'ignored_callback' };
+    try {
+      if (parsed) {
+        result = await this.withUserLock(from.id, async () => {
+          const app = this.store.findAskingByUser(from.id);
+          if (!app) return { action: 'ignored_no_application' };
+          const question = this.scenario.questions[app.question_index];
+          if (!question || question.id !== parsed.questionId) return { action: 'ignored_stale_callback' };
+          if (question.type === 'multi_choice') return this.processTopicButton(app, question, parsed.optionId, query.message);
+          return this.processAnswer(app, { optionId: parsed.optionId }, `option:${parsed.optionId}`);
+        });
+      }
+    } finally {
+      try {
+        await this.telegram.answerCallbackQuery({
+          callback_query_id: String(query.id), ...(result?.notice ? { text: result.notice } : {}),
+        });
+      } catch (error) {
+        this.logger.warn('answer_callback_failed', { error: error.message });
+      }
+    }
+    return result;
   }
 
+  openConversation(app) {
+    return app.conversation_open ? app : this.store.updateApplication(app.id, { conversation_open: 1 });
+  }
+
+  // A typed message or a pressed button on a choice question.
   async processAnswer(app, input, storedText) {
     const now = this.now();
-    if (!app.conversation_open) app = this.store.updateApplication(app.id, { conversation_open: 1 });
+    app = this.openConversation(app);
     const question = this.scenario.questions[app.question_index];
     if (!question) return this.finalize(app);
+    if (question.type === 'multi_choice') return this.processTopicText(app, question, input.text);
 
-    const result = evaluateAnswer(question, input, { linkPatterns: this.scenario.screening.compiledLinkPatterns });
+    const result = evaluateChoice(question, input);
     this.store.addAnswer({
       applicationId: app.id,
       questionId: question.id,
@@ -440,53 +530,119 @@ export class JoinGatekeeperService {
       reason: result.reason,
       now,
     });
-
-    if (!result.pass && result.retryable && app.retries_used < 1) {
-      this.store.updateApplication(app.id, { retries_used: app.retries_used + 1 });
-      const sent = await this.sendSequence(app.user_chat_id, [
-        { text: this.scenario.messages.retry },
-        this.questionPayload(question),
-      ]);
+    if (result.reason === 'no_matching_option' || result.reason === 'unknown_option') {
+      // Not an answer: show the question again (no extra text).
+      const sent = await this.sendDm(app.user_chat_id, this.questionPayload(question));
       if (!sent.ok) return this.onDmFailure(app, sent);
-      return { action: 'retry', applicationId: app.id, questionId: question.id, reason: result.reason };
+      return { action: 'reasked', applicationId: app.id, questionId: question.id };
     }
+    if (!result.pass) return this.failQuestionnaire(app, result.reason);
+    return this.advance(app);
+  }
 
+  async advance(app) {
     const nextIndex = app.question_index + 1;
-    if (nextIndex < this.scenario.questions.length) {
-      app = this.store.updateApplication(app.id, { question_index: nextIndex, retries_used: 0 });
-      const sent = await this.sendDm(app.user_chat_id, this.questionPayload(this.scenario.questions[nextIndex]));
-      if (!sent.ok) return this.onDmFailure(app, sent);
-      return { action: 'asked', applicationId: app.id, questionId: this.scenario.questions[nextIndex].id };
-    }
     app = this.store.updateApplication(app.id, { question_index: nextIndex, retries_used: 0 });
+    if (nextIndex < this.scenario.questions.length) {
+      const next = this.scenario.questions[nextIndex];
+      const sent = await this.sendDm(app.user_chat_id, this.questionPayload(next));
+      if (!sent.ok) return this.onDmFailure(app, sent);
+      return { action: 'asked', applicationId: app.id, questionId: next.id };
+    }
     return this.finalize(app);
+  }
+
+  // Buttons of the multi_choice (topics) question.
+  async processTopicButton(app, question, optionId, message) {
+    const now = this.now();
+    app = this.openConversation(app);
+    if (optionId === question.done.id) {
+      const state = topicState(question, this.currentAnswers(app.id));
+      if (!state.satisfied) {
+        return { action: 'topics_empty', applicationId: app.id, notice: this.scenario.messages[question.done.emptyNotice] };
+      }
+      this.store.addAnswer({
+        applicationId: app.id,
+        questionId: question.id,
+        text: `selected:${state.selected.join(',')};custom:${state.custom}`,
+        pass: true,
+        reason: TOPIC_ROW.done,
+        now,
+      });
+      return this.advance(app);
+    }
+    if (optionId === question.custom.id) {
+      const sent = await this.sendDm(app.user_chat_id, { text: this.scenario.messages[question.custom.prompt] });
+      if (!sent.ok) return this.onDmFailure(app, sent);
+      return { action: 'custom_topic_prompt', applicationId: app.id };
+    }
+    if (!question.options.some((option) => option.id === optionId)) return { action: 'ignored_callback' };
+    this.store.addAnswer({ applicationId: app.id, questionId: question.id, text: optionId, pass: true, reason: TOPIC_ROW.toggle, now });
+    const state = topicState(question, this.currentAnswers(app.id));
+    await this.editKeyboard(message, this.questionKeyboard(question, state.selected));
+    return { action: 'topic_toggled', applicationId: app.id, selected: state.selected };
+  }
+
+  // Re-render the keyboard of the question message; failure is not fatal.
+  async editKeyboard(message, replyMarkup) {
+    const chatId = message?.chat?.id;
+    const messageId = message?.message_id;
+    if (!Number.isSafeInteger(chatId) || chatId <= 0 || !Number.isSafeInteger(messageId)) return 'skipped';
+    try {
+      await this.telegram.editMessageReplyMarkup({ chat_id: chatId, message_id: messageId, reply_markup: replyMarkup });
+      return 'done';
+    } catch (error) {
+      this.logger.warn('edit_keyboard_failed', { error: error.message });
+      return 'failed';
+    }
+  }
+
+  // Free text while on the topics question = the user's own topic.
+  async processTopicText(app, question, text) {
+    const now = this.now();
+    const evaluation = evaluateCustomTopic(question, typeof text === 'string' ? text : '', this.scenario);
+    if (evaluation.kind === 'reject') {
+      this.store.addAnswer({
+        applicationId: app.id, questionId: question.id, text: text.slice(0, MAX_STORED_ANSWER_CHARS), pass: false,
+        reason: evaluation.reason, now,
+      });
+      return this.failQuestionnaire(app, evaluation.reason);
+    }
+    if (evaluation.kind === 'accept') {
+      this.store.addAnswer({
+        applicationId: app.id, questionId: question.id, text: text.slice(0, MAX_STORED_ANSWER_CHARS), pass: true,
+        reason: TOPIC_ROW.custom, now,
+      });
+    }
+    // Keep the topics keyboard at hand so the user can press «Готово».
+    const state = topicState(question, this.currentAnswers(app.id));
+    const sent = await this.sendDm(app.user_chat_id, this.questionPayload(question, state.selected));
+    if (!sent.ok) return this.onDmFailure(app, sent);
+    return {
+      action: evaluation.kind === 'accept' ? 'custom_topic_added' : 'topic_ignored',
+      applicationId: app.id,
+      ...(evaluation.kind === 'ignore' ? { reason: evaluation.reason } : {}),
+    };
+  }
+
+  // An answer that declines with its own reason code.
+  async failQuestionnaire(app, code) {
+    if (app.state === 'probation') return this.finalizeProbation(app, false, code);
+    return this.declineWithReason(app, code, 'declined_answers');
   }
 
   async finalize(app) {
     const { messages, questions } = this.scenario;
-    const lastPass = new Map();
-    for (const answer of this.store.listAnswers(app.id)) lastPass.set(answer.question_id, answer.pass === 1);
-    const allPassed = questions.every((question) => lastPass.get(question.id) === true);
+    const decision = decideAnswers(questions, this.currentAnswers(app.id));
+    if (!decision.approve) {
+      // Unreachable by construction (rejecting answers decline at once); kept
+      // so an inconsistency never approves. The sweep closes it as R_TIMEOUT.
+      this.logger.error('decision_incomplete', { application_id: app.id, missing: decision.missing });
+      return { action: 'incomplete', applicationId: app.id, missing: decision.missing };
+    }
     const now = this.now();
-    if (app.state === 'probation') return this.finalizeProbation(app, allPassed);
+    if (app.state === 'probation') return this.finalizeProbation(app, true);
     if (app.state === 'manual_review') this.store.updateApplication(app.id, { questionnaire_state: 'none' });
-
-    if (!allPassed) {
-      const actionState = await this.mutateRequest('declineChatJoinRequest', app);
-      this.store.updateApplication(app.id, {
-        state: 'declined_answers', decided_at: now, decision_reason: 'answers_failed', telegram_action_state: actionState,
-      });
-      await this.sendDm(app.user_chat_id, { text: messages.declined_answers });
-      return { action: 'declined_answers', applicationId: app.id, telegramActionState: actionState };
-    }
-
-    if (app.screening_verdict === 'review') {
-      this.store.updateApplication(app.id, {
-        state: 'manual_review', decided_at: now, decision_reason: 'screening_review',
-      });
-      await this.sendDm(app.user_chat_id, { text: messages.manual_review });
-      return { action: 'manual_review', reason: 'screening_review', applicationId: app.id };
-    }
 
     const actionState = await this.mutateRequest('approveChatJoinRequest', app);
     if (actionState === 'done') {
@@ -494,6 +650,7 @@ export class JoinGatekeeperService {
         state: 'approved', decided_at: now, decision_reason: 'answers_passed', telegram_action_state: 'done',
       });
       await this.sendDm(app.user_chat_id, { text: messages.approved });
+      this.logger.info('approved', { application_id: app.id });
       return { action: 'approved', applicationId: app.id };
     }
     // Approve failed or outcome unknown: the request stays with the admin.
@@ -507,20 +664,22 @@ export class JoinGatekeeperService {
 
   // ---------------------------------------------------------- probation
 
-  async finalizeProbation(app, allPassed) {
+  // Probation keeps its own texts (contract v2 §2); a failure records the
+  // reason code as decision_reason.
+  async finalizeProbation(app, passed, code = null) {
     const { messages } = this.scenario;
     const userId = app.user_id;
     const probations = this.store.listByUserAndStates(userId, ['probation']);
-    if (allPassed) {
+    if (passed) {
       const results = [];
       for (const probation of probations) results.push(await this.passProbation(probation, 'answers_passed'));
       await this.sendDm(app.user_chat_id, { text: messages.probation_passed });
       return { action: 'probation_passed', applicationId: app.id, results };
     }
     const results = [];
-    for (const probation of probations) results.push(await this.removeFromProbation(probation, 'answers_failed'));
+    for (const probation of probations) results.push(await this.removeFromProbation(probation, code));
     await this.sendDm(app.user_chat_id, { text: messages.probation_removed });
-    return { action: 'probation_removed', applicationId: app.id, results };
+    return { action: 'probation_removed', reason: code, applicationId: app.id, results };
   }
 
   async passProbation(app, reason) {
@@ -581,6 +740,9 @@ export class JoinGatekeeperService {
       return { action: 'shadow_logged', decision: 'would_start_questionnaire', applicationId: target.id };
     }
     const intro = target.state === 'probation' ? messages.probation_intro : messages.greeting;
+    this.store.addAnswer({
+      applicationId: target.id, questionId: 'questionnaire', text: null, pass: true, reason: QUESTIONNAIRE_START, now: this.now(),
+    });
     this.store.updateApplication(target.id, {
       questionnaire_state: 'active',
       question_index: 0,
@@ -679,12 +841,12 @@ export class JoinGatekeeperService {
         // is processed, so the order matters when the chat is not yet open.
         const insideWindow = now < app.created_at + limits.dmWindowSeconds * 1000;
         if (this.enforce && app.user_chat_id && (app.conversation_open === 1 || insideWindow)) {
-          const sent = await this.sendDm(app.user_chat_id, { text: messages.timeout });
+          const sent = await this.sendDm(app.user_chat_id, { text: reasonText(this.scenario, 'R_TIMEOUT') });
           if (sent.ok) timeoutDms += 1;
         }
         const actionState = this.enforce ? await this.mutateRequest('declineChatJoinRequest', app) : 'none';
         this.store.updateApplication(app.id, {
-          state: 'timed_out', decided_at: now, decision_reason: 'timeout', telegram_action_state: actionState,
+          state: 'timed_out', decided_at: now, decision_reason: 'R_TIMEOUT', telegram_action_state: actionState,
         });
         timedOut += 1;
       });

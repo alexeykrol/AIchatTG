@@ -38,7 +38,13 @@ describe('scenario', () => {
       'crypto', 'заработ', 'casino', 'казино', '18+', 'интим', 'escort', 'xxx',
       'porn', 'порн', 'onlyfans', 'сигнал', 'forex', 'форекс', 'раскрут',
     ]);
-    assert.equal(scenario.questions.length, 3);
+    assert.equal(scenario.schemaVersion, 2);
+    assert.deepEqual(scenario.questions.map((q) => [q.id, q.type]), [
+      ['participate', 'choice'], ['rules', 'choice'], ['topics', 'multi_choice'],
+    ]);
+    assert.deepEqual(Object.keys(scenario.reasons).sort(), [
+      'R_PROFILE_AD', 'R_RATE', 'R_READER', 'R_RULES', 'R_SCAM', 'R_STOPWORD', 'R_TIMEOUT', 'R_TOPIC_AD',
+    ]);
     assert.deepEqual(scenario.limits, {
       answerTimeoutSeconds: 1800, dmWindowSeconds: 300, maxApplicationsPerUserPerDay: 3, retentionDays: 30, probationDays: 7,
     });
@@ -54,9 +60,25 @@ describe('scenario', () => {
   const broken = {
     'duplicate question id': (raw) => { raw.questions[1].id = raw.questions[0].id; },
     'missing referenced prompt': (raw) => { raw.questions[0].prompt = 'nope'; },
-    'missing required message': (raw) => { delete raw.messages.timeout; },
-    'accepted references unknown option': (raw) => { raw.questions[0].accepted.push('ghost'); },
-    'bad free_text rule': (raw) => { raw.questions[1].rule.minWords = -1; },
+    'missing required message': (raw) => { delete raw.messages.approved; },
+    'missing reason message': (raw) => { delete raw.messages.reject_timeout; },
+    'schemaVersion 1': (raw) => { raw.schemaVersion = 1; },
+    'unknown reject code': (raw) => { raw.questions[0].options[1].reject = 'R_NOPE'; },
+    'pre-check code on an answer option': (raw) => { raw.questions[0].options[1].reject = 'R_SCAM'; },
+    'choice with no rejecting option': (raw) => { delete raw.questions[0].options[1].reject; },
+    'choice with only rejecting options': (raw) => { raw.questions[0].options[0].reject = 'R_READER'; },
+    'unknown option key': (raw) => { raw.questions[0].options[0].accepted = true; },
+    'free_text type no longer supported': (raw) => { raw.questions[0].type = 'free_text'; },
+    'missing reason code': (raw) => { delete raw.reasons.R_TIMEOUT; },
+    'reason references missing message': (raw) => { raw.reasons.R_RATE = 'nope'; },
+    'unknown reason code': (raw) => { raw.reasons.R_EXTRA = 'reject_rate'; },
+    'multi_choice minSelected 0': (raw) => { raw.questions[2].minSelected = 0; },
+    'multi_choice duplicate custom id': (raw) => { raw.questions[2].custom.id = 'agents'; },
+    'multi_choice missing done notice': (raw) => { raw.questions[2].done.emptyNotice = 'nope'; },
+    'multi_choice custom reject not R_TOPIC_AD': (raw) => { raw.questions[2].custom.reject = 'R_RULES'; },
+    'multi_choice not last': (raw) => { raw.questions.reverse(); },
+    'label too long': (raw) => { raw.questions[2].options[0].label = 'x'.repeat(61); },
+    'callback data over 64 bytes': (raw) => { raw.questions[2].id = `t${'x'.repeat(31)}`; raw.questions[2].options[0].id = `o${'y'.repeat(31)}`; },
     'bad regex': (raw) => { raw.screening.linkPatterns.push('(['); },
     'timeout out of range': (raw) => { raw.limits.answerTimeoutSeconds = 5; },
     'dm window above Telegram 5 minutes': (raw) => { raw.limits.dmWindowSeconds = 600; },

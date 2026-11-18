@@ -3,7 +3,7 @@ import { afterEach, describe, test } from 'node:test';
 import { parseStartCommand } from '../src/service.mjs';
 import { generateToken, hashToken } from '../src/tokens.mjs';
 import {
-  ambiguousError, CHAT_ID, definiteError, GOOD_ABOUT, harness, noRequestError, OTHER_CHAT_ID, T0,
+  ambiguousError, CHAT_ID, definiteError, harness, noRequestError, OTHER_CHAT_ID, passAll, T0,
 } from './helpers.mjs';
 
 const USER = 555001;
@@ -71,7 +71,7 @@ describe('tokens via /start', () => {
     const stored = h.store.getApplication(applicationId);
     assert.equal(stored.state, 'approved_token');
     assert.equal(stored.telegram_action_state, 'done');
-    assert.equal((await h.say(GOOD_ABOUT)).action, 'ignored_no_application');
+    assert.equal((await h.say('Да, хочу участвовать')).action, 'ignored_no_application');
   });
 
   test('same account again → already verified, no Telegram mutation', async () => {
@@ -124,6 +124,7 @@ describe('tokens via /start', () => {
     assert.equal(h.telegram.byMethod('getUserProfilePhotos').length, 0, 'no screening');
     const bot = await h.joinRequest({ user: { id: USER, is_bot: true }, chatId: CHAT_ID });
     assert.equal(bot.action, 'declined_screening', 'is_bot still blocks');
+    assert.equal(bot.reason, 'R_SCAM');
   });
 
   test('token lifts probation → probation_passed reason token', async () => {
@@ -198,12 +199,13 @@ describe('probation', () => {
     const { applicationId } = await toProbation();
     const started = await h.say('/start gate');
     assert.equal(started.action, 'questionnaire_started');
-    assert.deepEqual(texts().slice(-2), [h.scenario.messages.probation_intro, h.scenario.messages.q_purpose]);
-    assert.equal((await h.press('purpose', 'discuss')).action, 'asked');
-    assert.equal((await h.say(GOOD_ABOUT)).action, 'asked');
+    assert.deepEqual(texts().slice(-2), [h.scenario.messages.probation_intro, h.scenario.messages.q_participate]);
+    assert.equal((await h.press('participate', 'yes')).action, 'asked');
+    assert.equal((await h.press('rules', 'agree')).action, 'asked');
     // No 5-minute rule: answering much later still works.
     h.clock.now += 3 * DAY;
-    const done = await h.press('rules', 'agree');
+    await h.press('topics', 'careers');
+    const done = await h.press('topics', 'done');
     assert.equal(done.action, 'probation_passed');
     const stored = h.store.getApplication(applicationId);
     assert.equal(stored.state, 'probation_passed');
@@ -224,10 +226,10 @@ describe('probation', () => {
     h = harness();
     const { applicationId } = await toProbation();
     await h.say('/start gate');
-    await h.press('purpose', 'ads');
-    await h.say(GOOD_ABOUT);
-    const done = await h.press('rules', 'agree');
+    const done = await h.press('participate', 'no');
     assert.equal(done.action, 'probation_removed');
+    assert.equal(done.reason, 'R_READER');
+    assert.equal(h.store.getApplication(applicationId).decision_reason, 'R_READER');
     assert.deepEqual(h.telegram.byMethod('banChatMember').map((c) => c.payload), [{ chat_id: CHAT_ID, user_id: USER }]);
     assert.deepEqual(h.telegram.byMethod('unbanChatMember').map((c) => c.payload),
       [{ chat_id: CHAT_ID, user_id: USER, only_if_banned: true }]);
@@ -241,7 +243,7 @@ describe('probation', () => {
     const silent = await toProbation();
     const talked = await toProbation({ id: OTHER_USER });
     await h.say('/start gate', { userId: OTHER_USER });
-    await h.press('purpose', 'discuss', { userId: OTHER_USER });
+    await h.press('participate', 'yes', { userId: OTHER_USER });
     h.clock.now = T0 + 7 * DAY - 1;
     assert.equal((await h.service.sweep()).probationExpired, 0);
     const sendsBefore = h.telegram.byMethod('sendMessage').length;
@@ -259,20 +261,48 @@ describe('probation', () => {
       [[OTHER_USER, h.scenario.messages.probation_removed]]);
   });
 
-  test('/start from DM-failure manual_review runs that questionnaire; screening review stays manual_review', async () => {
+  test('/start from DM-failure manual_review runs that questionnaire → approve', async () => {
     h = harness();
     h.telegram.failNext('sendMessage', definiteError());
-    const { applicationId } = await h.joinRequest({ bio: 'Мой блог https://example.com' });
+    h.telegram.failNext('approveChatJoinRequest', definiteError('approveChatJoinRequest'));
+    const { applicationId } = await h.joinRequest();
+    assert.equal(h.store.getApplication(applicationId).state, 'manual_review');
     assert.equal((await h.say('/start')).action, 'questionnaire_started');
     assert.equal(texts().at(-2), h.scenario.messages.greeting);
-    await h.press('purpose', 'discuss');
-    await h.say(GOOD_ABOUT);
-    const done = await h.press('rules', 'agree');
-    assert.equal(done.action, 'manual_review');
-    assert.equal(done.reason, 'screening_review');
-    assert.equal(h.store.getApplication(applicationId).state, 'manual_review');
-    assert.equal(h.telegram.byMethod('approveChatJoinRequest').length, 0);
+    const done = await passAll(h);
+    assert.equal(done.action, 'approved');
+    assert.equal(h.store.getApplication(applicationId).state, 'approved');
     assert.equal((await h.say('/start')).action, 'start_info', 'questionnaire not repeated');
+  });
+
+  test('/start from DM-failure manual_review: rejecting answer → decline with its code', async () => {
+    h = harness();
+    h.telegram.failNext('sendMessage', definiteError());
+    h.telegram.failNext('approveChatJoinRequest', definiteError('approveChatJoinRequest'));
+    const { applicationId } = await h.joinRequest();
+    await h.say('/start');
+    await h.press('participate', 'yes');
+    const done = await h.press('rules', 'disagree');
+    assert.equal(done.reason, 'R_RULES');
+    const stored = h.store.getApplication(applicationId);
+    assert.equal(stored.state, 'declined_answers');
+    assert.equal(stored.decision_reason, 'R_RULES');
+  });
+
+  test('restarted probation questionnaire ignores topic toggles of the earlier run', async () => {
+    h = harness();
+    await toProbation();
+    await h.say('/start gate');
+    await h.press('participate', 'yes');
+    await h.press('rules', 'agree');
+    await h.press('topics', 'agents');
+    // The DM of the next step fails → questionnaire closed, probation kept.
+    h.telegram.failNext('sendMessage', definiteError());
+    assert.equal((await h.press('topics', 'custom')).action, 'questionnaire_dm_failed');
+    await h.say('/start gate');
+    await h.press('participate', 'yes');
+    await h.press('rules', 'agree');
+    assert.equal((await h.press('topics', 'done')).action, 'topics_empty', 'earlier selection does not carry over');
   });
 
   test('/start with nothing pending → info text', async () => {

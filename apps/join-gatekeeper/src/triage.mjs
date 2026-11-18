@@ -3,7 +3,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { screenApplicant } from './screening.mjs';
+import { PRECHECK_REASONS } from './scenario.mjs';
+import { precheckApplicant } from './screening.mjs';
 import {
   isAmbiguousTelegramError, isAuthOrRateError, isNoRequestError, permissions,
 } from './telegram-api.mjs';
@@ -18,7 +19,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const EXPORT_KEYS = new Set(['schema', 'chat_id', 'generated_at', 'requests']);
 const STRING_FIELDS = ['first_name', 'last_name', 'username', 'bio', 'lang_code'];
-const BOOLEAN_FIELDS = ['is_bot', 'is_scam', 'is_fake', 'is_premium', 'has_photo'];
+// has_personal_chat and is_deleted (A0-bis) are optional: exports without them
+// stay valid.
+const BOOLEAN_FIELDS = ['is_bot', 'is_scam', 'is_fake', 'is_premium', 'has_photo', 'has_personal_chat', 'is_deleted'];
+// Triage-only code (no DM is ever sent in triage): a deleted account. Highest
+// precedence, before R_SCAM.
+export const R_DELETED = 'R_DELETED';
+const TRIAGE_REASONS = Object.freeze([R_DELETED, ...PRECHECK_REASONS]);
 const REQUEST_KEYS = new Set(['user_id', 'requested_at', ...STRING_FIELDS, ...BOOLEAN_FIELDS]);
 
 export function sha256(data) {
@@ -67,25 +74,30 @@ export function validateExport(raw) {
   return raw;
 }
 
-// One request → { list, reasons }. null/missing = unknown, never false.
+// One request → { list, reasons, signals }. Same pre-check rules as the live
+// flow (A0-bis), preceded by the triage-only R_DELETED:
+// R_DELETED → R_SCAM → R_PROFILE_AD → R_STOPWORD → reject; anything else →
+// accept_restricted (the questionnaire decides later). `reasons` holds the
+// reason code (empty for accept_restricted); `signals` the matched signal
+// codes. null/missing = unknown, never false.
 export function classifyRequest(request, scenario) {
-  const flagReasons = ['is_bot', 'is_scam', 'is_fake'].filter((flag) => request[flag] === true);
+  if (request.is_deleted === true) return { list: 'reject', reasons: [R_DELETED], signals: ['is_deleted'] };
   const photoCount = request.has_photo === true ? 1 : (request.has_photo === false ? 0 : null);
-  const screening = screenApplicant({
+  const result = precheckApplicant({
     from: {
       is_bot: request.is_bot === true,
       first_name: request.first_name ?? undefined,
       last_name: request.last_name ?? undefined,
       username: request.username ?? undefined,
-      language_code: request.lang_code ?? undefined,
-      is_premium: request.is_premium ?? undefined,
     },
     bio: request.bio ?? null,
+    personalChat: typeof request.has_personal_chat === 'boolean' ? request.has_personal_chat : null,
     photoCount,
+    isScam: request.is_scam === true,
+    isFake: request.is_fake === true,
   }, scenario);
-  const reasons = [...new Set([...flagReasons, ...screening.reasons])];
-  const list = flagReasons.length > 0 || screening.verdict === 'block' ? 'reject' : 'accept_restricted';
-  return { list, reasons };
+  if (result.reason) return { list: 'reject', reasons: [result.reason], signals: result.signals };
+  return { list: 'accept_restricted', reasons: [], signals: [] };
 }
 
 // Pure: export text → the three output documents.
@@ -102,8 +114,8 @@ export function classifyExport({ exportText, scenario, now = Date.now() }) {
   const lists = { reject: [], accept_restricted: [] };
   const reasonCounts = { reject: {}, accept_restricted: {} };
   for (const request of data.requests) {
-    const { list, reasons } = classifyRequest(request, scenario);
-    lists[list].push({ user_id: request.user_id, requested_at: request.requested_at, reasons });
+    const { list, reasons, signals } = classifyRequest(request, scenario);
+    lists[list].push({ user_id: request.user_id, requested_at: request.requested_at, reasons, signals });
     const counts = reasonCounts[list];
     if (reasons.length === 0) counts.none = (counts.none || 0) + 1;
     for (const reason of reasons) counts[reason] = (counts[reason] || 0) + 1;
@@ -166,6 +178,9 @@ export function parseTriageList(listText, action) {
       throw new Error('triage list items must have unique positive integer user_id');
     }
     if (!Array.isArray(item.reasons)) throw new Error('triage list item reasons must be an array');
+    if (item.signals !== undefined && (!Array.isArray(item.signals) || item.signals.some((v) => typeof v !== 'string'))) {
+      throw new Error('triage list item signals must be an array of strings');
+    }
     seen.add(item.user_id);
   }
   return doc;
@@ -262,7 +277,7 @@ export async function executeTriage({
     calls += 1;
     const payload = { chat_id: chatId, user_id: item.user_id };
     const t = now();
-    const base = { chatId: String(chatId), userId: String(item.user_id), now: t, decidedAt: t, screeningReasons: item.reasons };
+    const base = { chatId: String(chatId), userId: String(item.user_id), now: t, decidedAt: t, screeningReasons: [...item.reasons, ...(item.signals ?? [])] };
 
     const verified = store.getVerifiedMember(item.user_id);
     if (verified) {
@@ -279,8 +294,9 @@ export async function executeTriage({
       const result = await callTelegram(telegram, 'declineChatJoinRequest', payload);
       if (STOP_STATES.has(result.state)) { stop(item, 'declineChatJoinRequest', result); break; }
       if (result.state === 'done') {
+        const code = item.reasons.length === 1 && TRIAGE_REASONS.includes(item.reasons[0]) ? item.reasons[0] : 'triage_reject';
         store.createApplication({
-          ...base, state: 'declined_screening', screeningVerdict: 'block', decisionReason: 'triage_reject',
+          ...base, state: 'declined_screening', screeningVerdict: 'block', decisionReason: code,
           extra: { telegram_action_state: 'done' },
         });
       }
@@ -298,7 +314,7 @@ export async function executeTriage({
     store.createApplication({
       ...base,
       state: 'probation',
-      screeningVerdict: item.reasons.length ? 'review' : 'clean',
+      screeningVerdict: 'clean',
       decisionReason: 'triage_accept_restricted',
       extra: {
         telegram_action_state: restrict.state === 'done' ? 'done' : (restrict.state === 'inconclusive' ? 'inconclusive' : 'failed'),

@@ -1,26 +1,15 @@
-// Deterministic answer evaluation (contract §6). Pure function.
-//
-// input: { text } for a typed message, or { optionId } for a pressed button.
-// Returns { pass, reason, retryable, optionId? }.
-//   retryable=true  — the answer did not count yet; one retry prompt is allowed.
-//   retryable=false — a definite choice that is not accepted; no retry.
-import {
-  comparable,
-  compileLinkPatterns,
-  containsLink,
-  countEmoji,
-  countLettersOrDigits,
-  normalizeText,
-  words,
-} from './text.mjs';
+// Deterministic answer evaluation and decision (questionnaire v2, A0-bis).
+// Pure functions: no I/O.
+import { adSignals } from './screening.mjs';
+import { comparable, countEmoji, countLettersOrDigits, normalizeText } from './text.mjs';
 
-const DEFAULT_LINK_PATTERNS = compileLinkPatterns([
-  'https?://',
-  '\\bwww\\.',
-  '\\bt\\.me/',
-  '\\btg://',
-  '\\b[a-z0-9-]+\\.(?:com|ru|net|org|io|me|xyz|top|link|click|site|online|shop)\\b',
-]);
+// Answer rows of the multi_choice question are an append-only log in
+// join_answers (no schema change): `reason` tells the row kind.
+export const TOPIC_ROW = Object.freeze({
+  toggle: 'toggle', // text = option id; selection = odd number of toggles
+  custom: 'custom_topic', // text = the user's own topic (clean)
+  done: 'done', // text = "selected:<ids>;custom:<n>"
+});
 
 export function nonsenseReason(text, promptText = '') {
   const normalized = normalizeText(text);
@@ -39,42 +28,71 @@ export function nonsenseReason(text, promptText = '') {
   return null;
 }
 
-function evaluateChoice(question, input) {
+// Choice question. input: { optionId } for a button or { text } for a typed
+// answer. Returns { pass, reason, optionId? }:
+//   pass=true                     → accepted option;
+//   pass=false, reason=R_*        → a definite rejecting option (decline code);
+//   pass=false, reason=no_matching_option / unknown_option → not an answer,
+//   the question is shown again.
+export function evaluateChoice(question, input = {}) {
+  let option;
   if (typeof input.optionId === 'string') {
-    const option = question.options.find((o) => o.id === input.optionId);
-    if (!option) return { pass: false, reason: 'unknown_option', retryable: true };
-    if (question.accepted.includes(option.id)) return { pass: true, reason: 'accepted_option', retryable: false, optionId: option.id };
-    return { pass: false, reason: 'option_not_accepted', retryable: false, optionId: option.id };
+    option = question.options.find((o) => o.id === input.optionId);
+    if (!option) return { pass: false, reason: 'unknown_option' };
+  } else {
+    const typed = comparable(input.text);
+    option = typed
+      ? question.options.find((o) => comparable(o.label) === typed || o.aliases.some((alias) => comparable(alias) === typed))
+      : null;
+    if (!option) return { pass: false, reason: 'no_matching_option' };
   }
-  const typed = comparable(input.text);
-  if (!typed) return { pass: false, reason: 'no_matching_option', retryable: true };
-  const option = question.options.find((o) => (
-    comparable(o.label) === typed || o.aliases.some((alias) => comparable(alias) === typed)
-  ));
-  if (!option) return { pass: false, reason: 'no_matching_option', retryable: true };
-  if (question.accepted.includes(option.id)) return { pass: true, reason: 'accepted_option', retryable: false, optionId: option.id };
-  return { pass: false, reason: 'option_not_accepted', retryable: false, optionId: option.id };
+  if (option.reject) return { pass: false, reason: option.reject, optionId: option.id };
+  return { pass: true, reason: 'accepted_option', optionId: option.id };
 }
 
-function evaluateFreeText(question, input, linkPatterns) {
-  if (typeof input.text !== 'string') return { pass: false, reason: 'not_text', retryable: true };
-  const nonsense = nonsenseReason(input.text, question.promptText);
-  if (nonsense) return { pass: false, reason: `nonsense:${nonsense}`, retryable: true };
-  const { rule } = question;
-  if (rule.forbidLinks && containsLink(input.text, linkPatterns)) {
-    return { pass: false, reason: 'contains_link', retryable: true };
-  }
-  const normalized = normalizeText(input.text);
-  if (normalized.length < rule.minChars) return { pass: false, reason: 'too_short', retryable: true };
-  if (words(normalized).length < rule.minWords) return { pass: false, reason: 'too_few_words', retryable: true };
-  if (rule.anyOf.length > 0 && !rule.anyOf.some((kw) => normalized.includes(kw))) {
-    return { pass: false, reason: 'missing_keyword', retryable: true };
-  }
-  return { pass: true, reason: 'ok', retryable: false };
+// A user's own topic (free text on the multi_choice question).
+//   { kind: 'reject', reason: 'R_TOPIC_AD', signals } — link / @mention / spam keyword;
+//   { kind: 'ignore', reason: 'nonsense:*' }          — nothing meaningful, not counted;
+//   { kind: 'accept' }                                 — counted as a topic.
+export function evaluateCustomTopic(question, text, scenario) {
+  const signals = adSignals(text, scenario);
+  if (signals.length > 0) return { kind: 'reject', reason: question.custom.reject, signals };
+  const nonsense = nonsenseReason(text, question.promptText);
+  if (nonsense) return { kind: 'ignore', reason: `nonsense:${nonsense}` };
+  return { kind: 'accept' };
 }
 
-export function evaluateAnswer(question, input = {}, { linkPatterns = DEFAULT_LINK_PATTERNS } = {}) {
-  if (question.type === 'choice') return evaluateChoice(question, input);
-  if (question.type === 'free_text') return evaluateFreeText(question, input, linkPatterns);
-  throw new Error(`unsupported question type: ${question.type}`);
+// Current selection of the multi_choice question from its answer rows.
+export function topicState(question, answers) {
+  const selected = new Set();
+  let custom = 0;
+  for (const row of answers) {
+    if (row.question_id !== question.id || row.pass !== 1) continue;
+    if (row.reason === TOPIC_ROW.toggle && question.options.some((o) => o.id === row.text)) {
+      if (selected.has(row.text)) selected.delete(row.text); else selected.add(row.text);
+    } else if (row.reason === TOPIC_ROW.custom) {
+      custom += 1;
+    }
+  }
+  const ordered = question.options.map((o) => o.id).filter((id) => selected.has(id));
+  return { selected: ordered, custom, satisfied: ordered.length >= question.minSelected || custom >= 1 };
 }
+
+// Final decision over all answers (decision rule A0-bis). Returns
+// { approve: true } when every question is answered acceptably, else
+// { approve: false, missing: questionId }. Rejecting answers never reach this
+// point: they decline at once with their own code.
+export function decideAnswers(questions, answers) {
+  for (const question of questions) {
+    if (question.type === 'choice') {
+      const last = answers.filter((row) => row.question_id === question.id && row.reason !== 'no_matching_option'
+        && row.reason !== 'unknown_option').at(-1);
+      if (!last || last.pass !== 1) return { approve: false, missing: question.id };
+    } else {
+      const done = answers.some((row) => row.question_id === question.id && row.reason === TOPIC_ROW.done && row.pass === 1);
+      if (!done || !topicState(question, answers).satisfied) return { approve: false, missing: question.id };
+    }
+  }
+  return { approve: true };
+}
+

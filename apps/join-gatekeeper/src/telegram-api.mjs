@@ -111,8 +111,19 @@ export class TelegramApi {
     return this.call('unbanChatMember', payload);
   }
 
+  // Multi-select topics: toggling re-renders the keyboard of the same message.
+  editMessageReplyMarkup(payload) {
+    return this.call('editMessageReplyMarkup', payload);
+  }
+
   getUserProfilePhotos(payload) {
     return this.call('getUserProfilePhotos', payload);
+  }
+
+  // Read-only (allowed in shadow mode): ChatFullInfo of the applicant, used
+  // best-effort for `personal_chat` (a channel attached to the profile).
+  getChat(payload) {
+    return this.call('getChat', payload);
   }
 
   setWebhook(payload) {

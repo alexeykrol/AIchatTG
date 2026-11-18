@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe('triage classify', () => {
-  test('scam/fake/bot → reject; clean and review → accept_restricted; summary counts and hashes', () => {
+  test('pre-check codes: R_SCAM / R_PROFILE_AD / R_STOPWORD → reject; everything else → accept_restricted', () => {
     const { exportText, files, summary } = classify([
       request(1),
       request(2, { is_scam: true }),
@@ -48,31 +48,81 @@ describe('triage classify', () => {
       request(4, { is_bot: true }),
       request(5, { bio: 'crypto casino заработок' }),
       request(6, { bio: 'мой сайт https://example.com' }),
+      request(7, { first_name: '🔥🔥', last_name: null, has_photo: false }),
+      request(8, { last_name: '@promo_ch' }),
     ]);
     const reject = JSON.parse(files['reject.json']);
     const accept = JSON.parse(files['accept_restricted.json']);
     assert.equal(reject.schema, 'joingate-triage-v1');
     assert.equal(reject.source_sha256, sha256(exportText));
     assert.equal(reject.chat_id, CHAT_ID);
-    assert.deepEqual(reject.items.map((i) => i.user_id), [2, 3, 4, 5]);
-    assert.deepEqual(reject.items[0].reasons, ['is_scam']);
-    assert.deepEqual(accept.items.map((i) => i.user_id), [1, 6]);
-    assert.deepEqual(accept.items[0], { user_id: 1, requested_at: '2026-11-10T08:00:00Z', reasons: [] });
-    assert.deepEqual(accept.items[1].reasons, ['link:bio']);
-    assert.deepEqual(summary.counts, { reject: 4, accept_restricted: 2 });
-    assert.equal(summary.reasons.reject.is_scam, 1);
-    assert.equal(summary.reasons.accept_restricted.none, 1);
+    assert.deepEqual(reject.items.map((i) => [i.user_id, i.reasons]), [
+      [2, ['R_SCAM']], [3, ['R_SCAM']], [4, ['R_SCAM']], [5, ['R_STOPWORD']], [6, ['R_PROFILE_AD']], [8, ['R_PROFILE_AD']],
+    ]);
+    assert.deepEqual(reject.items[0].signals, ['is_scam']);
+    assert.deepEqual(reject.items[4].signals, ['link:bio']);
+    assert.deepEqual(accept.items, [
+      { user_id: 1, requested_at: '2026-11-10T08:00:00Z', reasons: [], signals: [] },
+      { user_id: 7, requested_at: '2026-11-10T08:00:00Z', reasons: [], signals: [] },
+    ], 'soft signals (emoji name, no photo) do not reject');
+    assert.deepEqual(summary.counts, { reject: 6, accept_restricted: 2 });
+    assert.deepEqual(summary.reasons.reject, { R_SCAM: 3, R_STOPWORD: 1, R_PROFILE_AD: 2 });
+    assert.deepEqual(summary.reasons.accept_restricted, { none: 2 });
     assert.equal(summary.list_sha256.reject, sha256(files['reject.json']));
+  });
+
+  test('has_personal_chat: true → R_PROFILE_AD; false / null / missing → no signal', () => {
+    const withField = classify([
+      request(1, { has_personal_chat: true }),
+      request(2, { has_personal_chat: false }),
+      request(3, { has_personal_chat: null }),
+      request(4),
+    ]);
+    const reject = JSON.parse(withField.files['reject.json']);
+    assert.deepEqual(reject.items.map((i) => [i.user_id, i.reasons, i.signals]), [[1, ['R_PROFILE_AD'], ['personal_chat']]]);
+    assert.deepEqual(JSON.parse(withField.files['accept_restricted.json']).items.map((i) => i.user_id), [2, 3, 4]);
+    const doc = exportDoc([request(1)]);
+    doc.requests[0].has_personal_chat = 'yes';
+    assert.throws(() => classifyExport({ exportText: JSON.stringify(doc), scenario: SC }), /has_personal_chat must be a boolean or null/);
+  });
+
+  test('is_deleted: true → R_DELETED before R_SCAM; false / null / missing → no signal; counted in summary', () => {
+    const { files, summary } = classify([
+      request(1, { is_deleted: true, is_scam: true, bio: 'https://x.example' }),
+      request(2, { is_deleted: false }),
+      request(3, { is_deleted: null }),
+      request(4),
+      request(5, { is_deleted: true }),
+    ]);
+    const reject = JSON.parse(files['reject.json']);
+    assert.deepEqual(reject.items.map((i) => [i.user_id, i.reasons, i.signals]), [
+      [1, ['R_DELETED'], ['is_deleted']], [5, ['R_DELETED'], ['is_deleted']],
+    ]);
+    assert.deepEqual(JSON.parse(files['accept_restricted.json']).items.map((i) => i.user_id), [2, 3, 4]);
+    assert.deepEqual(summary.reasons.reject, { R_DELETED: 2 });
+    const doc = exportDoc([request(1)]);
+    doc.requests[0].is_deleted = 'true';
+    assert.throws(() => classifyExport({ exportText: JSON.stringify(doc), scenario: SC }), /is_deleted must be a boolean or null/);
+  });
+
+  test('execute reject records R_DELETED as decision_reason', async () => {
+    dir = tempDir();
+    store = new JoinStore(path.join(dir, 'join-gatekeeper.sqlite'));
+    const { files } = classify([request(1, { is_deleted: true })]);
+    const listText = files['reject.json'];
+    const receipt = await executeTriage({
+      listText, action: 'reject', expectSha256: sha256(listText), confirm: true, store, telegram: new FakeTelegram(),
+      targetChatIds: [String(CHAT_ID)], sleep: async () => {}, now: () => T0,
+    });
+    assert.equal(receipt.completed, true);
+    assert.equal(store.listByUserAndStates(1, ['declined_screening'])[0].decision_reason, 'R_DELETED');
   });
 
   test('null fields are unknown, never false', () => {
     const { files } = classify([request(7, {
       first_name: null, last_name: null, username: null, is_bot: null, is_scam: null, is_fake: null, has_photo: null,
     })]);
-    const accept = JSON.parse(files['accept_restricted.json']);
-    assert.deepEqual(accept.items[0].reasons, ['empty_name'], 'unknown name → review, not block; null photo is no signal');
-    const { files: f2 } = classify([request(8, { has_photo: false, bio: 'https://x.example' })]);
-    assert.deepEqual(JSON.parse(f2['accept_restricted.json']).items[0].reasons, ['link:bio', 'no_photo']);
+    assert.deepEqual(JSON.parse(files['accept_restricted.json']).items[0].reasons, []);
   });
 
   test('schema errors are refused', () => {
@@ -195,7 +245,9 @@ describe('triage execute', () => {
     assert.equal(first.receipt.stopped.user_id, 2);
     assert.equal(first.receipt.stopped.state, 'inconclusive');
     assert.deepEqual(telegram.calls.map((c) => c.payload.user_id), [1, 2]);
-    assert.equal(store.listByUserAndStates(1, ['declined_screening']).length, 1);
+    const declined = store.listByUserAndStates(1, ['declined_screening']);
+    assert.equal(declined.length, 1);
+    assert.equal(declined[0].decision_reason, 'R_SCAM', 'decline records the reason code');
 
     const second = await run(listText, 'reject', { telegram });
     assert.equal(second.receipt.completed, true);

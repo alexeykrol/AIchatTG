@@ -8,15 +8,19 @@ the contracts).
 Contracts:
 [v1](../../docs/proposals/2026-11-15-join-request-gatekeeper-v1.md) (base) and
 [v2](../../docs/proposals/2026-11-17-join-request-gatekeeper-v2.md) (tokens,
-probation, batch triage, rights — overrides v1 where stated).
+probation, batch triage, rights — overrides v1 where stated) and
+[questionnaire v2 / A0-bis](../../docs/proposals/2026-11-18-join-gatekeeper-questionnaire-v2.md)
+(pre-checks, reason codes, multi-select topics — overrides v1 §5–§6).
 
 ## What it does
 
 For a group with "approve new members" enabled, the bot receives
-`chat_join_request`, screens the account with deterministic Telegram-only
-signals, writes to the applicant privately via `user_chat_id`, asks 2–3
-questions from `JOIN_SCENARIO.json`, and then approves, declines, or leaves the
-request pending for an admin. It never writes to the group. No paid model
+`chat_join_request`, runs deterministic pre-checks (rate limit, bot/scam,
+profile advertising incl. a channel attached to the profile via `getChat`,
+spam keywords), writes to the applicant privately via `user_chat_id`, asks
+three questions from `JOIN_SCENARIO.json` (participate? rules? topics —
+multi-select), and then approves or declines with exactly one reason code
+(`R_*`, each with its own DM). It never writes to the group. No paid model
 calls.
 
 ### Access tokens (paid students, v2 §1)
@@ -52,10 +56,10 @@ The token CLI needs only `JOIN_GATEKEEPER_DATA_ROOT` (and optional
 ### Probation — "accepted without the right to write" (v2 §2)
 
 - A new request where the bot could not open the dialogue (DM failed or
-  unknown, missing `user_chat_id`) **and** screening is `clean` → approve +
+  unknown, missing `user_chat_id`) **and** the pre-checks passed → approve +
   `restrictChatMember` (no sending) → `probation` with a deadline of
-  `limits.probationDays` (default 7). Screening `review` keeps `manual_review`;
-  `block` keeps decline. If approve fails, the request stays with an admin. If
+  `limits.probationDays` (default 7). If approve fails, the request stays with
+  an admin. If
   restrict fails or is unknown, the state is still `probation` and the failure
   is logged as an error: the person is in the group without restriction.
 - An admin pins a message with `https://t.me/<bot>?start=gate` in the group
@@ -79,10 +83,14 @@ npm run triage -- execute ... --confirm --receipt-dir receipts            # PROD
 ```
 
 - `classify` is offline: strict `joingate-pending-export-v1` input,
-  `is_bot` / `is_scam` / `is_fake` true or screening `block` → `reject.json`,
-  everything else → `accept_restricted.json`, plus `summary.json` (counts,
-  reasons, and the sha256 of each list). Output files are 0600, never
-  overwritten. `null` means unknown, never false.
+  the live pre-check rules, preceded by the triage-only `is_deleted: true` →
+  `R_DELETED`: `is_bot` / `is_scam` / `is_fake` → `R_SCAM`,
+  profile advertising (incl. optional `has_personal_chat: true`) →
+  `R_PROFILE_AD`, spam keyword → `R_STOPWORD` → `reject.json`; everything else
+  → `accept_restricted.json`, plus `summary.json` (counts per list and per
+  reason code, and the sha256 of each list). Items carry `reasons` (the code)
+  and `signals`. Output files are 0600, never overwritten. `null` means
+  unknown, never false.
 - `execute` is a dry run unless `--confirm` is given; it refuses unless the
   list file hash equals `--expect-sha256`. A confirmed run needs
   `JOIN_GATEKEEPER_BOT_TOKEN`, `JOIN_GATEKEEPER_TARGET_CHAT_IDS` (the list chat
@@ -109,7 +117,9 @@ of decided applications; tokens, verified members and the journal are kept.
 
 - `shadow` (default): screen and log the would-be decision. No Telegram writes
   (no DM, approve, decline, restrict, ban). Token binding is still recorded
-  locally. The only Telegram call is the read-only `getUserProfilePhotos`.
+  locally. The only Telegram calls are the read-only `getChat` and
+  `getUserProfilePhotos`. Logs carry decisions and reason codes only — never
+  names, bio, answers or topic text.
 - `enforce`: full flow. Refuses to start while the scenario `status` is `draft`.
 
 ## Environment
