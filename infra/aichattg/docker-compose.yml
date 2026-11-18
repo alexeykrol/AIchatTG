@@ -71,6 +71,54 @@ services:
       traefik.http.middlewares.aichattg-gatekeeper-strip.stripprefix.prefixes: /gatekeeper
       traefik.http.services.aichattg-gatekeeper.loadbalancer.server.port: "8787"
 
+  # Scenario C (join requests). Same Gatekeeper bot token by PO decision
+  # 2026-11-17 (one bot, several scenarios); scenarios A/B are paused, so only
+  # one of the two gatekeeper profiles may own the bot webhook at a time.
+  aichattg-join-gatekeeper:
+    <<: *service-security
+    profiles:
+      - join-gatekeeper
+    image: "aichattg/join-gatekeeper:${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    build:
+      context: ../..
+      dockerfile: infra/aichattg/Dockerfile.join-gatekeeper
+      args:
+        AICHATTG_SOURCE_SHA: "${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
+    environment:
+      JOIN_GATEKEEPER_PORT: "8788"
+      JOIN_GATEKEEPER_CONTAINER_BIND: "true"
+      JOIN_GATEKEEPER_DATA_ROOT: /var/lib/aichattg/join-gatekeeper
+      JOIN_GATEKEEPER_DATABASE_PATH: join-gatekeeper.sqlite
+      JOIN_GATEKEEPER_BOT_TOKEN: "${GATEKEEPER_BOT_TOKEN:?GATEKEEPER_BOT_TOKEN is required}"
+      JOIN_GATEKEEPER_TARGET_CHAT_IDS: "${JOIN_GATEKEEPER_TARGET_CHAT_IDS:?JOIN_GATEKEEPER_TARGET_CHAT_IDS is required}"
+      JOIN_GATEKEEPER_WEBHOOK_SECRET: "${JOIN_GATEKEEPER_WEBHOOK_SECRET:?JOIN_GATEKEEPER_WEBHOOK_SECRET is required}"
+      JOIN_GATEKEEPER_MODE: "${JOIN_GATEKEEPER_MODE:-shadow}"
+      JOIN_GATEKEEPER_GROUP_LINK: "${JOIN_GATEKEEPER_GROUP_LINK:-}"
+      JOIN_GATEKEEPER_PUBLIC_BASE_URL: "https://${AICHATTG_FQDN:?AICHATTG_FQDN is required}/join-gatekeeper"
+    volumes:
+      - type: bind
+        source: "${AICHATTG_DATA_ROOT:?AICHATTG_DATA_ROOT is required}/join-gatekeeper"
+        target: /var/lib/aichattg/join-gatekeeper
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      traefik.enable: "${AICHATTG_JOIN_GATEKEEPER_ROUTING_ENABLED:-false}"
+      traefik.docker.network: root_default
+      traefik.http.routers.aichattg-join-gatekeeper.rule: "Host(`${AICHATTG_FQDN:?AICHATTG_FQDN is required}`) && PathPrefix(`/join-gatekeeper`)"
+      traefik.http.routers.aichattg-join-gatekeeper.entrypoints: web,websecure
+      traefik.http.routers.aichattg-join-gatekeeper.tls: "true"
+      traefik.http.routers.aichattg-join-gatekeeper.tls.certresolver: mytlschallenge
+      traefik.http.routers.aichattg-join-gatekeeper.middlewares: aichattg-join-gatekeeper-strip@docker
+      traefik.http.routers.aichattg-join-gatekeeper.priority: "210"
+      traefik.http.middlewares.aichattg-join-gatekeeper-strip.stripprefix.prefixes: /join-gatekeeper
+      traefik.http.services.aichattg-join-gatekeeper.loadbalancer.server.port: "8788"
+
   aichattg-telegram-runtime:
     <<: *service-security
     profiles:

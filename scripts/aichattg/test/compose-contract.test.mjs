@@ -49,6 +49,21 @@ test('the UTC release timestamp reaches only the production Console', async () =
   assert.match(dockerfile, /ENV NODE_ENV=production/u);
 });
 
+test('join-gatekeeper is opt-in, isolated, and defaults to shadow', async () => {
+  const compose = await readFile(composeUrl, 'utf8');
+  const service = compose.split('  aichattg-join-gatekeeper:')[1]?.split('  aichattg-telegram-runtime:')[0];
+  assert.ok(service, 'join-gatekeeper service is missing');
+  assert.match(service, /profiles:\n\s+- join-gatekeeper/u);
+  assert.match(service, /traefik\.enable: "\$\{AICHATTG_JOIN_GATEKEEPER_ROUTING_ENABLED:-false\}"/u);
+  assert.match(service, /JOIN_GATEKEEPER_MODE: "\$\{JOIN_GATEKEEPER_MODE:-shadow\}"/u);
+  assert.match(service, /JOIN_GATEKEEPER_BOT_TOKEN: "\$\{GATEKEEPER_BOT_TOKEN:/u);
+  assert.match(service, /target: \/var\/lib\/aichattg\/join-gatekeeper/u);
+  assert.doesNotMatch(service, /\/var\/lib\/aichattg\/gatekeeper\b|TRIBUTE|ZAPIER|news-digest/u);
+  const dockerfile = await readFile(new URL('../../../infra/aichattg/Dockerfile.join-gatekeeper', import.meta.url), 'utf8');
+  assert.match(dockerfile, /COPY apps\/join-gatekeeper\/src\/ \.\/src\//u);
+  assert.doesNotMatch(dockerfile, /apps\/gatekeeper\//u);
+});
+
 test('private Review activation is opt-in with exact readonly config and project-only sockets', async () => {
   const base = await readFile(composeUrl, 'utf8');
   const overlay = await readFile(new URL('../../../infra/aichattg/docker-compose.review.yml', import.meta.url), 'utf8');
