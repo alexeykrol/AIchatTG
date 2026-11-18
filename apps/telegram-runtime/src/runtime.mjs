@@ -35,6 +35,7 @@ import {
   ASSISTANT_HELP_TEXT,
   ASSISTANT_RETIRED_COMMAND_TEXT,
   ASSISTANT_ROUTER_FAILURE_TEXT,
+  ASSISTANT_STUB_TEXT,
   ASSISTANT_UNAVAILABLE_TEXT,
   assistantAbstentionReply,
   assistantDeterministicReply,
@@ -1467,10 +1468,13 @@ export function createTelegramRuntime({
       if (!questionClaim.claimed) return { kind: 'duplicate_question', status: questionClaim.existing?.status || 'unknown' };
       question.answerClaim = questionClaim.claim;
     }
+    const stubMode = config.assistantStubMode === true;
     if (moderation.status !== 'allowed') {
       if (moderation.status === 'error') {
+        // In stub mode the only public assistant text is the stub itself.
         const delivered = await sendAssistantServiceReply(
-          eventId, question, ASSISTANT_ROUTER_FAILURE_TEXT, 'boundary:judgement_unavailable',
+          eventId, question, stubMode ? ASSISTANT_STUB_TEXT : ASSISTANT_ROUTER_FAILURE_TEXT,
+          stubMode ? 'boundary:assistant_stub' : 'boundary:judgement_unavailable',
         );
         if (delivered.deliveryUncertain !== true) {
           await cleanupAssistantAskPrompt(eventId, question);
@@ -1486,6 +1490,30 @@ export function createTelegramRuntime({
       };
     }
     try {
+      // Stub mode (PO decision 2026-11-18): every addressed question — /ask,
+      // mention, reply, bare /ask, /help, /ai — gets one fixed code-owned
+      // reply. No provider, router, analyzer, knowledge or working-state call;
+      // no forceReply hint and no dialogue memory. Rate limits still apply.
+      if (stubMode) {
+        const request = store.reserveAssistantRequest({
+          eventId,
+          chatId: question.chatId,
+          userId: question.userId,
+          cooldownSec: config.assistantCooldownSec,
+          dailyCap: (config.syntheticTestingEnabled === true && question.isSyntheticSender === true)
+            ? config.assistantSyntheticDailyPerUser
+            : config.assistantDailyPerUser,
+        });
+        if (!request.allowed) {
+          store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: request.reason });
+          return { kind: 'skipped', reason: request.reason };
+        }
+        const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_STUB_TEXT, 'boundary:assistant_stub');
+        store.completeAssistantRequest(eventId);
+        if (result.deliveryUncertain !== true) await cleanupAssistantAskPrompt(eventId, question);
+        store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
+        return { ...result, stub: true };
+      }
       if (question.command === 'help') {
         const result = await sendAssistantServiceReply(eventId, question, ASSISTANT_HELP_TEXT, 'command:help');
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
