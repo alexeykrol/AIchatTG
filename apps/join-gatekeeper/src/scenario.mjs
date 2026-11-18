@@ -9,6 +9,8 @@ export const REQUIRED_MESSAGES = [
   // contract v2
   'token_welcome', 'token_already_verified', 'token_invalid', 'probation_intro', 'probation_passed',
   'probation_removed', 'start_info',
+  // texts v3 (2026-11-18)
+  'token_approved', 'probation_lift_unconfirmed', 'probation_expired', 'button_open_group',
 ];
 // Questionnaire v2 (A0-bis): every decline carries exactly one of these codes,
 // and each code has its own user-facing message (scenario `reasons` map).

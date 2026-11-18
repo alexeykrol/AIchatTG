@@ -658,7 +658,7 @@ export class JoinGatekeeperService {
     this.store.updateApplication(app.id, {
       state: 'manual_review', decided_at: now, decision_reason: reason, telegram_action_state: actionState,
     });
-    await this.sendDm(app.user_chat_id, { text: messages.manual_review });
+    await this.sendDm(app.user_chat_id, this.withGroupButton(messages.manual_review));
     return { action: 'manual_review', reason, applicationId: app.id };
   }
 
@@ -673,7 +673,12 @@ export class JoinGatekeeperService {
     if (passed) {
       const results = [];
       for (const probation of probations) results.push(await this.passProbation(probation, 'answers_passed'));
-      await this.sendDm(app.user_chat_id, { text: messages.probation_passed });
+      // «You can write now» only after Telegram confirmed every lift.
+      const confirmed = results.length > 0 && results.every((r) => r.telegramActionState === 'done');
+      await this.sendDm(app.user_chat_id, {
+        text: confirmed ? messages.probation_passed : messages.probation_lift_unconfirmed,
+      });
+      if (!confirmed) return { action: 'probation_lift_unconfirmed', applicationId: app.id, results };
       return { action: 'probation_passed', applicationId: app.id, results };
     }
     const results = [];
@@ -719,12 +724,22 @@ export class JoinGatekeeperService {
     return this.handleGateStart(userId, privateChatId, { infoIfNothing: true });
   }
 
-  async reply(privateChatId, text, event) {
+  async reply(privateChatId, payload, event) {
     if (!this.enforce) {
       this.logger.info('shadow_decision', { decision: `would_reply_${event}` });
       return { ok: true, shadow: true };
     }
-    return this.sendDm(privateChatId, { text });
+    return this.sendDm(privateChatId, typeof payload === 'string' ? { text: payload } : payload);
+  }
+
+  // DM payload with the inline «Открыть группу» button (URL = configured
+  // group link; without a link the text goes alone).
+  withGroupButton(text) {
+    if (!this.config.groupLink) return { text };
+    return {
+      text,
+      reply_markup: { inline_keyboard: [[{ text: this.scenario.messages.button_open_group, url: this.config.groupLink }]] },
+    };
   }
 
   // `/start gate` or bare `/start` (contract v2 §2).
@@ -732,7 +747,7 @@ export class JoinGatekeeperService {
     const { messages, questions } = this.scenario;
     const target = this.store.findQuestionnaireTarget(userId);
     if (!target) {
-      if (infoIfNothing) await this.reply(privateChatId, messages.start_info, 'start_info');
+      if (infoIfNothing) await this.reply(privateChatId, this.withGroupButton(messages.start_info), 'start_info');
       return { action: 'start_info' };
     }
     if (!this.enforce) {
@@ -764,7 +779,7 @@ export class JoinGatekeeperService {
     const row = this.store.getToken(tokenSha256);
 
     if (row && row.status === 'used' && row.telegram_user_id === String(userId)) {
-      await this.reply(privateChatId, messages.token_already_verified, 'token_already_verified');
+      await this.reply(privateChatId, this.withGroupButton(messages.token_already_verified), 'token_already_verified');
       return { action: 'token_already_verified', siteRecordId: row.site_record_id };
     }
 
@@ -780,7 +795,7 @@ export class JoinGatekeeperService {
       }
       this.store.addJournal({ event, userId, siteRecordId: current?.site_record_id ?? null, details, now });
       this.logger.warn(event, { site_record_id: current?.site_record_id ?? null, user_id: String(userId) });
-      await this.reply(privateChatId, messages.token_invalid, 'token_invalid');
+      await this.reply(privateChatId, this.withGroupButton(messages.token_invalid), 'token_invalid');
       // Normal flow: a pending questionnaire (probation / DM failure) starts.
       const next = await this.handleGateStart(userId, privateChatId, { infoIfNothing: false });
       return { action: event, next: next.action };
@@ -821,8 +836,11 @@ export class JoinGatekeeperService {
     }
 
     this.store.addJournal({ event: 'token_approvals', userId, siteRecordId, details: { approvals, closed: open.length, lifted: lifted.length }, now });
-    const welcome = this.config.groupLink ? `${messages.token_welcome}\n\n${this.config.groupLink}` : messages.token_welcome;
-    await this.reply(privateChatId, welcome, 'token_welcome');
+    // «I approved your request» only after Telegram confirmed an approve;
+    // otherwise (no request, failure, shadow) — «submit a request».
+    const approved = Object.values(approvals).includes('done');
+    const welcome = approved ? messages.token_approved : messages.token_welcome;
+    await this.reply(privateChatId, this.withGroupButton(welcome), approved ? 'token_approved' : 'token_welcome');
     return { action: 'token_verified', siteRecordId, approvals, closed: open.length, lifted: lifted.length };
   }
 
@@ -862,7 +880,7 @@ export class JoinGatekeeperService {
           if (!app || app.state !== 'probation') return;
           await this.removeFromProbation(app, 'probation_expired');
           if (app.conversation_open === 1 && app.user_chat_id) {
-            await this.sendDm(app.user_chat_id, { text: messages.probation_removed });
+            await this.sendDm(app.user_chat_id, { text: messages.probation_expired });
           }
           probationExpired += 1;
         });

@@ -33,7 +33,12 @@ calls.
   account becomes a verified member, pending join requests of this user are
   approved in every allowlisted chat ("no request" is a normal outcome),
   probation is lifted, open questionnaires are closed as `approved_token`, and
-  a welcome DM is sent (with `JOIN_GATEKEEPER_GROUP_LINK` if set).
+  a welcome DM is sent: `token_approved` only when Telegram confirmed an
+  approve, otherwise `token_welcome` ("submit a request").
+  Token replies, `start_info` and the approve-failure `manual_review` DM carry an
+  inline «Открыть группу» button (URL = `JOIN_GATEKEEPER_GROUP_LINK`; no link →
+  no button). Probation: «you can write» only after a confirmed lift, otherwise
+  `probation_lift_unconfirmed`; expiry sends `probation_expired`.
   Same account again → "already verified". Another account, revoked or unknown
   token → journal event (`token_reuse` / `token_revoked_use` / `token_unknown`)
   and a neutral reply; the normal flow applies.
@@ -136,7 +141,7 @@ of decided applications; tokens, verified members and the journal are kept.
 | `JOIN_GATEKEEPER_DATABASE_PATH` | no | default `join-gatekeeper.sqlite`, must stay inside the data root |
 | `JOIN_GATEKEEPER_PUBLIC_BASE_URL` | for webhook registration | https only |
 | `JOIN_GATEKEEPER_SCENARIO_PATH` | no | default: bundled `JOIN_SCENARIO.json` |
-| `JOIN_GATEKEEPER_GROUP_LINK` | no | `https://t.me/...`, appended to the token welcome DM |
+| `JOIN_GATEKEEPER_GROUP_LINK` | no | `https://t.me/...`, URL of the «Открыть группу» button |
 
 ## Commands
 

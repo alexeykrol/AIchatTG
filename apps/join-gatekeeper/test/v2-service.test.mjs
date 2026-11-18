@@ -22,6 +22,8 @@ function issue(siteRecordId = 'site-1') {
   return token;
 }
 
+const GROUP_BUTTON = (url) => ({ inline_keyboard: [[{ text: 'Открыть группу', url }]] });
+
 function texts() {
   return h.telegram.byMethod('sendMessage').map((c) => c.payload.text);
 }
@@ -59,7 +61,59 @@ describe('tokens via /start', () => {
     assert.equal(h.store.getVerifiedMember(USER).site_record_id, 'site-1');
     const last = h.telegram.byMethod('sendMessage').at(-1).payload;
     assert.equal(last.chat_id, USER);
-    assert.equal(last.text, `${h.scenario.messages.token_welcome}\n\nhttps://t.me/our_group`);
+    // Telegram confirmed an approve → «I approved your request» + group button.
+    assert.equal(last.text, h.scenario.messages.token_approved);
+    assert.deepEqual(last.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+  });
+
+  test('no pending request or approve not confirmed → «submit a request» text + group button', async () => {
+    for (const failure of [noRequestError(), definiteError('approveChatJoinRequest'), ambiguousError('approveChatJoinRequest')]) {
+      h = harness({ groupLink: 'https://t.me/our_group' });
+      h.telegram.failNext('approveChatJoinRequest', failure);
+      const result = await h.say(`/start ${issue()}`);
+      assert.equal(result.action, 'token_verified');
+      const last = h.telegram.byMethod('sendMessage').at(-1).payload;
+      assert.equal(last.text, h.scenario.messages.token_welcome);
+      assert.deepEqual(last.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+      h.close();
+      h = null;
+    }
+  });
+
+  test('already-verified and invalid replies carry the group button', async () => {
+    h = harness({ groupLink: 'https://t.me/our_group' });
+    const token = issue();
+    await h.say(`/start ${token}`);
+    await h.say(`/start ${token}`);
+    await h.say(`/start ${token}`, { userId: OTHER_USER });
+    const [again, invalid] = h.telegram.byMethod('sendMessage').slice(-2).map((c) => c.payload);
+    assert.equal(again.text, h.scenario.messages.token_already_verified);
+    assert.deepEqual(again.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+    assert.equal(invalid.text, h.scenario.messages.token_invalid);
+    assert.deepEqual(invalid.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+  });
+
+  test('questionnaire passed but approve not confirmed → manual_review text with group button', async () => {
+    h = harness({ groupLink: 'https://t.me/our_group' });
+    await h.joinRequest();
+    h.telegram.failNext('approveChatJoinRequest', ambiguousError('approveChatJoinRequest'));
+    const done = await passAll(h);
+    assert.equal(done.action, 'manual_review');
+    const last = h.telegram.byMethod('sendMessage').at(-1).payload;
+    assert.equal(last.text, h.scenario.messages.manual_review);
+    assert.deepEqual(last.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+  });
+
+  test('bare /start with nothing pending → start_info with group button; no link → no button', async () => {
+    h = harness({ groupLink: 'https://t.me/our_group' });
+    assert.equal((await h.say('/start')).action, 'start_info');
+    const info = h.telegram.byMethod('sendMessage').at(-1).payload;
+    assert.equal(info.text, h.scenario.messages.start_info);
+    assert.deepEqual(info.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
+    h.close();
+    h = harness();
+    await h.say('/start');
+    assert.equal(h.telegram.byMethod('sendMessage').at(-1).payload.reply_markup, undefined);
   });
 
   test('open questionnaire is closed as approved_token', async () => {
@@ -258,7 +312,25 @@ describe('probation', () => {
     assert.equal(h.telegram.byMethod('banChatMember').length, 2);
     const newSends = h.telegram.byMethod('sendMessage').slice(sendsBefore);
     assert.deepEqual(newSends.map((c) => [c.payload.chat_id, c.payload.text]),
-      [[OTHER_USER, h.scenario.messages.probation_removed]]);
+      [[OTHER_USER, h.scenario.messages.probation_expired]]);
+  });
+
+  test('probation passed but lift not confirmed → «could not confirm» text, not «you can write»', async () => {
+    for (const failure of [definiteError('restrictChatMember'), ambiguousError('restrictChatMember')]) {
+      h = harness();
+      const { applicationId } = await toProbation();
+      await h.say('/start gate');
+      await h.press('participate', 'yes');
+      await h.press('rules', 'agree');
+      await h.press('topics', 'careers');
+      h.telegram.failNext('restrictChatMember', failure);
+      const done = await h.press('topics', 'done');
+      assert.equal(done.action, 'probation_lift_unconfirmed');
+      assert.notEqual(h.store.getApplication(applicationId).restrict_state, 'lifted');
+      assert.equal(texts().at(-1), h.scenario.messages.probation_lift_unconfirmed);
+      h.close();
+      h = null;
+    }
   });
 
   test('/start from DM-failure manual_review runs that questionnaire → approve', async () => {

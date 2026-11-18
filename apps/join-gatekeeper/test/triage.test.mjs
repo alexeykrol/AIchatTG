@@ -287,6 +287,16 @@ describe('triage execute', () => {
     assert.deepEqual(again.receipt.counts, { skipped_already_processed: 3 });
   });
 
+  test('400 USER_ID_INVALID (deleted account a moment later) is skipped_deleted too', async () => {
+    const { files, telegram } = setup([request(1, { is_scam: true }), request(2, { is_scam: true })]);
+    telegram.failNext('declineChatJoinRequest', new TelegramApiError(
+      'declineChatJoinRequest failed: Bad Request: USER_ID_INVALID', { method: 'declineChatJoinRequest', status: 400 },
+    ));
+    const { receipt } = await run(files['reject.json'], 'reject', { telegram });
+    assert.equal(receipt.completed, true);
+    assert.deepEqual(receipt.counts, { skipped_deleted: 1, declined: 1 });
+  });
+
   test('a real 403 (bot was kicked) still stops the batch', async () => {
     const { files, telegram } = setup([request(1, { is_scam: true }), request(2, { is_scam: true })]);
     telegram.failNext('declineChatJoinRequest', new TelegramApiError(

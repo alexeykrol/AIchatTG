@@ -37,7 +37,7 @@ export function parseBotToken(env) {
   return botToken;
 }
 
-// Optional public group link appended to the token welcome DM (contract v2 §1).
+// Optional public group link: URL of the «Открыть группу» button (texts v3).
 export function parseGroupLink(env) {
   const name = `${PREFIX}GROUP_LINK`;
   const raw = optional(env, name);

@@ -26,7 +26,9 @@ export function isNoRequestError(error) {
 // Definite answer "this account is deleted": Telegram refuses any action on a
 // deactivated user with 403. Not an auth problem of the bot — the item is
 // skipped and the batch goes on (the request of a deleted account stays).
-const DEACTIVATED_RE = /user is deactivated|USER_DEACTIVATED/i;
+// 400 USER_ID_INVALID is the same account a moment later (B9 rerun, 18.11:
+// the decline of a deleted account came back with it).
+const DEACTIVATED_RE = /user is deactivated|USER_DEACTIVATED|USER_ID_INVALID/i;
 export function isDeactivatedUserError(error) {
   return !isAmbiguousTelegramError(error) && [400, 403].includes(error.status) && DEACTIVATED_RE.test(error.message);
 }
