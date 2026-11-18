@@ -23,6 +23,14 @@ export function isNoRequestError(error) {
   return !isAmbiguousTelegramError(error) && error.status === 400 && NO_REQUEST_RE.test(error.message);
 }
 
+// Definite answer "this account is deleted": Telegram refuses any action on a
+// deactivated user with 403. Not an auth problem of the bot — the item is
+// skipped and the batch goes on (the request of a deleted account stays).
+const DEACTIVATED_RE = /user is deactivated|USER_DEACTIVATED/i;
+export function isDeactivatedUserError(error) {
+  return !isAmbiguousTelegramError(error) && [400, 403].includes(error.status) && DEACTIVATED_RE.test(error.message);
+}
+
 // Definite errors that mean "this bot cannot do this at all" (wrong token,
 // not an admin, missing right, rate limited) — a batch must stop on them.
 const AUTH_RE = /unauthorized|forbidden|not enough rights|CHAT_ADMIN_REQUIRED|need administrator|not an administrator|bot is not a member|too many requests/i;

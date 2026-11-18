@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PRECHECK_REASONS } from './scenario.mjs';
 import { precheckApplicant } from './screening.mjs';
 import {
-  isAmbiguousTelegramError, isAuthOrRateError, isNoRequestError, permissions,
+  isAmbiguousTelegramError, isAuthOrRateError, isDeactivatedUserError, isNoRequestError, permissions,
 } from './telegram-api.mjs';
 
 export const EXPORT_SCHEMA = 'joingate-pending-export-v1';
@@ -193,6 +193,7 @@ async function callTelegram(telegram, method, payload) {
     return { state: 'done' };
   } catch (error) {
     if (isAmbiguousTelegramError(error)) return { state: 'inconclusive', error: error.message };
+    if (isDeactivatedUserError(error)) return { state: 'skipped_deleted', error: error.message };
     if (isAuthOrRateError(error)) return { state: 'auth', error: error.message };
     if (method === 'approveChatJoinRequest' || method === 'declineChatJoinRequest') {
       if (isNoRequestError(error)) return { state: 'no_request', error: error.message };
@@ -300,13 +301,13 @@ export async function executeTriage({
           extra: { telegram_action_state: 'done' },
         });
       }
-      record(item, result.state === 'done' ? 'declined' : result.state);
+      record(item, result.state === 'done' ? 'declined' : result.state, result.error ? { error: result.error } : {});
       continue;
     }
 
     const approve = await callTelegram(telegram, 'approveChatJoinRequest', payload);
     if (STOP_STATES.has(approve.state)) { stop(item, 'approveChatJoinRequest', approve); break; }
-    if (approve.state !== 'done') { record(item, approve.state); continue; }
+    if (approve.state !== 'done') { record(item, approve.state, approve.error ? { error: approve.error } : {}); continue; }
     const restrict = await callTelegram(telegram, 'restrictChatMember', {
       ...payload, permissions: permissions(false), use_independent_chat_permissions: true,
     });
