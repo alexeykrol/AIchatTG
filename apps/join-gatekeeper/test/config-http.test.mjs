@@ -11,6 +11,7 @@ import { loadScenario, validateScenario } from '../src/scenario.mjs';
 import { JoinStore } from '../src/store.mjs';
 import {
   baseEnv,
+  draftScenarioFile,
   FakeTelegram,
   rawScenario,
   readyScenarioFile,
@@ -30,9 +31,13 @@ afterEach(() => {
 });
 
 describe('scenario', () => {
-  test('bundled scenario is valid and draft', () => {
+  test('bundled scenario is valid and owner-approved (ready)', () => {
     const scenario = loadScenario();
-    assert.equal(scenario.status, 'draft');
+    assert.equal(scenario.status, 'ready');
+    assert.deepEqual(scenario.screening.spamKeywords, [
+      'crypto', 'заработ', 'casino', 'казино', '18+', 'интим', 'escort', 'xxx',
+      'porn', 'порн', 'onlyfans', 'сигнал', 'forex', 'форекс', 'раскрут',
+    ]);
     assert.equal(scenario.questions.length, 3);
     assert.deepEqual(scenario.limits, {
       answerTimeoutSeconds: 1800, dmWindowSeconds: 300, maxApplicationsPerUserPerDay: 3, retentionDays: 30, probationDays: 7,
@@ -43,7 +48,7 @@ describe('scenario', () => {
     const out = execFileSync(process.execPath, ['src/scenario-cli.mjs', 'check'], { cwd: APP_ROOT, encoding: 'utf8' });
     const summary = JSON.parse(out);
     assert.equal(summary.ok, true);
-    assert.equal(summary.status, 'draft');
+    assert.equal(summary.status, 'ready');
   });
 
   const broken = {
@@ -80,7 +85,10 @@ describe('config', () => {
   });
 
   test('enforce mode with a draft scenario refuses to start', () => {
-    assert.throws(() => loadConfig(baseEnv(dir(), { JOIN_GATEKEEPER_MODE: 'enforce' })), /requires a ready scenario/);
+    const d = dir();
+    assert.throws(() => loadConfig(baseEnv(d, {
+      JOIN_GATEKEEPER_MODE: 'enforce', JOIN_GATEKEEPER_SCENARIO_PATH: draftScenarioFile(d),
+    })), /requires a ready scenario/);
   });
 
   test('enforce mode with a ready scenario starts', () => {
@@ -144,7 +152,9 @@ describe('register-webhook', () => {
     const d = dir();
     const telegram = new FakeTelegram();
     await assert.rejects(() => registerWebhook({
-      env: baseEnv(d, { JOIN_GATEKEEPER_PUBLIC_BASE_URL: 'https://example.com' }),
+      env: baseEnv(d, {
+        JOIN_GATEKEEPER_PUBLIC_BASE_URL: 'https://example.com', JOIN_GATEKEEPER_SCENARIO_PATH: draftScenarioFile(d),
+      }),
       telegramFactory: () => telegram,
       writeReceipt: () => {},
     }), /ready join scenario/);

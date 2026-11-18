@@ -140,6 +140,14 @@ export function readyScenarioFile(dir) {
   return file;
 }
 
+export function draftScenarioFile(dir) {
+  const raw = rawScenario();
+  raw.status = 'draft';
+  const file = path.join(dir, 'draft-scenario.json');
+  fs.writeFileSync(file, JSON.stringify(raw));
+  return file;
+}
+
 export function baseEnv(dir, overrides = {}) {
   return {
     JOIN_GATEKEEPER_BOT_TOKEN: TOKEN,

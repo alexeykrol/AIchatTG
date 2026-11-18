@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "status": "draft",
-  "note": "All texts, questions, acceptance rules and keyword lists below are agent-written draft placeholders pending Product Owner approval (JOINGATE-2), including the contract v2 texts (token_*, probation_*, start_info). Enforce mode refuses to start while status is draft.",
+  "status": "ready",
+  "note": "Approved by the Product Owner via coordinator aichattg-33 on 2026-11-17 (A0), with the reduced spam keyword list. Any text or rule change needs a new owner approval.",
   "messages": {
     "greeting": "Здравствуйте! Вы подали заявку на вступление в группу. Группа открыта для всех, кто хочет общаться: обсуждать ИИ, делиться опытом и задавать вопросы. Чтобы отсечь спам-ботов, задам пару коротких вопросов — это займёт минуту.",
     "q_purpose": "Вопрос 1 из 3. Что вас привело в группу? Выберите вариант кнопкой.",
@@ -94,13 +94,9 @@
   "screening": {
     "spamKeywords": [
       "crypto",
-      "крипт",
       "заработ",
-      "earn",
       "casino",
       "казино",
-      "ставк",
-      "bet",
       "18+",
       "интим",
       "escort",
@@ -108,14 +104,10 @@
       "porn",
       "порн",
       "onlyfans",
-      "инвест",
-      "invest",
       "сигнал",
       "forex",
       "форекс",
-      "раскрут",
-      "продвижен",
-      "подписчик"
+      "раскрут"
     ],
     "linkPatterns": [
       "https?://",

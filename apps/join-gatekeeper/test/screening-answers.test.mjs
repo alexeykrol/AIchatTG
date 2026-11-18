@@ -20,6 +20,17 @@ describe('screenApplicant', () => {
     assert.ok(result.reasons.includes('spam_keyword:заработ'));
   });
 
+  test('core audience wording stays clean (PO keyword decision 2026-11-17)', () => {
+    for (const bio of [
+      'Предприниматель, инвестор, продвижение в соцсетях, 1000 подписчиков',
+      'Better marketing with AI, learning every day',
+      'Пишу скрипты на Python, ставка на автоматизацию',
+    ]) {
+      const result = screenApplicant({ from: user(), bio, photoCount: 1 }, sc);
+      assert.deepEqual(result, { verdict: 'clean', reasons: [] }, bio);
+    }
+  });
+
   test('link alone is review', () => {
     const result = screenApplicant({ from: user(), bio: 'Мой блог https://example.com', photoCount: 2 }, sc);
     assert.equal(result.verdict, 'review');
