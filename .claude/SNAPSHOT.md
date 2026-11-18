@@ -4,6 +4,15 @@
 
 ## Текущее состояние
 
+- **18.11.2026 ~03:10 UTC — кандидат текстов v3 привратника готов, НЕ выкачен.**
+  - `54afe06` на ветке `claude/join-gatekeeper-texts-v3` (= 8efc0d4 + коммит,
+    запушена). Тесты 148/0. Ждём «да» PO через координатора.
+  - Кнопка «Открыть группу» из JOIN_GATEKEEPER_GROUP_LINK (в проде уже задан);
+    успешные тексты — только после подтверждения Telegram; отдельный текст
+    истечения пробации; triage: USER_ID_INVALID → skipped_deleted.
+  - Тестовые токены: mail-test-1/3 issued, mail-test-2 used PO (196267257);
+    файл `alexeykrol-wp/exports/mail-test-tokens-2026-11-18b.csv`.
+
 - **18.11.2026 02:40 UTC — правка deactivated выкачена, reject дожат.**
   - Привратник: релиз `8efc0d4` (ветка `claude/join-gatekeeper-deactivated`
     от 49db56d, запушена; main не трогали), образ sha256:23ef1cee…, enforce,
