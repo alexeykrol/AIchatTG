@@ -14,7 +14,6 @@ import { createRuntimeStore, openRuntimeDatabase } from '../src/database.mjs';
 import { createProviderAdapter } from '../src/provider-adapter.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { createTelegramAdapter } from '../src/telegram-adapter.mjs';
-import { selectorFixture } from './evidence-selector-fixture.mjs';
 
 // Stub mode (PO decision 2026-11-18): every assistant question gets one fixed
 // code-owned reply. The real provider parser, runtime and Telegram rendering
@@ -87,7 +86,7 @@ function harness(t, scriptedResponses, { stubMode, cooldownSec = 0 }) {
           return {
             model: request.model,
             choices: [{ finish_reason: 'stop', message: {
-              content: stage === 'safety' ? selectorFixture(request, next.content) : next.content,
+              content: next.content,
             } }],
             usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
           };
