@@ -4,6 +4,20 @@
 
 ## Текущее состояние
 
+- **18.11.2026 02:35 UTC — исполнен пакет PO «да на всё».**
+  - Привратник: B7 enforce (релиз 49db56d, бэкап env pre-enforce).
+  - B8: approve + restrict для 8908799403 passed.
+  - B9 accept_restricted: 118 approved_restricted, 1 no_request (B8),
+    2 failed (не в группе).
+  - B9 reject остановлен: 1 declined, затем «403 user is deactivated» на
+    удалённом аккаунте, код счёл это auth-ошибкой. Нужна правка: deactivated →
+    skip; дожим ждёт «да» PO.
+  - Пробация 119 человек истекает ~25.11 02:28 UTC.
+  - Квитанции: data/…/join-gatekeeper/receipts/.
+  - Ассистент: runtime выкачен на fcda6a6 (ccea9af + заглушка 2.4.46,
+    STUB_MODE=true, ветка запушена), образ sha256:7e0a472b…, откат — релиз
+    ccea9af. Тестовый вопрос — not_run, нужен человек.
+  - c4f4915 (локальный main) не пушить и не выкатывать.
 - **18.11.2026 02:18 UTC — анкета v2 (A0-bis) в проде в shadow.**
   - Релиз `49db56d` (push в main), образ sha256:74c89c74…; откат — релиз
     0ddf07c. За время работы заявок 0.
