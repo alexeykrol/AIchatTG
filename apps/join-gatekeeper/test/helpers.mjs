@@ -52,6 +52,9 @@ export class FakeTelegram {
   answerCallbackQuery(payload) { return this.record('answerCallbackQuery', payload, true); }
   approveChatJoinRequest(payload) { return this.record('approveChatJoinRequest', payload, true); }
   declineChatJoinRequest(payload) { return this.record('declineChatJoinRequest', payload, true); }
+  restrictChatMember(payload) { return this.record('restrictChatMember', payload, true); }
+  banChatMember(payload) { return this.record('banChatMember', payload, true); }
+  unbanChatMember(payload) { return this.record('unbanChatMember', payload, true); }
   getUserProfilePhotos(payload) { return this.record('getUserProfilePhotos', payload, { total_count: this.photoCount, photos: [] }); }
   setWebhook(payload) { return this.record('setWebhook', payload, true); }
 
@@ -63,13 +66,21 @@ export function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'join-gatekeeper-test-'));
 }
 
-export function harness({ mode = 'enforce', scenarioEdit, targetChatIds = [String(CHAT_ID)] } = {}) {
+export function noRequestError(method = 'approveChatJoinRequest') {
+  return new TelegramApiError(`${method} failed: Bad Request: HIDE_REQUESTER_MISSING`, { method, status: 400 });
+}
+
+export function authError(method = 'declineChatJoinRequest') {
+  return new TelegramApiError(`${method} failed: Bad Request: not enough rights`, { method, status: 400 });
+}
+
+export function harness({ mode = 'enforce', scenarioEdit, targetChatIds = [String(CHAT_ID)], groupLink = '' } = {}) {
   const dir = tempDir();
   const store = new JoinStore(path.join(dir, 'join-gatekeeper.sqlite'));
   const telegram = new FakeTelegram();
   const clock = { now: T0 };
   const sc = scenario(scenarioEdit);
-  const config = { mode, targetChatIds, webhookSecret: SECRET, scenario: sc };
+  const config = { mode, targetChatIds, webhookSecret: SECRET, scenario: sc, groupLink };
   const service = new JoinGatekeeperService({ config, store, telegram, scenario: sc, now: () => clock.now });
   let updateId = 1000;
   const h = {

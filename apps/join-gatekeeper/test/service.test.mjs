@@ -141,14 +141,29 @@ describe('JoinGatekeeperService — enforce flow', () => {
     assert.equal(h.telegram.byMethod('declineChatJoinRequest').length, 1);
   });
 
-  test('DM failure → manual_review dm_failed, request not declined', async () => {
+  test('DM failure with clean screening → probation (v2 overrides v1 manual_review)', async () => {
     h = harness();
     h.telegram.failNext('sendMessage', definiteError());
     const result = await h.joinRequest();
+    assert.equal(result.action, 'probation');
+    assert.equal(result.reason, 'dm_failed');
+    assert.equal(h.telegram.byMethod('declineChatJoinRequest').length, 0);
+    assert.equal(h.telegram.byMethod('approveChatJoinRequest').length, 1);
+    assert.equal(h.telegram.byMethod('restrictChatMember').length, 1);
+    const stored = app(result.applicationId);
+    assert.equal(stored.state, 'probation');
+    assert.equal(stored.dm_state, 'failed');
+  });
+
+  test('DM failure with screening review → manual_review dm_failed, request not declined', async () => {
+    h = harness();
+    h.telegram.failNext('sendMessage', definiteError());
+    const result = await h.joinRequest({ bio: 'Мой блог https://example.com' });
     assert.equal(result.action, 'manual_review');
     assert.equal(result.reason, 'dm_failed');
     assert.equal(h.telegram.byMethod('declineChatJoinRequest').length, 0);
     assert.equal(h.telegram.byMethod('approveChatJoinRequest').length, 0);
+    assert.equal(h.telegram.byMethod('restrictChatMember').length, 0);
     const stored = app(result.applicationId);
     assert.equal(stored.state, 'manual_review');
     assert.equal(stored.dm_state, 'failed');
@@ -254,7 +269,8 @@ describe('JoinGatekeeperService — guards', () => {
     await assert.rejects(() => h.service.sendDm(CHAT_ID, { text: 'x' }), NonPrivateChatError);
     assert.deepEqual(h.telegram.calls, []);
     const result = await h.joinRequest({ userChatId: CHAT_ID });
-    assert.equal(result.action, 'manual_review', 'invalid user_chat_id goes to admin, not to the group');
+    assert.equal(result.action, 'probation', 'invalid user_chat_id with clean screening → probation, never a DM to the group');
+    assert.equal(result.reason, 'missing_user_chat_id');
     assert.equal(h.telegram.byMethod('sendMessage').length, 0);
   });
 });

@@ -16,6 +16,32 @@ export function isAmbiguousTelegramError(error) {
   return !(error instanceof TelegramApiError) || error.ambiguous === true;
 }
 
+// Definite answer "there is no such join request / the user is already in" —
+// a normal outcome of approveChatJoinRequest for a user who never requested.
+const NO_REQUEST_RE = /HIDE_REQUESTER_MISSING|USER_ALREADY_PARTICIPANT|request.{0,20}not found|join request|USER_NOT_FOUND|user not found/i;
+export function isNoRequestError(error) {
+  return !isAmbiguousTelegramError(error) && error.status === 400 && NO_REQUEST_RE.test(error.message);
+}
+
+// Definite errors that mean "this bot cannot do this at all" (wrong token,
+// not an admin, missing right, rate limited) — a batch must stop on them.
+const AUTH_RE = /unauthorized|forbidden|not enough rights|CHAT_ADMIN_REQUIRED|need administrator|not an administrator|bot is not a member|too many requests/i;
+export function isAuthOrRateError(error) {
+  if (isAmbiguousTelegramError(error)) return false;
+  return [401, 403, 429].includes(error.status) || AUTH_RE.test(error.message);
+}
+
+// Permissions used for probation (contract v2 §2): restrict = all false,
+// lift = all true.
+export const PERMISSION_KEYS = Object.freeze([
+  'can_send_messages', 'can_send_audios', 'can_send_documents', 'can_send_photos', 'can_send_videos',
+  'can_send_video_notes', 'can_send_voice_notes', 'can_send_polls', 'can_send_other_messages',
+  'can_add_web_page_previews', 'can_change_info', 'can_invite_users', 'can_pin_messages', 'can_manage_topics',
+]);
+export function permissions(value) {
+  return Object.fromEntries(PERMISSION_KEYS.map((key) => [key, value]));
+}
+
 export class TelegramApi {
   constructor({ botToken, fetchImpl = globalThis.fetch, timeoutMs = 15_000 }) {
     this.baseUrl = `https://api.telegram.org/bot${botToken}`;
@@ -70,6 +96,19 @@ export class TelegramApi {
 
   declineChatJoinRequest(payload) {
     return this.call('declineChatJoinRequest', payload);
+  }
+
+  // Chat-member actions (contract v2 §2/§4): need can_restrict_members.
+  restrictChatMember(payload) {
+    return this.call('restrictChatMember', payload);
+  }
+
+  banChatMember(payload) {
+    return this.call('banChatMember', payload);
+  }
+
+  unbanChatMember(payload) {
+    return this.call('unbanChatMember', payload);
   }
 
   getUserProfilePhotos(payload) {

@@ -10,7 +10,9 @@
     "start": "node src/server.mjs",
     "webhook:register": "node src/register-webhook.mjs",
     "scenario:check": "node src/scenario-cli.mjs check",
-    "test": "node --test"
+    "test": "node --test",
+    "tokens": "node src/tokens-cli.mjs",
+    "triage": "node src/triage-cli.mjs"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0"

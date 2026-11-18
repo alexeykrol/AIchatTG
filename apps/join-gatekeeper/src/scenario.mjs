@@ -4,7 +4,12 @@ import { normalizeText } from './text.mjs';
 
 export const DEFAULT_SCENARIO_PATH = fileURLToPath(new URL('../JOIN_SCENARIO.json', import.meta.url));
 export const CALLBACK_PREFIX = 'jg';
-export const REQUIRED_MESSAGES = ['greeting', 'retry', 'approved', 'declined_answers', 'manual_review', 'timeout'];
+export const REQUIRED_MESSAGES = [
+  'greeting', 'retry', 'approved', 'declined_answers', 'manual_review', 'timeout',
+  // contract v2
+  'token_welcome', 'token_already_verified', 'token_invalid', 'probation_intro', 'probation_passed',
+  'probation_removed', 'start_info',
+];
 
 const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'status', 'note', 'messages', 'questions', 'screening', 'limits']);
 const ID_RE = /^[a-z][a-z0-9_]{0,31}$/;
@@ -13,7 +18,9 @@ const LIMITS = {
   dmWindowSeconds: [30, 300],
   maxApplicationsPerUserPerDay: [1, 20],
   retentionDays: [1, 365],
+  probationDays: [1, 60],
 };
+const LIMIT_DEFAULTS = { probationDays: 7 };
 
 function fail(message) {
   throw new Error(`invalid join scenario: ${message}`);
@@ -141,7 +148,8 @@ export function validateScenario(raw) {
   if (!isPlainObject(raw.limits)) fail('limits must be an object');
   const limits = {};
   for (const [key, [min, max]] of Object.entries(LIMITS)) {
-    limits[key] = integerIn(raw.limits[key], `limits.${key}`, min, max);
+    const value = raw.limits[key] === undefined && Object.hasOwn(LIMIT_DEFAULTS, key) ? LIMIT_DEFAULTS[key] : raw.limits[key];
+    limits[key] = integerIn(value, `limits.${key}`, min, max);
   }
   for (const key of Object.keys(raw.limits)) if (!Object.hasOwn(LIMITS, key)) fail(`limits.${key} is not supported`);
 

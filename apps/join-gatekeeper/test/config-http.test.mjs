@@ -35,7 +35,7 @@ describe('scenario', () => {
     assert.equal(scenario.status, 'draft');
     assert.equal(scenario.questions.length, 3);
     assert.deepEqual(scenario.limits, {
-      answerTimeoutSeconds: 1800, dmWindowSeconds: 300, maxApplicationsPerUserPerDay: 3, retentionDays: 30,
+      answerTimeoutSeconds: 1800, dmWindowSeconds: 300, maxApplicationsPerUserPerDay: 3, retentionDays: 30, probationDays: 7,
     });
   });
 

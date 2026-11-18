@@ -40,7 +40,7 @@ const sweepTimer = setInterval(async () => {
   sweeping = true;
   try {
     const result = await service.sweep();
-    if (result.timedOut > 0 || result.purged.answers > 0 || result.purged.applications > 0) {
+    if (result.timedOut > 0 || result.probationExpired > 0 || result.purged.answers > 0 || result.purged.applications > 0) {
       logger.info('sweep', result);
     }
   } catch (error) {

@@ -31,7 +31,31 @@ function parseBoolean(env, name, fallback = false) {
   throw new Error(`${name} must be true or false`);
 }
 
-function parseTargetChatIds(env) {
+export function parseBotToken(env) {
+  const botToken = required(env, `${PREFIX}BOT_TOKEN`);
+  if (!/^\d+:[A-Za-z0-9_-]+$/.test(botToken)) throw new Error(`${PREFIX}BOT_TOKEN has an invalid format`);
+  return botToken;
+}
+
+// Optional public group link appended to the token welcome DM (contract v2 §1).
+export function parseGroupLink(env) {
+  const name = `${PREFIX}GROUP_LINK`;
+  const raw = optional(env, name);
+  if (!raw) return '';
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be an https://t.me/... URL`);
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 't.me' || url.username || url.password || url.hash
+    || url.pathname.length < 2) {
+    throw new Error(`${name} must be an https://t.me/... URL`);
+  }
+  return url.href;
+}
+
+export function parseTargetChatIds(env) {
   const name = `${PREFIX}TARGET_CHAT_IDS`;
   const raw = required(env, name);
   const ids = raw.split(',').map((value) => value.trim());
@@ -76,8 +100,7 @@ function parsePublicBaseUrl(env) {
 }
 
 export function loadConfig(env = process.env, { loadScenarioImpl = loadScenario } = {}) {
-  const botToken = required(env, `${PREFIX}BOT_TOKEN`);
-  if (!/^\d+:[A-Za-z0-9_-]+$/.test(botToken)) throw new Error(`${PREFIX}BOT_TOKEN has an invalid format`);
+  const botToken = parseBotToken(env);
   const targetChatIds = parseTargetChatIds(env);
   const webhookSecret = required(env, `${PREFIX}WEBHOOK_SECRET`);
   if (!/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret)) {
@@ -101,7 +124,28 @@ export function loadConfig(env = process.env, { loadScenarioImpl = loadScenario 
     dataRoot,
     databasePath,
     publicBaseUrl: parsePublicBaseUrl(env),
+    groupLink: parseGroupLink(env),
     scenarioPath,
     scenario,
+  });
+}
+
+// Operator CLIs (tokens, triage) need only the database path: no bot token,
+// no webhook secret (contract v2 §1).
+export function loadDataConfig(env = process.env) {
+  return resolveDataPaths(env);
+}
+
+// triage execute --confirm: bot token + allowlist + data paths + scenario
+// (probationDays). Does not require the webhook secret or an enforce-mode
+// scenario: triage sends no DMs, and each run is gated by --confirm and the
+// list hash approved by the Product Owner.
+export function loadTriageConfig(env = process.env, { loadScenarioImpl = loadScenario } = {}) {
+  const scenarioPath = optional(env, `${PREFIX}SCENARIO_PATH`) || DEFAULT_SCENARIO_PATH;
+  return Object.freeze({
+    botToken: parseBotToken(env),
+    targetChatIds: parseTargetChatIds(env),
+    ...resolveDataPaths(env),
+    scenario: loadScenarioImpl(scenarioPath),
   });
 }

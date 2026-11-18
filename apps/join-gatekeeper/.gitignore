@@ -1,0 +1,4 @@
+*.csv
+*.sqlite*
+triage-out/
+receipts/
