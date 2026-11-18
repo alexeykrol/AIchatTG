@@ -25,7 +25,7 @@ function issue(siteRecordId = 'site-1') {
 const GROUP_BUTTON = (url) => ({ inline_keyboard: [[{ text: 'Открыть группу', url }]] });
 
 function texts() {
-  return h.telegram.byMethod('sendMessage').map((c) => c.payload.text);
+  return h.telegram.shownTexts();
 }
 
 async function toProbation(user = {}) {
@@ -99,7 +99,7 @@ describe('tokens via /start', () => {
     h.telegram.failNext('approveChatJoinRequest', ambiguousError('approveChatJoinRequest'));
     const done = await passAll(h);
     assert.equal(done.action, 'manual_review');
-    const last = h.telegram.byMethod('sendMessage').at(-1).payload;
+    const last = h.telegram.byMethod('editMessageText').at(-1).payload;
     assert.equal(last.text, h.scenario.messages.manual_review);
     assert.deepEqual(last.reply_markup, GROUP_BUTTON('https://t.me/our_group'));
   });
@@ -368,7 +368,8 @@ describe('probation', () => {
     await h.press('participate', 'yes');
     await h.press('rules', 'agree');
     await h.press('topics', 'agents');
-    // The DM of the next step fails → questionnaire closed, probation kept.
+    // The next step can be neither edited in nor sent → questionnaire closed, probation kept.
+    h.telegram.failNext('editMessageText', definiteError('editMessageText'));
     h.telegram.failNext('sendMessage', definiteError());
     assert.equal((await h.press('topics', 'custom')).action, 'questionnaire_dm_failed');
     await h.say('/start gate');

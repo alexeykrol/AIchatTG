@@ -66,6 +66,12 @@ export class FakeTelegram {
   banChatMember(payload) { return this.record('banChatMember', payload, true); }
   unbanChatMember(payload) { return this.record('unbanChatMember', payload, true); }
   editMessageReplyMarkup(payload) { return this.record('editMessageReplyMarkup', payload, true); }
+  editMessageText(payload) { return this.record('editMessageText', payload, true); }
+
+  // Texts the user sees, in order: new messages and edited ones.
+  shownTexts() {
+    return this.calls.filter((c) => c.method === 'sendMessage' || c.method === 'editMessageText').map((c) => c.payload.text);
+  }
   getUserProfilePhotos(payload) { return this.record('getUserProfilePhotos', payload, { total_count: this.photoCount, photos: [] }); }
   getChat(payload) { return this.record('getChat', payload, { id: payload.chat_id, ...this.chatInfo }); }
   setWebhook(payload) { return this.record('setWebhook', payload, true); }

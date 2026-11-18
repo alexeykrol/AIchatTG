@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 import { reasonText } from '../src/scenario.mjs';
 import { assertPrivateChatId, NonPrivateChatError } from '../src/service.mjs';
+import { TelegramApiError } from '../src/telegram-api.mjs';
 import {
   ambiguousError,
   CHAT_ID,
@@ -29,8 +30,13 @@ function app(id) {
   return h.store.getApplication(id);
 }
 
+// What the user sees: new messages and messages edited in place.
 function texts() {
-  return h.telegram.byMethod('sendMessage').map((c) => c.payload.text);
+  return h.telegram.shownTexts();
+}
+
+function lastShown() {
+  return h.telegram.calls.filter((c) => c.method === 'sendMessage' || c.method === 'editMessageText').at(-1).payload;
 }
 
 function methods() {
@@ -55,7 +61,9 @@ describe('questionnaire v2 — enforce flow', () => {
     assert.equal(app(started.applicationId).conversation_open, 1);
     assert.equal((await h.press('rules', 'agree')).action, 'asked');
     assert.equal(texts().at(-1), h.scenario.messages.q_topics);
-    const q3 = h.telegram.byMethod('sendMessage').at(-1).payload.reply_markup.inline_keyboard;
+    // Steps after a button press replace the pressed message, no new message.
+    assert.equal(h.telegram.byMethod('sendMessage').length, 2);
+    const q3 = lastShown().reply_markup.inline_keyboard;
     assert.deepEqual(q3.map((row) => row[0].text), [
       'ИИ-агенты и автоматизация', 'ИИ в бизнесе и работе', 'Профессии и будущее в эпоху ИИ',
       'Инструменты: ChatGPT, Claude и другие', 'Касты, роли и личная стратегия', 'Добавить свою тему', 'Готово',
@@ -73,6 +81,42 @@ describe('questionnaire v2 — enforce flow', () => {
     assert.equal(stored.decision_reason, 'answers_passed');
     assert.equal(h.telegram.byMethod('answerCallbackQuery').length, 4);
     onlyPrivateSends(h.telegram);
+  });
+
+  test('prod 18.11: new messages refused after the first answer → questionnaire still completes by edits', async () => {
+    h = harness();
+    const started = await h.joinRequest();
+    // From now on Telegram refuses any NEW message to this user.
+    const refuse = () => { throw new TelegramApiError("sendMessage failed: Forbidden: bot can't initiate conversation with a user", { method: 'sendMessage', status: 403 }); };
+    h.telegram.sendMessage = async (payload) => { h.telegram.calls.push({ method: 'sendMessage', payload }); refuse(); };
+    assert.equal((await h.press('participate', 'yes', { messageId: 42 })).action, 'asked');
+    assert.equal((await h.press('rules', 'agree', { messageId: 42 })).action, 'asked');
+    await h.press('topics', 'agents', { messageId: 42 });
+    const done = await h.press('topics', 'done', { messageId: 42 });
+    assert.equal(done.action, 'approved');
+    assert.equal(app(started.applicationId).state, 'approved');
+    const edits = h.telegram.byMethod('editMessageText').map((c) => [c.payload.message_id, c.payload.text]);
+    assert.deepEqual(edits, [
+      [42, h.scenario.messages.q_rules], [42, h.scenario.messages.q_topics], [42, h.scenario.messages.approved],
+    ]);
+    assert.equal(h.telegram.byMethod('restrictChatMember').length, 0, 'no fallback to probation');
+  });
+
+  test('edit refused → the step goes as a new message', async () => {
+    h = harness();
+    await h.joinRequest();
+    h.telegram.failNext('editMessageText', definiteError('editMessageText'));
+    assert.equal((await h.press('participate', 'yes')).action, 'asked');
+    assert.equal(h.telegram.byMethod('sendMessage').at(-1).payload.text, h.scenario.messages.q_rules);
+  });
+
+  test('final text replaces the question without its keyboard', async () => {
+    h = harness();
+    await h.joinRequest();
+    await h.press('participate', 'no');
+    const last = h.telegram.byMethod('editMessageText').at(-1).payload;
+    assert.equal(last.text, R('R_READER'));
+    assert.equal(last.reply_markup, undefined);
   });
 
   test('answers are stored: choice options, topic toggles, custom topic, done summary', async () => {
@@ -104,7 +148,7 @@ describe('questionnaire v2 — enforce flow', () => {
     assert.equal(result.reason, 'R_READER');
     assert.equal(texts().at(-1), R('R_READER'));
     const order = methods();
-    assert.ok(order.lastIndexOf('sendMessage') < order.indexOf('declineChatJoinRequest'));
+    assert.ok(order.lastIndexOf('editMessageText') < order.indexOf('declineChatJoinRequest'));
     const stored = app(applicationId);
     assert.equal(stored.state, 'declined_answers');
     assert.equal(stored.decision_reason, 'R_READER');
@@ -172,7 +216,8 @@ describe('questionnaire v2 — enforce flow', () => {
     await h.press('participate', 'yes');
     await h.press('rules', 'agree');
     assert.equal((await h.press('topics', 'custom')).action, 'custom_topic_prompt');
-    assert.equal(texts().at(-1), 'Напишите свою тему одним сообщением.');
+    assert.equal(texts().at(-1), `${h.scenario.messages.q_topics}\n\nНапишите свою тему одним сообщением.`);
+    assert.equal(lastShown().reply_markup.inline_keyboard.at(-1)[0].text, 'Готово', 'keyboard stays');
     assert.equal((await h.say('Нейросети в образовании')).action, 'custom_topic_added');
     const reshown = h.telegram.byMethod('sendMessage').at(-1).payload;
     assert.equal(reshown.text, h.scenario.messages.q_topics);

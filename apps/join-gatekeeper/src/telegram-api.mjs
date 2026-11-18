@@ -126,6 +126,13 @@ export class TelegramApi {
     return this.call('editMessageReplyMarkup', payload);
   }
 
+  // A step after a button press replaces the pressed message: the bot may not
+  // be allowed to start a new message (prod 18.11: "bot can't initiate
+  // conversation with a user" right after the first answer).
+  editMessageText(payload) {
+    return this.call('editMessageText', payload);
+  }
+
   getUserProfilePhotos(payload) {
     return this.call('getUserProfilePhotos', payload);
   }

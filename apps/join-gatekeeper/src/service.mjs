@@ -194,6 +194,37 @@ export class JoinGatekeeperService {
     return rows.slice(from);
   }
 
+  // The bot message whose button was pressed — the place where the next step
+  // is shown. null when the update is not a button press in a private chat.
+  originOf(message) {
+    const chatId = message?.chat?.id;
+    const messageId = message?.message_id;
+    if (!Number.isSafeInteger(chatId) || chatId <= 0 || !Number.isSafeInteger(messageId)) return null;
+    return { chatId, messageId };
+  }
+
+  // Shows the next step of a questionnaire. After a button press the pressed
+  // message is edited in place: Telegram may refuse a NEW message to a user
+  // who never wrote to the bot ("bot can't initiate conversation", prod
+  // 18.11 — 14 of 15 people stuck after the first answer), while editing the
+  // bot's own message is always allowed. Edit failure → a new message.
+  async deliver(app, payload, origin = null) {
+    if (origin) {
+      try {
+        await this.telegram.editMessageText({
+          chat_id: origin.chatId, message_id: origin.messageId, text: payload.text,
+          ...(payload.reply_markup ? { reply_markup: payload.reply_markup } : {}),
+        });
+        return { ok: true, edited: true };
+      } catch (error) {
+        if (/message is not modified/i.test(error.message)) return { ok: true, edited: true };
+        this.logger.warn('edit_message_failed', { application_id: app.id, error: error.message });
+      }
+    }
+    if (!Number.isSafeInteger(Number(app.user_chat_id)) || Number(app.user_chat_id) <= 0) return { ok: false, ambiguous: false };
+    return this.sendDm(app.user_chat_id, payload);
+  }
+
   // Sends a sequence of DMs; stops at the first failure.
   async sendSequence(chatId, payloads) {
     for (const payload of payloads) {
@@ -392,10 +423,10 @@ export class JoinGatekeeperService {
   // Decline with exactly one reason code. The reason DM goes BEFORE
   // declineChatJoinRequest: an unopened private chat (user_chat_id) can no
   // longer be written to once the request is processed.
-  async declineWithReason(app, code, state) {
+  async declineWithReason(app, code, state, origin = null) {
     const update = {};
-    if (Number.isSafeInteger(Number(app.user_chat_id)) && Number(app.user_chat_id) > 0) {
-      const sent = await this.sendDm(app.user_chat_id, { text: reasonText(this.scenario, code) });
+    if (origin || (Number.isSafeInteger(Number(app.user_chat_id)) && Number(app.user_chat_id) > 0)) {
+      const sent = await this.deliver(app, { text: reasonText(this.scenario, code) }, origin);
       if (app.dm_state === 'none') update.dm_state = sent.ok ? 'sent' : 'failed';
     }
     const actionState = await this.mutateRequest('declineChatJoinRequest', app);
@@ -493,8 +524,9 @@ export class JoinGatekeeperService {
           if (!app) return { action: 'ignored_no_application' };
           const question = this.scenario.questions[app.question_index];
           if (!question || question.id !== parsed.questionId) return { action: 'ignored_stale_callback' };
-          if (question.type === 'multi_choice') return this.processTopicButton(app, question, parsed.optionId, query.message);
-          return this.processAnswer(app, { optionId: parsed.optionId }, `option:${parsed.optionId}`);
+          const origin = this.originOf(query.message);
+          if (question.type === 'multi_choice') return this.processTopicButton(app, question, parsed.optionId, query.message, origin);
+          return this.processAnswer(app, { optionId: parsed.optionId }, `option:${parsed.optionId}`, origin);
         });
       }
     } finally {
@@ -514,11 +546,11 @@ export class JoinGatekeeperService {
   }
 
   // A typed message or a pressed button on a choice question.
-  async processAnswer(app, input, storedText) {
+  async processAnswer(app, input, storedText, origin = null) {
     const now = this.now();
     app = this.openConversation(app);
     const question = this.scenario.questions[app.question_index];
-    if (!question) return this.finalize(app);
+    if (!question) return this.finalize(app, origin);
     if (question.type === 'multi_choice') return this.processTopicText(app, question, input.text);
 
     const result = evaluateChoice(question, input);
@@ -532,28 +564,28 @@ export class JoinGatekeeperService {
     });
     if (result.reason === 'no_matching_option' || result.reason === 'unknown_option') {
       // Not an answer: show the question again (no extra text).
-      const sent = await this.sendDm(app.user_chat_id, this.questionPayload(question));
+      const sent = await this.deliver(app, this.questionPayload(question), origin);
       if (!sent.ok) return this.onDmFailure(app, sent);
       return { action: 'reasked', applicationId: app.id, questionId: question.id };
     }
-    if (!result.pass) return this.failQuestionnaire(app, result.reason);
-    return this.advance(app);
+    if (!result.pass) return this.failQuestionnaire(app, result.reason, origin);
+    return this.advance(app, origin);
   }
 
-  async advance(app) {
+  async advance(app, origin = null) {
     const nextIndex = app.question_index + 1;
     app = this.store.updateApplication(app.id, { question_index: nextIndex, retries_used: 0 });
     if (nextIndex < this.scenario.questions.length) {
       const next = this.scenario.questions[nextIndex];
-      const sent = await this.sendDm(app.user_chat_id, this.questionPayload(next));
+      const sent = await this.deliver(app, this.questionPayload(next), origin);
       if (!sent.ok) return this.onDmFailure(app, sent);
       return { action: 'asked', applicationId: app.id, questionId: next.id };
     }
-    return this.finalize(app);
+    return this.finalize(app, origin);
   }
 
   // Buttons of the multi_choice (topics) question.
-  async processTopicButton(app, question, optionId, message) {
+  async processTopicButton(app, question, optionId, message, origin = null) {
     const now = this.now();
     app = this.openConversation(app);
     if (optionId === question.done.id) {
@@ -569,10 +601,15 @@ export class JoinGatekeeperService {
         reason: TOPIC_ROW.done,
         now,
       });
-      return this.advance(app);
+      return this.advance(app, origin);
     }
     if (optionId === question.custom.id) {
-      const sent = await this.sendDm(app.user_chat_id, { text: this.scenario.messages[question.custom.prompt] });
+      // Prompt goes under the question; the keyboard stays so «Готово» works.
+      const state = topicState(question, this.currentAnswers(app.id));
+      const payload = origin
+        ? { text: `${question.promptText}\n\n${this.scenario.messages[question.custom.prompt]}`, reply_markup: this.questionKeyboard(question, state.selected) }
+        : { text: this.scenario.messages[question.custom.prompt] };
+      const sent = await this.deliver(app, payload, origin);
       if (!sent.ok) return this.onDmFailure(app, sent);
       return { action: 'custom_topic_prompt', applicationId: app.id };
     }
@@ -626,12 +663,12 @@ export class JoinGatekeeperService {
   }
 
   // An answer that declines with its own reason code.
-  async failQuestionnaire(app, code) {
-    if (app.state === 'probation') return this.finalizeProbation(app, false, code);
-    return this.declineWithReason(app, code, 'declined_answers');
+  async failQuestionnaire(app, code, origin = null) {
+    if (app.state === 'probation') return this.finalizeProbation(app, false, code, origin);
+    return this.declineWithReason(app, code, 'declined_answers', origin);
   }
 
-  async finalize(app) {
+  async finalize(app, origin = null) {
     const { messages, questions } = this.scenario;
     const decision = decideAnswers(questions, this.currentAnswers(app.id));
     if (!decision.approve) {
@@ -641,7 +678,7 @@ export class JoinGatekeeperService {
       return { action: 'incomplete', applicationId: app.id, missing: decision.missing };
     }
     const now = this.now();
-    if (app.state === 'probation') return this.finalizeProbation(app, true);
+    if (app.state === 'probation') return this.finalizeProbation(app, true, null, origin);
     if (app.state === 'manual_review') this.store.updateApplication(app.id, { questionnaire_state: 'none' });
 
     const actionState = await this.mutateRequest('approveChatJoinRequest', app);
@@ -649,7 +686,7 @@ export class JoinGatekeeperService {
       this.store.updateApplication(app.id, {
         state: 'approved', decided_at: now, decision_reason: 'answers_passed', telegram_action_state: 'done',
       });
-      await this.sendDm(app.user_chat_id, { text: messages.approved });
+      await this.deliver(app, { text: messages.approved }, origin);
       this.logger.info('approved', { application_id: app.id });
       return { action: 'approved', applicationId: app.id };
     }
@@ -658,7 +695,7 @@ export class JoinGatekeeperService {
     this.store.updateApplication(app.id, {
       state: 'manual_review', decided_at: now, decision_reason: reason, telegram_action_state: actionState,
     });
-    await this.sendDm(app.user_chat_id, this.withGroupButton(messages.manual_review));
+    await this.deliver(app, this.withGroupButton(messages.manual_review), origin);
     return { action: 'manual_review', reason, applicationId: app.id };
   }
 
@@ -666,7 +703,7 @@ export class JoinGatekeeperService {
 
   // Probation keeps its own texts (contract v2 §2); a failure records the
   // reason code as decision_reason.
-  async finalizeProbation(app, passed, code = null) {
+  async finalizeProbation(app, passed, code = null, origin = null) {
     const { messages } = this.scenario;
     const userId = app.user_id;
     const probations = this.store.listByUserAndStates(userId, ['probation']);
@@ -675,15 +712,15 @@ export class JoinGatekeeperService {
       for (const probation of probations) results.push(await this.passProbation(probation, 'answers_passed'));
       // «You can write now» only after Telegram confirmed every lift.
       const confirmed = results.length > 0 && results.every((r) => r.telegramActionState === 'done');
-      await this.sendDm(app.user_chat_id, {
+      await this.deliver(app, {
         text: confirmed ? messages.probation_passed : messages.probation_lift_unconfirmed,
-      });
+      }, origin);
       if (!confirmed) return { action: 'probation_lift_unconfirmed', applicationId: app.id, results };
       return { action: 'probation_passed', applicationId: app.id, results };
     }
     const results = [];
     for (const probation of probations) results.push(await this.removeFromProbation(probation, code));
-    await this.sendDm(app.user_chat_id, { text: messages.probation_removed });
+    await this.deliver(app, { text: messages.probation_removed }, origin);
     return { action: 'probation_removed', reason: code, applicationId: app.id, results };
   }
 
