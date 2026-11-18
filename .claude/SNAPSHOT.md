@@ -4,6 +4,22 @@
 
 ## Текущее состояние
 
+- **18.11.2026 02:40 UTC — правка deactivated выкачена, reject дожат.**
+  - Привратник: релиз `8efc0d4` (ветка `claude/join-gatekeeper-deactivated`
+    от 49db56d, запушена; main не трогали), образ sha256:23ef1cee…, enforce,
+    healthy. Откат — релиз 49db56d.
+  - Повтор reject с тем же хешем 79dab08c…: 9 declined (R_PROFILE_AD),
+    21 skipped_deleted, 1 skipped_already_processed, 1 failed (8891434006 —
+    удалённый аккаунт, decline → USER_ID_INVALID; висит, как велел PO).
+    Квитанция receipt-reject-79dab08c0821-2026-11-18T02-40-04-627Z.json.
+  - Долг: USER_ID_INVALID тоже считать skipped_deleted.
+  - Ассистент молчит в @aialexekrol: «not enough rights to send text
+    messages» — у участников группы can_send_messages=false, бот
+    alexkrol_moderation_bot там обычный member. Не код fcda6a6; отката нет.
+    Лечение — сделать бота админом или вернуть участникам право писать (PO).
+  - Ветку `claude/join-gatekeeper-deactivated` влить в origin/main позже,
+    после решения по c4f4915.
+
 - **18.11.2026 02:35 UTC — исполнен пакет PO «да на всё».**
   - Привратник: B7 enforce (релиз 49db56d, бэкап env pre-enforce).
   - B8: approve + restrict для 8908799403 passed.
