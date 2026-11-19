@@ -94,7 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     units = []
     for i, r in enumerate(records, 1):
         rel = f"mirror/{r['id']}.md"
-        raw = r["text"].encode("utf-8")
+        # The course chunker (allcourses chunker.normalize_unit_text) drops everything up to the first line
+        # whose strip() == "---": in the course mirror that line ends the "# H1 / > meta" header. In the book,
+        # "---" is an ordinary section divider, so a bare record lost all text before its first divider
+        # (11 of 20 records; CH-07 kept 1 character of 11096). Write the record in the mirror format: a
+        # synthetic header ending with "---", then the record text byte for byte.
+        raw = (f"# {r['title']}\n\n> **Record** | ID: {r['id']}\n\n---\n\n" + r["text"]).encode("utf-8")
         (out / rel).write_bytes(raw)
         units.append({
             "unit_id": r["id"], "unit_type": "lesson", "course_id": COURSE_ID, "parent_id": None,

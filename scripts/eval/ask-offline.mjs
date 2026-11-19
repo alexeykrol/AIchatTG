@@ -27,6 +27,8 @@
  *                              the rewrite on no-signal questions (see --rewrite-no-signal). --rewrite-effort (default `minimal`, the
  *                              production default; the shim maps it to Anthropic `low`), --rewrite-price-input /
  *                              --rewrite-price-output (required for a model without a published price here).
+ *   --max-entries N / --max-context-tokens N  retrieval width (production env TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_*;
+ *                              defaults 12 / 6000). Recorded in manifest.retrieval.
  *   --rewrite-no-signal        (only with --rewrite) passes `rewriteOnNoSignal: true` to createKnowledgeRetrieval:
  *                              no-signal questions may be rewritten too (still only when the free local search is
  *                              weak). Off in production; recorded in manifest.retrieval and manifest.rewrite.
@@ -67,6 +69,7 @@ export function parseArgs(argv) {
     anthropicVersion: DEFAULT_ANTHROPIC_VERSION, keyEnv: null, capUsd: null, priceInput: null, priceOutput: null,
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
     rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
+    maxEntries: null, maxContextTokens: null,
   };
   const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
@@ -76,6 +79,7 @@ export function parseArgs(argv) {
     '--price-input': 'priceInput', '--price-output': 'priceOutput', '--already-spent-usd': 'alreadySpentUsd',
     '--rewrite': 'rewrite', '--rewrite-effort': 'rewriteEffort', '--rewrite-price-input': 'rewritePriceInput',
     '--rewrite-price-output': 'rewritePriceOutput', '--prompt-addendum': 'promptAddendum',
+    '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
@@ -89,7 +93,7 @@ export function parseArgs(argv) {
     a[key] = inline ?? argv[++i];
   }
   for (const k of ['limit', 'maxOutputTokens', 'capUsd', 'priceInput', 'priceOutput', 'alreadySpentUsd',
-    'rewritePriceInput', 'rewritePriceOutput']) {
+    'rewritePriceInput', 'rewritePriceOutput', 'maxEntries', 'maxContextTokens']) {
     if (a[k] != null) a[k] = Number(a[k]);
   }
   if (!['retrieval', 'mock', 'live'].includes(a.mode)) throw new Error('--mode must be retrieval, mock or live');
@@ -263,7 +267,9 @@ async function main() {
   });
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
     rewriteQuestion: stack?.rewriteQuestion ?? null,
-    ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}) });
+    ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}),
+    ...(args.maxEntries != null ? { maxEntries: args.maxEntries } : {}),
+    ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}) });
   const rows = [];
   let stoppedBy = null;
   try {
@@ -309,7 +315,8 @@ async function main() {
     stopped_by_spend_guard: stoppedBy,
     aichattg_git_sha: (() => { try { return execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD']).toString().trim(); } catch { return null; } })(),
     database: databasePath, database_sha256: sha256File(databasePath),
-    retrieval: { maxEntries: RETRIEVAL_MAX_ENTRIES, maxContextTokens: RETRIEVAL_MAX_CONTEXT_TOKENS,
+    retrieval: { maxEntries: args.maxEntries ?? RETRIEVAL_MAX_ENTRIES,
+      maxContextTokens: args.maxContextTokens ?? RETRIEVAL_MAX_CONTEXT_TOKENS,
       rewrite: Boolean(stack?.rewriteQuestion),
       rewrite_on_no_signal: Boolean(args.rewriteNoSignal) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,
