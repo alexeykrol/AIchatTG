@@ -268,6 +268,47 @@ test('mock run with --rewrite: production wiring, no-signal skips, zero network'
   }
 });
 
+test('--rewrite-no-signal: boolean flag, valid only with --rewrite', () => {
+  const a = parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5', '--rewrite-no-signal']);
+  assert.equal(a.rewriteNoSignal, true);
+  assert.equal(a.rewrite, 'claude-haiku-5-5');
+  assert.equal(parseArgs(['--mode', 'mock']).rewriteNoSignal, false);
+  assert.throws(() => parseArgs(['--mode', 'mock', '--rewrite-no-signal']), /only together with --rewrite/);
+  assert.throws(() => parseArgs(['--mode', 'mock', '--rewrite', 'x', '--rewrite-no-signal=1']), /takes no value/);
+  assert.throws(() => createOfflineAssistant({ databasePath: '/nonexistent', rewriteOnNoSignal: true }), /needs a rewriteQuestion/);
+});
+
+test('mock run with --rewrite --rewrite-no-signal: no-signal questions may be rewritten, zero network', { skip: skipBook }, async () => {
+  const realFetch = globalThis.fetch;
+  let outbound = 0;
+  globalThis.fetch = async () => { outbound += 1; throw new Error('network_forbidden'); };
+  const calls = [];
+  const args = parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5', '--rewrite-no-signal']);
+  const stack = buildProviderStack(args, { transport: fakeAnthropicTransport({ calls }) });
+  const assistant = createOfflineAssistant({ databasePath: database, provider: stack.provider,
+    rewriteQuestion: stack.rewriteQuestion, rewriteOnNoSignal: true });
+  try {
+    let noSignal = 0; let noSignalAttempted = 0;
+    for (const q of loadQuestions(DONOR)) {
+      stack.setTag(q.q);
+      const r = await assistant.ask(q.question, { userId: q.q });
+      if (r.trace?.domain === 'domain_no_signal') {
+        noSignal += 1;
+        const tagged = stack.guard.journal().filter((j) => j.tag === q.q && j.kind === 'rewrite' && j.event === 'call');
+        if (tagged.length > 0) noSignalAttempted += 1;
+      }
+    }
+    assert.equal(outbound, 0);
+    assert.ok(noSignal > 0);
+    assert.ok(noSignalAttempted > 0, 'at least one no-signal question reached the rewrite');
+    const rewriteRows = stack.guard.journal().filter((j) => j.kind === 'rewrite' && j.event === 'call');
+    assert.equal(calls.filter((c) => c.body.model === 'claude-haiku-5-5').length, rewriteRows.length);
+  } finally {
+    assistant.close();
+    globalThis.fetch = realFetch;
+  }
+});
+
 // Pinned before the levers were added (2026-11-19): sha256 over the per-request sha256 lines
 // (URL + headers + body) of the 100-question default mock run, against this exact book database.
 const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';

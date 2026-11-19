@@ -184,6 +184,51 @@ test('a no-signal confirmation pass stays local: the paid rewrite step is never 
   assert.equal(rewriteCalls, 1);
 });
 
+function countingRewriteLayer(options, retriever = fakeRetriever({ status: 'not_found' })) {
+  const counter = { rewrite: 0, local: 0 };
+  const adapter = {
+    ...retriever.adapter,
+    forQuestion(input) { counter.local += 1; return retriever.adapter.forQuestion(input); },
+    forQuestionWithRewrite(input) { counter.rewrite += 1; return retriever.adapter.forQuestionWithRewrite(input); },
+  };
+  const layer = createKnowledgeRetrieval(options, { knowledge: admittedKnowledge(), buildRetriever: () => adapter });
+  return { layer, counter };
+}
+
+test('rewriteOnNoSignal defaults to off: the no-signal pass stays local', async () => {
+  const { layer, counter } = countingRewriteLayer({ rewriteEnabled: true });
+  const refused = await layer.forQuestion({ question: 'как приготовить борщ' });
+  assert.equal(refused.reason, 'domain_no_signal');
+  assert.equal(counter.rewrite, 0);
+  assert.equal(counter.local, 1);
+});
+
+test('rewriteOnNoSignal opt-in sends a no-signal question through the rewrite path; verdict unchanged', async () => {
+  const { layer, counter } = countingRewriteLayer({ rewriteEnabled: true, rewriteOnNoSignal: true });
+  const refused = await layer.forQuestion({ question: 'как приготовить борщ' });
+  assert.equal(counter.rewrite, 1);
+  assert.equal(counter.local, 0);
+  // Both layers still refuse together exactly as before.
+  assert.equal(refused.grounded, false);
+  assert.equal(refused.reason, 'domain_no_signal');
+  assert.equal(refused.domainId, 'out_of_scope');
+  assert.equal(refused.trace.domain, 'domain_no_signal');
+  // A served no-signal question keeps its no-signal trace.
+  const served = countingRewriteLayer({ rewriteEnabled: true, rewriteOnNoSignal: true }, fakeRetriever());
+  const ok = await served.layer.forQuestion({ question: 'как приготовить борщ' });
+  assert.equal(served.counter.rewrite, 1);
+  assert.equal(ok.grounded, true);
+  assert.equal(ok.trace.domain, 'domain_no_signal');
+});
+
+test('rewriteOnNoSignal without rewriteEnabled never rewrites', async () => {
+  const { layer, counter } = countingRewriteLayer({ rewriteEnabled: false, rewriteOnNoSignal: true });
+  await layer.forQuestion({ question: 'как приготовить борщ' });
+  await layer.forQuestion({ question: 'что такое ии-агент' });
+  assert.equal(counter.rewrite, 0);
+  assert.equal(counter.local, 2);
+});
+
 test('a not_found pack is reported as an abstention, not as a failure', async () => {
   const retriever = fakeRetriever({ status: 'not_found' });
   const layer = retrieval({}, { retriever });

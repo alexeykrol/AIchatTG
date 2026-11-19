@@ -24,9 +24,12 @@
  *                              `createRewriterAdapter` -> `createKnowledgeRetrieval({ rewriteEnabled: true })`,
  *                              exactly as server.mjs wires it, its transport through the same Anthropic shim and
  *                              the same spend guard (journal rows `kind: "rewrite"`). Production still skips
- *                              the rewrite on no-signal questions. --rewrite-effort (default `minimal`, the
+ *                              the rewrite on no-signal questions (see --rewrite-no-signal). --rewrite-effort (default `minimal`, the
  *                              production default; the shim maps it to Anthropic `low`), --rewrite-price-input /
  *                              --rewrite-price-output (required for a model without a published price here).
+ *   --rewrite-no-signal        (only with --rewrite) passes `rewriteOnNoSignal: true` to createKnowledgeRetrieval:
+ *                              no-signal questions may be rewritten too (still only when the free local search is
+ *                              weak). Off in production; recorded in manifest.retrieval and manifest.rewrite.
  *   --prompt-addendum <file>   the file's text appended (after a blank line) to the end of the production answer
  *                              system prompt, in the shim; the file's sha256 goes to the manifest.
  */
@@ -63,8 +66,9 @@ export function parseArgs(argv) {
     only: null, model: DEFAULT_MODEL, effort: DEFAULT_EFFORT, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     anthropicVersion: DEFAULT_ANTHROPIC_VERSION, keyEnv: null, capUsd: null, priceInput: null, priceOutput: null,
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
-    rewritePriceOutput: null, promptAddendum: null,
+    rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
   };
+  const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
     '--mode': 'mode', '--package': 'packagePath', '--donor': 'donor', '--out': 'out', '--limit': 'limit',
     '--only': 'only', '--model': 'model', '--effort': 'effort', '--max-output-tokens': 'maxOutputTokens',
@@ -75,6 +79,11 @@ export function parseArgs(argv) {
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
+    if (booleans[flag]) {
+      if (inline !== undefined) throw new Error(`${flag} takes no value`);
+      a[booleans[flag]] = true;
+      continue;
+    }
     const key = map[flag];
     if (!key) throw new Error(`unknown option ${flag}`);
     a[key] = inline ?? argv[++i];
@@ -88,6 +97,7 @@ export function parseArgs(argv) {
     throw new Error('--rewrite and --prompt-addendum need --mode mock or live (they go through the spend guard)');
   }
   if (a.rewrite != null && !String(a.rewrite).trim()) throw new Error('--rewrite needs a model id');
+  if (a.rewriteNoSignal && a.rewrite == null) throw new Error('--rewrite-no-signal is valid only together with --rewrite <model>');
   if (a.only) a.only = new Set(String(a.only).split(',').map((s) => s.trim()));
   return a;
 }
@@ -220,7 +230,10 @@ export function rewriteSummary(rows, stack, args) {
       : args.rewriteEffort === 'none' ? 'thinking between_tools (Sonnet 5.5 only)' : args.rewriteEffort,
     max_output_tokens: 128, system_prompt_sha256: sha256(REWRITE_SYSTEM_PROMPT),
     price_usd_per_mtok: stack.rewritePrice,
+    rewrite_on_no_signal: Boolean(args.rewriteNoSignal),
     skipped_no_signal: rows.filter((r) => r.rewrite_skipped_no_signal).length,
+    no_signal_questions: rows.filter((r) => r.domain_signal === DOMAIN_ROUTE_REASONS.NO_SIGNAL).length,
+    no_signal_attempted: rows.filter((r) => r.rewrite_no_signal_attempted).length,
     attempted: rows.filter((r) => r.rewrite_attempted).length,
     reasons, winners: rows.filter((r) => r.rewrite_winner).reduce((m, r) => ({ ...m, [r.rewrite_winner]: (m[r.rewrite_winner] || 0) + 1 }), {}),
     calls: calls.length, cost_usd: calls.reduce((n, j) => n + j.costUsd, 0),
@@ -249,7 +262,8 @@ async function main() {
     journalPath: join(out, 'journal.jsonl'),
   });
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
-    rewriteQuestion: stack?.rewriteQuestion ?? null });
+    rewriteQuestion: stack?.rewriteQuestion ?? null,
+    ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}) });
   const rows = [];
   let stoppedBy = null;
   try {
@@ -275,7 +289,11 @@ async function main() {
         latency_ms: Date.now() - t0,
         ...(diag ? { diagnostics: diag } : {}),
         ...(stack?.rewriteQuestion ? {
-          rewrite_skipped_no_signal: r.trace?.domain === DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+          rewrite_skipped_no_signal: !args.rewriteNoSignal && r.trace?.domain === DOMAIN_ROUTE_REASONS.NO_SIGNAL,
+          // A refused no-signal trace carries no rewrite block (production traces unchanged), so the
+          // attempt is also read from the journal: a rewrite call tagged with this question.
+          rewrite_no_signal_attempted: r.trace?.domain === DOMAIN_ROUTE_REASONS.NO_SIGNAL
+            && (rw?.attempted === true || rewriteCalls.length > 0),
           rewrite_attempted: rw?.attempted ?? false, rewrite_reason: rw?.reason ?? null,
           rewrite_question: rw?.rewrittenQuestion ?? null, rewrite_winner: rw?.winner ?? null,
           rewrite_calls: rewriteCalls.length, rewrite_cost_usd: rewriteCalls.reduce((n, j) => n + j.costUsd, 0),
@@ -292,7 +310,8 @@ async function main() {
     aichattg_git_sha: (() => { try { return execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD']).toString().trim(); } catch { return null; } })(),
     database: databasePath, database_sha256: sha256File(databasePath),
     retrieval: { maxEntries: RETRIEVAL_MAX_ENTRIES, maxContextTokens: RETRIEVAL_MAX_CONTEXT_TOKENS,
-      rewrite: Boolean(stack?.rewriteQuestion) },
+      rewrite: Boolean(stack?.rewriteQuestion),
+      rewrite_on_no_signal: Boolean(args.rewriteNoSignal) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,
     answer_system_prompt_sha256: sha256(answerSystemPrompt(sample, DEFAULT_DOMAIN_CATALOG)),
     substitutions: [...SUBSTITUTIONS, ...(args.mode === 'retrieval' ? ['answer_model_not_called'] : []),

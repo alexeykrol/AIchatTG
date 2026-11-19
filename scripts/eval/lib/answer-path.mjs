@@ -13,6 +13,7 @@
  * Retrieval business logic is unchanged: 12 entries / 6000 tokens, packs validated. Rewrite (input-layer
  * step 5) is off as in production unless a `rewriteQuestion` is given; then it is wired exactly as
  * `server.mjs` wires it (`rewriteEnabled: true` + the rewriter port into `createKnowledgeRetrieval`).
+ * `rewriteOnNoSignal: true` (experiment only, never set in production) also lets no-signal questions reach it.
  */
 import { createKnowledgeRetrieval } from '../../../apps/telegram-runtime/src/knowledge-retrieval.mjs';
 import {
@@ -54,11 +55,14 @@ export function usedIds(knowledge) {
 export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
-  rewriteQuestion = null,
+  rewriteQuestion = null, rewriteOnNoSignal = false,
 }) {
   const rewriteEnabled = typeof rewriteQuestion === 'function';
+  if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
+  // The opt-in key is passed only when set, so the default call is the pre-lever call.
   const retrieval = createKnowledgeRetrieval(
-    { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true },
+    { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true,
+      ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}) },
     { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );
   if (!retrieval.available) throw new Error(`retrieval unavailable: ${retrieval.reason}`);

@@ -44,6 +44,9 @@ export function createKnowledgeRetrieval(
     maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
     maxEntries = DEFAULT_MAX_ENTRIES,
     rewriteEnabled = false,
+    // Opt-in, off by default and never set by config.mjs/server.mjs: lets a
+    // no-signal question reach the paid rewrite step too (eval measurement only).
+    rewriteOnNoSignal = false,
     validatePacks = true,
   } = {},
   {
@@ -127,10 +130,15 @@ export function createKnowledgeRetrieval(
       });
     }
 
-    // The rewrite step may call a paid provider. A no-signal question has not
-    // yet earned one: its confirmation pass stays purely local, preserving the
-    // veto's original guarantee that no money is spent before a positive signal.
-    const answer = rewriteEnabled === true && !noSignal
+    // The rewrite step may call a paid provider. By default a no-signal question
+    // has not yet earned one: its confirmation pass stays purely local, preserving
+    // the veto's original guarantee that no money is spent before a positive
+    // signal. That guarantee holds by default and is waived only by the explicit
+    // `rewriteOnNoSignal: true` option; even then the retriever itself calls the
+    // rewriter only after its free local search came back weak. The verdict,
+    // reasons and traces below are the same either way.
+    const rewriteAllowed = rewriteEnabled === true && (!noSignal || rewriteOnNoSignal === true);
+    const answer = rewriteAllowed
       ? await retriever.forQuestionWithRewrite({
         question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail,
       })
