@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "../Доноры/Synthetic_User"
+		},
+		{
+			"path": "../agi2claude"
 		}
 	],
 	"settings": {
