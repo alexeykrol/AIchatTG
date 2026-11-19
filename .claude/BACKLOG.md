@@ -1,13 +1,23 @@
 ---
 title: Backlog
 type: backlog
-updated: 2026-09-24
+updated: 2026-11-19
 ---
 
 # Backlog
 
 ## Next
 
+- [ ] SENIOR-SERVICE-CONCEPT (19.11.2026, обсуждение, не план): цель владельца —
+      агент на API догоняет и превосходит дженерик по качеству ответа при одной
+      базе; модель «младший/старший консультант», диспетчер на нашей стороне,
+      общий журнал спроса, платформа для экспертов, бесплатный плагин как
+      лид-магнит, маркетплейс в бэклоге. Ассистент — один из входов к общему
+      сервису ответов. Шаг К1 (паритет на стенде, оценка USD50–100) ждёт «да»
+      владельца и бюджет; платных вызовов not_run.
+      `docs/proposals/2026-11-19-senior-service-concept.md`; основной документ
+      `~/Code/BestMentor_Plugin/docs/senior-service-concept.md` (b9b2b13);
+      замеры `docs/reports/2026-11-19-assistant-vs-agi2claude-comparison.md`.
 - [x] CURRENT-AD-9809:24September13:56UTC one delete+one immutable-author ban,
       readbackkicked/until0 and native absence. No retries or earlier replays.
 - [ ] SOURCE-EVIDENCE-SELECTOR: real acceptance of approvedd8e stopped on3rd
