@@ -7,7 +7,8 @@
 #    table with the stand's own verdicts for the generic chat and the stand bot.
 # DONOR_BUILD_CAP_USD is the owner's total for the donor ledger (it is already above the donor's own $80).
 set -euo pipefail
-KEY_ENV="${1:?key env name}"; CAP="${2:?answer cap usd}"; BUILD="${3:?donor build cap usd}"
+KEY_ENV="${1:?key env name}"; CAP="${2:?answer cap usd}"; BUILD="${3:?donor build cap usd}"; shift 3
+# Any further arguments go to ask-offline.mjs (e.g. --package, --rewrite, --prompt-addendum, --already-spent-usd).
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 NODE="${AICHATTG_EVAL_NODE:-$HOME/.nvm/versions/node/v20.20.0/bin/node}"
 PY="${AICHATTG_EVAL_PY:-$HOME/Code/agi2claude/.venv/bin/python}"
@@ -23,6 +24,6 @@ if ! grep -qE '^\| Overall pass \|.*\| 0/100 \(judged 8\) \|$' "$REPO/output/eva
   echo "STOP: the judge passed at least one known-bad answer; do not trust it for the comparison" >&2; exit 5
 fi
 "$NODE" "$REPO/scripts/eval/ask-offline.mjs" --mode live --donor "$DONOR" --key-env "$KEY_ENV" \
-  --cap-usd "$CAP" --out "$RUN"
+  --cap-usd "$CAP" --out "$RUN" "$@"
 "$PY" "$REPO/scripts/eval/judge_with_stand.py" --donor "$DONOR" --key-env "$KEY_ENV" --side aichattg \
   --answers "$RUN/answers.md" --out "$REPO/output/eval/judge/$STAMP-aichattg"
