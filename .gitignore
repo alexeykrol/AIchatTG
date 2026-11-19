@@ -32,3 +32,6 @@ playwright-report/
 *.sqlite3
 .handoffs/local/
 .handoffs/*.local.md
+
+# Agent worktrees (local only; a pre-compaction safety commit once picked one up as a gitlink)
+.claude/worktrees/
