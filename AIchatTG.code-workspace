@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../operations"
+		},
+		{
+			"path": "../agi"
+		},
+		{
+			"path": "../Доноры/Synthetic_User"
 		}
 	],
 	"settings": {
