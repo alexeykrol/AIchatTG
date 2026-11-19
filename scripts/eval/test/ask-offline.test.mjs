@@ -6,9 +6,13 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { answerSystemPrompt } from '../../../apps/telegram-runtime/src/provider-adapter.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from '../../../apps/telegram-runtime/src/assistant-domains.mjs';
+import { createHash } from 'node:crypto';
 import {
-  buildProviderStack, fakeAnthropicTransport, parseArgs, priceFor, DEFAULT_MODEL, DEFAULT_EFFORT,
+  buildProviderStack, fakeAnthropicTransport, parseArgs, priceFor, rewritePriceFor, DEFAULT_MODEL, DEFAULT_EFFORT,
+  DEFAULT_REWRITE_EFFORT,
 } from '../ask-offline.mjs';
+import { REWRITE_SYSTEM_PROMPT } from '../../../apps/telegram-runtime/src/rewriter-adapter.mjs';
+import { PUBLISHED_PRICES } from '../lib/spend-guard.mjs';
 import { createOfflineAssistant, RETRIEVAL_MAX_CONTEXT_TOKENS, RETRIEVAL_MAX_ENTRIES, usedIds } from '../lib/answer-path.mjs';
 import { chatResponseFromMessages, createAnthropicChatShim, messagesRequestFromChat } from '../lib/anthropic-shim.mjs';
 import { SpendCapReached, createSpendGuard, inputTokenCeiling } from '../lib/spend-guard.mjs';
@@ -148,4 +152,143 @@ test('100 questions in mock mode make zero outbound network calls', { skip: skip
     assistant.close();
     globalThis.fetch = realFetch;
   }
+});
+
+const ADDENDUM = join(REPO, 'scripts/eval/addenda/conflicts.md');
+
+test('lever flags: parsing, rewrite price, retrieval mode refuses them', () => {
+  const a = parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5', '--prompt-addendum', ADDENDUM]);
+  assert.equal(a.rewrite, 'claude-haiku-5-5');
+  assert.equal(a.rewriteEffort, DEFAULT_REWRITE_EFFORT);
+  assert.equal(a.promptAddendum, ADDENDUM);
+  assert.deepEqual({ input: rewritePriceFor(a).input, output: rewritePriceFor(a).output },
+    { input: PUBLISHED_PRICES['claude-haiku-5-5'].input, output: PUBLISHED_PRICES['claude-haiku-5-5'].output });
+  assert.throws(() => rewritePriceFor(parseArgs(['--mode', 'mock', '--rewrite', 'claude-unknown-9'])), /--rewrite-price-input/);
+  assert.equal(rewritePriceFor(parseArgs(['--mode', 'mock', '--rewrite', 'x', '--rewrite-price-input', '1',
+    '--rewrite-price-output', '2'])).source, 'command line');
+  assert.throws(() => parseArgs(['--rewrite', 'claude-haiku-5-5']), /mock or live/);
+  assert.throws(() => parseArgs(['--prompt-addendum', ADDENDUM]), /mock or live/);
+  const plain = parseArgs([]);
+  assert.equal(plain.rewrite, null);
+  assert.equal(plain.promptAddendum, null);
+});
+
+test('default stack has no rewriter and no addendum; shim leaves the system prompt alone', async () => {
+  const calls = [];
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock']), { transport: fakeAnthropicTransport({ calls }) });
+  assert.equal(stack.rewriteQuestion, null);
+  assert.equal(stack.addendum, null);
+  const chat = { model: 'm', max_completion_tokens: 10,
+    messages: [{ role: 'system', content: 'SYS' }, { role: 'user', content: '{"question":"q"}' }] };
+  const shim = createAnthropicChatShim({ apiKey: 'k', fetchFn: fakeAnthropicTransport({ calls }) });
+  await shim('https://api.anthropic.com/v1/chat/completions', { body: JSON.stringify(chat) });
+  assert.equal(JSON.stringify(calls.at(-1).body), JSON.stringify(messagesRequestFromChat(chat)));
+  assert.throws(() => createAnthropicChatShim({ apiKey: 'k', systemAddendum: '   ' }), /addendum/);
+});
+
+test('rewrite goes to its model through the shim and the guard, cost journaled apart', async () => {
+  const calls = [];
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5']),
+    { transport: fakeAnthropicTransport({ calls }) });
+  stack.setTag('Q1');
+  const out = await stack.rewriteQuestion({ question: 'как платят специалисту', conceptMatches: ['Специалист'] });
+  assert.equal(out, 'как платят специалисту определение термины');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(calls[0].headers['x-api-key'], 'eval-shim-holds-the-real-key');
+  const body = calls[0].body;
+  assert.equal(body.model, 'claude-haiku-5-5');
+  assert.equal(body.system, REWRITE_SYSTEM_PROMPT);
+  assert.equal(body.max_tokens, 128);
+  assert.deepEqual(body.output_config, { effort: 'low' }, 'production minimal -> Anthropic low');
+  assert.match(body.messages[0].content, /Термины, уже найденные в базе: Специалист/);
+  const j = stack.guard.journal();
+  assert.equal(j.length, 1);
+  assert.equal(j[0].kind, 'rewrite');
+  assert.equal(j[0].tag, 'Q1');
+  const p = PUBLISHED_PRICES['claude-haiku-5-5'];
+  assert.ok(Math.abs(j[0].costUsd - (j[0].usage.input_tokens * p.input + j[0].usage.output_tokens * p.output) / 1e6) < 1e-15);
+  // the guard refuses a rewrite whose ceiling would cross the cap, before the transport
+  const tight = buildProviderStack(parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5', '--cap-usd', '0.0000001']),
+    { transport: fakeAnthropicTransport({ calls }) });
+  await assert.rejects(tight.rewriteQuestion({ question: 'вопрос' }), /spend cap reached/);
+  assert.equal(calls.length, 1);
+  assert.equal(tight.guard.journal()[0].event, 'refused');
+  assert.equal(tight.guard.journal()[0].kind, 'rewrite');
+});
+
+test('addendum lands at the end of the answer system prompt; its hash is the file hash', { skip: skipBook }, async () => {
+  const calls = [];
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock', '--prompt-addendum', ADDENDUM]),
+    { transport: fakeAnthropicTransport({ calls }) });
+  const text = readFileSync(ADDENDUM, 'utf8').trimEnd();
+  assert.equal(stack.addendum.sha256, createHash('sha256').update(readFileSync(ADDENDUM)).digest('hex'));
+  const assistant = createOfflineAssistant({ databasePath: database, provider: stack.provider });
+  try {
+    const q = 'А что делает Специалист, если ему мало платят? Уходит в другую сферу?';
+    await assistant.ask(q, { userId: 'a1' });
+    const routing = await assistant.routeQuestion(q, { userId: 'a2' });
+    const prod = answerSystemPrompt({ route: routing.route, knowledge: routing.knowledge,
+      domainRoutes: routing.domainRoutes, domainCoverage: routing.domainCoverage,
+      missingDomains: routing.missingDomains, registryDigest: routing.registryDigest }, DEFAULT_DOMAIN_CATALOG);
+    assert.equal(calls[0].body.system, `${prod}\n\n${text}`);
+    assert.ok(calls[0].body.system.endsWith(text));
+  } finally { assistant.close(); }
+});
+
+test('mock run with --rewrite: production wiring, no-signal skips, zero network', { skip: skipBook }, async () => {
+  const realFetch = globalThis.fetch;
+  let outbound = 0;
+  globalThis.fetch = async () => { outbound += 1; throw new Error('network_forbidden'); };
+  const calls = [];
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock', '--rewrite', 'claude-haiku-5-5']),
+    { transport: fakeAnthropicTransport({ calls }) });
+  const assistant = createOfflineAssistant({ databasePath: database, provider: stack.provider,
+    rewriteQuestion: stack.rewriteQuestion });
+  try {
+    let noSignal = 0; let attempted = 0;
+    for (const q of loadQuestions(DONOR)) {
+      stack.setTag(q.q);
+      const r = await assistant.ask(q.question, { userId: q.q });
+      if (r.trace?.domain === 'domain_no_signal') {
+        noSignal += 1;
+        assert.notEqual(r.trace?.rewrite?.attempted, true, `${q.q}: no-signal question must not be rewritten`);
+      }
+      if (r.trace?.rewrite?.attempted) attempted += 1;
+    }
+    assert.equal(outbound, 0);
+    const rewriteRows = stack.guard.journal().filter((j) => j.kind === 'rewrite');
+    assert.equal(rewriteRows.length, attempted);
+    assert.ok(attempted > 0, 'at least one question triggered the rewrite');
+    assert.ok(noSignal > 0);
+    assert.equal(calls.filter((c) => c.body.model === 'claude-haiku-5-5').length, attempted);
+  } finally {
+    assistant.close();
+    globalThis.fetch = realFetch;
+  }
+});
+
+// Pinned before the levers were added (2026-11-19): sha256 over the per-request sha256 lines
+// (URL + headers + body) of the 100-question default mock run, against this exact book database.
+const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';
+const PINNED_DEFAULT_REQUESTS_SHA256 = '34ed73457f68ce44c4e1987815b8ef2cbfec8b182d55b1c5f66ae007ca8aa0a5';
+const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
+
+test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {
+  skip: sameBook ? false : 'book database differs from the one the digest was pinned on',
+}, async () => {
+  const fake = fakeAnthropicTransport();
+  const lines = [];
+  const transport = async (url, init) => {
+    lines.push(createHash('sha256').update(`${url}\n${JSON.stringify(init.headers)}\n${init.body}`).digest('hex'));
+    return fake(url, init);
+  };
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock']), { transport });
+  const assistant = createOfflineAssistant({ databasePath: database, provider: stack.provider,
+    rewriteQuestion: stack.rewriteQuestion });
+  try {
+    for (const q of loadQuestions(DONOR)) { stack.setTag(q.q); await assistant.ask(q.question, { userId: `eval-${q.q}` }); }
+  } finally { assistant.close(); }
+  assert.equal(lines.length, 81);
+  assert.equal(createHash('sha256').update(`${lines.join('\n')}\n`).digest('hex'), PINNED_DEFAULT_REQUESTS_SHA256);
 });

@@ -81,7 +81,7 @@ export function renderRetrievalMarkdown(report, manifest) {
   const lines = [
     '# Retrieval at $0: AIchatTG retriever over the stand book (20 records)', '',
     `Database: \`${manifest.database}\` (sha256 ${manifest.database_sha256.slice(0, 12)}), retrieval`
-      + ` ${manifest.retrieval.maxEntries} entries / ${manifest.retrieval.maxContextTokens} tokens, rewrite off.`,
+      + ` ${manifest.retrieval.maxEntries} entries / ${manifest.retrieval.maxContextTokens} tokens, rewrite ${manifest.retrieval.rewrite ? 'on' : 'off'}.`,
     'Unit of recall: a stand record id (`unitOfChunkId` of the chunk ids handed to the answer model).', '',
     '| Measure | Value |', '| --- | --- |',
     `| Answerable: mean recall@12 of gold records | ${s.answerable_recall_at_12} |`,

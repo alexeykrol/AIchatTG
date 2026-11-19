@@ -10,7 +10,9 @@
  *     the exact-example hints of the catalog still apply as in production;
  *   - dialogue history empty, no working state, no analyzer, no moderation, no address detection, no quota;
  *   - delivery (footer, Markdown rendering, chunking for Telegram) is not applied: the text is the model's.
- * Retrieval business logic is unchanged: 12 entries / 6000 tokens, rewrite off, packs validated.
+ * Retrieval business logic is unchanged: 12 entries / 6000 tokens, packs validated. Rewrite (input-layer
+ * step 5) is off as in production unless a `rewriteQuestion` is given; then it is wired exactly as
+ * `server.mjs` wires it (`rewriteEnabled: true` + the rewriter port into `createKnowledgeRetrieval`).
  */
 import { createKnowledgeRetrieval } from '../../../apps/telegram-runtime/src/knowledge-retrieval.mjs';
 import {
@@ -52,10 +54,12 @@ export function usedIds(knowledge) {
 export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
+  rewriteQuestion = null,
 }) {
+  const rewriteEnabled = typeof rewriteQuestion === 'function';
   const retrieval = createKnowledgeRetrieval(
-    { maxEntries, maxContextTokens, rewriteEnabled: false, validatePacks: true },
-    { knowledge: packageKnowledge({ databasePath, domainId }) },
+    { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true },
+    { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );
   if (!retrieval.available) throw new Error(`retrieval unavailable: ${retrieval.reason}`);
   // runtime.mjs: the compatibility adapter maps the content retrieval under the content source id.

@@ -17,6 +17,10 @@
  *     which turns thinking off on models that refuse `disabled`);
  *   - the response is mapped back to the Chat Completions envelope the adapter parses.
  *
+ * Experiment seam (off by default): `systemAddendum` appends a fixed text, after a blank line, to the end of
+ * the production system prompt of every request this shim carries (`--prompt-addendum`). Without it the
+ * request is exactly the mapping above.
+ *
  * The key never travels through the adapter: the adapter gets a placeholder and the shim strips its
  * Authorization header, so the real key exists in one closure only and is never logged.
  */
@@ -88,16 +92,21 @@ function responseLike({ ok, status, body, requestId }) {
  * @param {string} o.apiKey       real Anthropic key (from the env var named on the command line)
  * @param {Function} [o.fetchFn]  transport; globalThis.fetch in a paid run, a fake in tests
  * @param {Function} [o.onCall]   observer: ({ request, response, raw }) for the run journal
+ * @param {string|null} [o.systemAddendum]  experiment text appended to the end of the system prompt
  */
 export function createAnthropicChatShim({
   apiKey, fetchFn = globalThis.fetch, base = ANTHROPIC_MESSAGES_BASE,
-  anthropicVersion = DEFAULT_ANTHROPIC_VERSION, onCall = null,
+  anthropicVersion = DEFAULT_ANTHROPIC_VERSION, onCall = null, systemAddendum = null,
 } = {}) {
   if (typeof apiKey !== 'string' || !apiKey.trim() || /[\r\n]/.test(apiKey)) throw new Error('shim_api_key_missing');
+  if (systemAddendum != null && (typeof systemAddendum !== 'string' || !systemAddendum.trim())) {
+    throw new Error('shim_system_addendum_invalid');
+  }
   return async function shimFetch(url, init = {}) {
     if (String(url) !== `${base}chat/completions`) throw new Error('shim_unexpected_url');
     const chat = JSON.parse(init.body);
     const request = messagesRequestFromChat(chat);
+    if (systemAddendum != null) request.system = request.system ? `${request.system}\n\n${systemAddendum}` : systemAddendum;
     const res = await fetchFn(`${base}messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': anthropicVersion },

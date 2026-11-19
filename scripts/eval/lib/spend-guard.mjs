@@ -67,35 +67,41 @@ export function createSpendGuard({ capUsd, price, journalPath = null, alreadySpe
   }
 
   /** Reserve the ceiling of one Messages request; throws SpendCapReached instead of allowing the call. */
-  function reserve(messagesRequest, tag = null) {
+  function reserve(messagesRequest, tag = null, { kind = null, price: callPrice = price } = {}) {
     if (stopped) throw new SpendCapReached(stopped);
     const inTok = inputTokenCeiling(messagesRequest);
     const outTok = Number(messagesRequest.max_tokens) || 0;
-    const ceiling = (inTok * price.input + outTok * price.output) / 1e6;
+    const ceiling = (inTok * callPrice.input + outTok * callPrice.output) / 1e6;
     if (settled + reserved + ceiling > capUsd) {
-      stopped = { capUsd, settledUsd: settled, openReservationsUsd: reserved, nextCeilingUsd: ceiling, tag };
-      write({ event: 'refused', tag, ceilingUsd: ceiling, settledUsd: settled, capUsd });
+      stopped = { capUsd, settledUsd: settled, openReservationsUsd: reserved, nextCeilingUsd: ceiling, tag,
+        ...(kind ? { kind } : {}) };
+      write({ event: 'refused', tag, ...(kind ? { kind } : {}), ceilingUsd: ceiling, settledUsd: settled, capUsd });
       throw new SpendCapReached(stopped);
     }
     reserved += ceiling;
-    return { tag, ceiling, inTok, outTok };
+    return { tag, ceiling, inTok, outTok, kind, price: callPrice };
   }
 
   /** Replace a reservation by the actual cost; usage null = unknown, the full ceiling counts as spent. */
   function settle(r, { usage = null, status = null, stopReason = null, model = null } = {}) {
     reserved -= r.ceiling;
-    const actual = usage ? costUsd(usage, price) : r.ceiling;
+    const actual = usage ? costUsd(usage, r.price || price) : r.ceiling;
     settled += actual;
-    write({ event: 'call', tag: r.tag, model, status, stopReason, ceilingUsd: r.ceiling,
+    write({ event: 'call', tag: r.tag, ...(r.kind ? { kind: r.kind } : {}), model, status, stopReason, ceilingUsd: r.ceiling,
       costUsd: actual, costKnown: Boolean(usage), usage, settledUsd: settled, capUsd });
     return actual;
   }
 
-  /** Wrap a transport that speaks the Messages API. */
-  function wrapFetch(fetchFn, { tagOf = () => null } = {}) {
+  /**
+   * Wrap a transport that speaks the Messages API. `kind` labels the journal rows of this wrapper (e.g.
+   * `rewrite`, kept apart from answer cost); `price` overrides the guard price for a different model. Both
+   * wrappers of one run share the same cap and the same settled total.
+   */
+  function wrapFetch(fetchFn, { tagOf = () => null, kind = null, price: callPrice = price } = {}) {
+    if (!(callPrice?.input > 0) || !(callPrice?.output > 0)) throw new Error('spend_price_required');
     return async function guardedFetch(url, init = {}) {
       const body = JSON.parse(init.body);
-      const r = reserve(body, tagOf(body));
+      const r = reserve(body, tagOf(body), { kind, price: callPrice });
       let res;
       try { res = await fetchFn(url, init); } catch (error) {
         settle(r, { status: 'transport_failed' });
