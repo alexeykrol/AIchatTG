@@ -102,6 +102,34 @@ test('no-concept gate is accepted in all modes and rejects invalid values', () =
 });
 
 const gatePackage = process.env.AICHATTG_EVAL_GATE_PACKAGE || database;
+test('coverage text defaults to content and accepts alias coverage in all modes', () => {
+  assert.equal(parseArgs([]).coverageText, 'content');
+  for (const mode of ['retrieval', 'mock', 'live']) {
+    assert.equal(parseArgs(['--mode', mode, '--coverage-text', 'content+alias']).coverageText, 'content+alias');
+  }
+  assert.throws(() => parseArgs(['--coverage-text', 'alias']), /must be content or content\+alias/);
+  assert.throws(() => parseArgs(['--coverage-text']), /must be content or content\+alias/);
+});
+
+test('coverage text reaches the run manifest', {
+  skip: gatePackage && existsSync(gatePackage) && existsSync(join(DONOR, 'evals/baseline/id_map.json'))
+    ? false : 'book package or donor missing',
+}, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aichattg-eval-coverage-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const flags of [[], ['--coverage-text', 'content+alias']]) {
+    const coverageText = flags[1] ?? 'content';
+    const out = join(root, coverageText);
+    execFileSync(process.execPath, [
+      join(REPO, 'scripts/eval/ask-offline.mjs'), '--mode', 'retrieval',
+      '--package', gatePackage, '--donor', DONOR, '--out', out, '--limit', '1', ...flags,
+    ]);
+    const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.retrieval.coverage_text, coverageText);
+    assert.equal(manifest.answered_rows, 1);
+  }
+});
+
 test('no-concept gate reaches the run manifest and answers rows', {
   skip: gatePackage && existsSync(gatePackage) && existsSync(join(DONOR, 'evals/baseline/id_map.json'))
     ? false : 'book package or donor missing',
