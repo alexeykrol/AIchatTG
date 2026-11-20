@@ -51,7 +51,7 @@ function update(updateId, messageId, text) {
   };
 }
 
-function harness(t, scriptedResponses) {
+function harness(t, scriptedResponses, { neverRefuse = false } = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-irrelevant-sequence-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const store = createRuntimeStore(db);
@@ -119,6 +119,10 @@ function harness(t, scriptedResponses) {
     assistantModerationWaitMs: 0, assistantModerationPollMs: 1,
     assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 100,
     assistantDialogueTurnLimit: 20, assistantDialogueTtlSec: 604800,
+    // These scenarios pin the approved off-subject redirect, which since
+    // 2026-11-20 is the NEVER_REFUSE=false rollback path. The default
+    // (off_domain answer through the real adapter) has its own test below.
+    assistantNeverRefuse: neverRefuse,
     moderator: { chatIds: ['-100'], botToken: '123:fixture-only', botUsername: 'moderator_bot', exemptBotIds: [] },
     assistant: { chatIds: ['-100'], botToken: '555444:fixture-only', botUsername: 'assistant_bot', exemptBotIds: [] },
   };
@@ -258,6 +262,26 @@ for (const order of WEBHOOK_ORDERS) {
     assert.equal(h.db.prepare('SELECT count(*) AS n FROM runtime_judgement_envelopes').get().n, 2);
   });
 }
+
+test('never-refuse (default): an off-subject question is answered by the model through the real adapter', async (t) => {
+  const h = harness(t, [safety(), irrelevant(), { stage: 'answer', content: 'Это за пределами материалов курса и книги. Борщ варят так…' }],
+    { neverRefuse: true });
+  const result = await h.deliver(85, '/ask Как приготовить борщ?', WEBHOOK_ORDERS[0]);
+  assert.equal(result.kind, 'answered');
+  assert.equal(result.knowledgeGap.kind, 'off_domain');
+  assert.deepEqual(h.calls.provider.map(({ stage }) => stage), ['safety', 'domain', 'answer']);
+  const answer = h.calls.provider[2].request;
+  assert.match(answer.messages[0].content, /knowledgeGap: off_domain/);
+  assert.match(answer.messages[0].content, /парадокс/);
+  const input = JSON.parse(answer.messages[1].content);
+  assert.equal(input.question, 'Как приготовить борщ?');
+  assert.equal(input.knowledgeGap, 'off_domain');
+  assert.equal(input.knowledge, null);
+  assert.deepEqual(input.route, { action: 'redirect', sourceId: null });
+  assert.deepEqual(h.calls.knowledge, []);
+  assert.match(h.sends.at(-1).text, /за пределами материалов курса/);
+  assert.notEqual(h.sends.at(-1).text, assistantReleaseText(ASSISTANT_OUT_OF_COVERAGE_TEXT));
+});
 
 test('an ordinary unrelated question uses the same clean domain-no-signal boundary', async (t) => {
   const h = harness(t, [safety(), irrelevant()]);

@@ -689,3 +689,69 @@ test('the value answer prompt refuses the magic-pill premise and demands the hon
   assert.match(value, /name lessons by their title/u);
   assert.match(value, /Do not invent prices, dates, discounts or promises of results/u);
 });
+
+// Правила владельца 20.11.2026: «нет» не бывает; противоречие — парадокс.
+test('the answer prompt carries the never-refuse and paradox rules and no refusal instruction', () => {
+  const content = answerSystemPrompt({ knowledge: { sourceId: 'course-content-v1', entries: [] } });
+  assert.match(content, /Никогда не отвечай отказом/u);
+  assert.match(content, /однозначного ответа на этот вопрос нет/u);
+  assert.match(content, /помечай как своё рассуждение/u);
+  assert.match(content, /прямо назови это парадоксом/u);
+  assert.match(content, /не примиряй их за автора/u);
+  assert.match(content, /действовать в неопределённости/u);
+  assert.doesNotMatch(content, /using only/u);
+  assert.doesNotMatch(content, /say so briefly and ask for a more specific question/u);
+});
+
+test('knowledge-gap payloads reach the answer model with their own instruction; plain payloads still need knowledge', async () => {
+  const requests = [];
+  const adapter = createProviderAdapter(providerConfig(), {
+    async fetchFn(_url, init) { requests.push(JSON.parse(init.body)); return response(completion('Размышление.')); },
+  });
+  const inDomain = { text: 'Что делать, если в книге нет ответа?', dialogue: [],
+    route: { action: 'teach', sourceId: 'course-content-v1' }, knowledge: null, knowledgeGap: 'in_domain_gap',
+    domainRoutes: [{ domainId: 'content', action: 'teach', sourceId: 'course-content-v1' }],
+    domainCoverage: [{ domainId: 'content', sourceId: 'course-content-v1', status: 'missing', reason: 'grounding_not_found' }],
+    missingDomains: ['content'] };
+  const answered = await adapter.answer(inDomain);
+  assert.equal(answered.text, 'Размышление.');
+  assert.match(requests[0].messages[0].content, /knowledgeGap\)/u);
+  assert.match(requests[0].messages[0].content, /Domain content:/u);
+  const sent = JSON.parse(requests[0].messages[1].content);
+  assert.equal(sent.knowledgeGap, 'in_domain_gap');
+  assert.equal(sent.knowledge, null);
+  assert.equal(answerSystemPrompt(inDomain), requests[0].messages[0].content);
+
+  await adapter.answer({ text: 'Какая завтра погода?', dialogue: [], route: { action: 'redirect', sourceId: null },
+    knowledge: null, knowledgeGap: 'off_domain', domainRoutes: [], domainCoverage: [], riskFlags: [] });
+  assert.match(requests[1].messages[0].content, /knowledgeGap: off_domain/u);
+  assert.doesNotMatch(requests[1].messages[0].content, /\nDomain /u);
+  assert.deepEqual(JSON.parse(requests[1].messages[1].content).route, { action: 'redirect', sourceId: null });
+
+  // Without the gap marker a payload with no knowledge is still a local rejection.
+  await assert.rejects(adapter.answer({ ...inDomain, knowledgeGap: undefined }), { code: 'provider_request_invalid' });
+  // A gap turn cannot smuggle knowledge, and an unknown gap kind is not a gap.
+  await assert.rejects(adapter.answer({ ...inDomain, knowledge: { sourceId: 'course-content-v1', entries: [{ id: 'x', content: 'y' }] } }),
+    { code: 'provider_request_invalid' });
+  await assert.rejects(adapter.answer({ ...inDomain, knowledgeGap: true }), { code: 'provider_request_invalid' });
+  // Off-domain cannot carry a routed domain.
+  await assert.rejects(adapter.answer({ text: 'q', dialogue: [], route: { action: 'redirect', sourceId: null },
+    knowledge: null, knowledgeGap: 'off_domain', domainRoutes: inDomain.domainRoutes }), { code: 'provider_request_invalid' });
+  assert.equal(requests.length, 2);
+});
+
+test('never-refuse and rewrite-on-no-signal configuration: defaults and parsing', () => {
+  const defaults = loadRuntimeConfig({}, { cwd: '/tmp/aichattg-test' });
+  assert.equal(defaults.assistantNeverRefuse, true);
+  assert.equal(defaults.assistantRetrieval.rewriteOnNoSignal, false);
+  const set = loadRuntimeConfig({
+    TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE: 'false',
+    TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL: 'true',
+  }, { cwd: '/tmp/aichattg-test' });
+  assert.equal(set.assistantNeverRefuse, false);
+  assert.equal(set.assistantRetrieval.rewriteOnNoSignal, true);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE: 'yes' },
+    { cwd: '/tmp/aichattg-test' }), /NEVER_REFUSE must be true or false/);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL: '1' },
+    { cwd: '/tmp/aichattg-test' }), /REWRITE_ON_NO_SIGNAL must be true or false/);
+});

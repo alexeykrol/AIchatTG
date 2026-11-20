@@ -173,8 +173,9 @@ test('every delivered Assistant path carries the release footer but dialogue mem
 
     const route = provider.routeAssistant;
     provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
-    assert.equal((await ask(60, '/ask рецепт борща')).abstained, true);
-    assert.equal(wire.at(-1).text, assistantReleaseText(ASSISTANT_OUT_OF_COVERAGE_TEXT));
+    // Never-refuse (2026-11-20): off-subject is answered by the model, not redirected.
+    assert.equal((await ask(60, '/ask рецепт борща')).knowledgeGap.kind, 'off_domain');
+    assert.notEqual(wire.at(-1).text, assistantReleaseText(ASSISTANT_OUT_OF_COVERAGE_TEXT));
     provider.routeAssistant = route;
     provider.answer = async () => { throw new ProviderRequestError('provider_request_invalid'); };
     assert.equal((await ask(70, '/ask что такое агент')).degraded, true);
@@ -634,7 +635,34 @@ test('course-operations hints coerce a disagreeing model route into the operatio
 // (provider_request_invalid), и клиент получал пустоту. Три пустых ответа
 // подряд, синтетик ушёл неудовлетворённым. Redirect обязан обслуживаться
 // путём воздержания: ответственный текст + журнал дефицита.
-test('a redirect route answers with the out-of-coverage text instead of falling into silence', async () => {
+test('never-refuse (default): a redirect route is answered by the model as off_domain, never silence', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-off-domain-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const actions = [];
+  const provider = fakeLlm();
+  const answers = [];
+  provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
+  const originalAnswer = provider.answer;
+  provider.answer = async (payload) => { answers.push(payload); return originalAnswer(payload); };
+  const store = createRuntimeStore(db);
+  const runtime = createTelegramRuntime({
+    config: config({ assistantKnowledgeEnabled: true }), store, provider,
+    knowledge: availableKnowledge(), ...adapters(actions),
+  });
+  try {
+    await runtime.handleUpdate('moderator', update(32, 92, '/ask посоветуйте crm для салона красоты'));
+    const result = await runtime.handleUpdate('assistant', update(33, 92, '/ask посоветуйте crm для салона красоты'));
+    assert.equal(result.kind, 'answered');
+    assert.equal(result.knowledgeGap.kind, 'off_domain');
+    assert.equal(answers.length, 1);
+    assert.equal(answers[0].knowledgeGap, 'off_domain');
+    const sent = actions.filter(([kind]) => kind === 'send').at(-1);
+    assert.notEqual(sent[1].text, ASSISTANT_OUT_OF_COVERAGE_TEXT);
+    assert.equal(store.listCoverageDeficits({ limit: 10 }).length, 1);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('rollback (NEVER_REFUSE=false): a redirect route answers with the out-of-coverage text instead of falling into silence', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-runtime-redirect-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
@@ -645,7 +673,7 @@ test('a redirect route answers with the out-of-coverage text instead of falling 
   provider.answer = async (payload) => { answerCalls += 1; return originalAnswer(payload); };
   const store = createRuntimeStore(db);
   const runtime = createTelegramRuntime({
-    config: config({ assistantKnowledgeEnabled: true }), store, provider,
+    config: config({ assistantKnowledgeEnabled: true, assistantNeverRefuse: false }), store, provider,
     knowledge: availableKnowledge(), ...adapters(actions),
   });
   try {
@@ -1041,7 +1069,7 @@ test('service replies are delivered but never enter dialogue history', async () 
 // Воздержание — НАСТОЯЩИЙ ответ на настоящий вопрос: «в материалах этого нет» —
 // это содержание беседы, а не реакция интерфейса на пустой ввод. Его нельзя
 // выплеснуть вместе со служебными ходами.
-test('an abstention answer stays in dialogue history because it answers a real question', async () => {
+test('rollback (NEVER_REFUSE=false): an abstention answer stays in dialogue history because it answers a real question', async () => {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-abstention-memory-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
@@ -1049,7 +1077,8 @@ test('an abstention answer stays in dialogue history because it answers a real q
   const provider = fakeLlm();
   provider.routeAssistant = async () => ({ action: 'redirect', sourceId: null });
   const runtime = createTelegramRuntime({
-    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10 }),
+    config: config({ assistantKnowledgeEnabled: true, assistantCooldownSec: 0, assistantDailyPerUser: 10,
+      assistantNeverRefuse: false }),
     store, provider, knowledge: availableKnowledge(), ...adapters(actions),
   });
   try {

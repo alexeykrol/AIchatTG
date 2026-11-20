@@ -289,20 +289,21 @@ test('unknown outcome of an external call: uncertain, never a repeat', async () 
   } finally { fixture.close(); }
 });
 
-test('boundary answer is legal visible text: abstention is committed and the run continues', async () => {
+test('knowledge gap is answered by the model (never refuse): the answer is committed and the run continues', async () => {
   // The router chooses a known domain, but the expert bank cannot ground the
-  // synthetic's continuation. It must name a knowledge gap, not unknown scope.
+  // synthetic's continuation. Owner rule 2026-11-20: no refusal text — the
+  // expert model answers with the "no direct answer" caveat instead.
   const fixture = rig({ wrappers: { rolePatch: `const answer = result.provider.answer; result.provider.answer = async (input) => ({ ...(await answer(input)), text: 'Ну ладно. А дальше что?' });` } });
   try {
     const result = await runDualDialogue(fixture.options);
     assert.equal(result.status, 'completed'); assert.equal(result.messages.length, 6);
     const boundary = domainBoundaryReply({ reason: 'domain_knowledge_missing',
       domainRoutes: [DEFAULT_DOMAIN_CATALOG.routeFor('content')] }, DEFAULT_DOMAIN_CATALOG).text;
-    assert.equal(result.messages[2].from, EXPERT); assert.equal(result.messages[2].text, assistantReleaseText(boundary));
-    assert.match(boundary, /Вопрос относится к моей области/);
-    assert.match(boundary, /нет достаточных сведений/);
+    assert.equal(result.messages[2].from, EXPERT);
+    assert.notEqual(result.messages[2].text, assistantReleaseText(boundary));
+    assert.match(result.messages[2].text, /^Ответ эксперта/);
     assert.equal(result.messages[2].receipt.status, 'completed');
-    assert.ok(readFileSync(join(fixture.runDir, 'transcript.md'), 'utf8').includes(boundary));
+    assert.ok(!readFileSync(join(fixture.runDir, 'transcript.md'), 'utf8').includes(boundary));
   } finally { fixture.close(); }
 });
 

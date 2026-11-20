@@ -218,3 +218,44 @@ export function domainBoundaryReply(routing, catalog) {
   if (routing.reason === 'domain_no_signal') return assistantAbstentionReply(routing.reason);
   return null;
 }
+
+/** Two kinds of a turn the old path would have refused; analysis keeps them apart. */
+export const KNOWLEDGE_GAP_KINDS = Object.freeze({
+  IN_DOMAIN: 'in_domain_gap',
+  OFF_DOMAIN: 'off_domain',
+});
+
+/**
+ * Product rule (owner, 2026-11-20): the assistant never answers with "no".
+ *
+ *  - `in_domain_gap`: the router placed the question inside a registered domain
+ *    but no admitted knowledge came back (`domain_knowledge_missing`: nothing
+ *    found, no dictionary signal confirmed by the search, an empty projection, or
+ *    an unconnected source). The model answers with a "no direct answer in the
+ *    materials" caveat, reasoning from the logic of the material.
+ *  - `off_domain`: the router selected no domain at all (`domain_no_signal`).
+ *    The model answers from general knowledge, saying briefly that this is
+ *    outside the course and book materials.
+ *
+ * Returns `{ routing, gap }` or null (not an abstention). `gap` is the queryable
+ * record of the case: its kind, the detailed reason the old path would have
+ * refused for, the routed domains and the ids of the closest material handed to
+ * the model (empty when retrieval returned none).
+ */
+export function knowledgeGapRouting(routing) {
+  if (routing?.abstain !== true) return null;
+  const routed = Array.isArray(routing.domainRoutes) && routing.domainRoutes.length > 0;
+  let kind;
+  if (routing.reason === 'domain_knowledge_missing' && routed) kind = KNOWLEDGE_GAP_KINDS.IN_DOMAIN;
+  else if (routing.reason === 'domain_no_signal' && !routed) kind = KNOWLEDGE_GAP_KINDS.OFF_DOMAIN;
+  else return null;
+  const missing = (routing.domainCoverage || []).find((d) => d.status === 'missing');
+  const gap = Object.freeze({
+    kind,
+    detail: (kind === KNOWLEDGE_GAP_KINDS.IN_DOMAIN && missing?.reason) || routing.reason,
+    domainIds: routed ? routing.domainRoutes.map((r) => r.domainId) : [],
+    closestIds: (routing.knowledge?.entries || []).map((e) => e.id).filter(Boolean),
+  });
+  const { abstain: _abstain, reason: _reason, ...rest } = routing;
+  return { routing: { ...rest, domainRoutes: routed ? routing.domainRoutes : [], knowledgeGap: gap }, gap };
+}

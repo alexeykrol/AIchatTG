@@ -44,8 +44,10 @@ export function createKnowledgeRetrieval(
     maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
     maxEntries = DEFAULT_MAX_ENTRIES,
     rewriteEnabled = false,
-    // Opt-in, off by default and never set by config.mjs/server.mjs: lets a
-    // no-signal question reach the paid rewrite step too (eval measurement only).
+    // Opt-in, off by default: lets a no-signal question reach the paid rewrite
+    // step too. Production sets it from
+    // TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL (config.mjs);
+    // server.mjs passes `config.assistantRetrieval` through unchanged.
     rewriteOnNoSignal = false,
     validatePacks = true,
   } = {},

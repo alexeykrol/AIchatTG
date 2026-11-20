@@ -602,7 +602,7 @@ withRuntime('dispatch: a verdict refusal over a fired detector is overridden, no
 });
 
 // Отказ законен только при молчании обоих слоёв — и он ответ, а не молчание.
-withRuntime('dispatch: a refusal with silent detectors is served as an abstention', async ({ store }) => {
+withRuntime('dispatch: a refusal with silent detectors is answered off_domain (never refuse)', async ({ store }) => {
   const actions = [];
   const { adapter } = stubAnalyzer({ text: verdictJson(['out_of_corpus']), mode: ANALYZER_MODES.DISPATCH });
   const { provider, routerCalls } = countedProvider();
@@ -612,11 +612,27 @@ withRuntime('dispatch: a refusal with silent detectors is served as an abstentio
   });
   const result = await runQuestion(runtime, '/ask Посоветуйте CRM для салона красоты');
   assert.equal(result.kind, 'answered');
-  assert.equal(result.abstained, true);
+  assert.equal(result.abstained, undefined);
+  assert.equal(result.knowledgeGap.kind, 'off_domain');
   assert.equal(routerCalls.length, 0);
   assert.ok(actions.at(-1)[1].text.length > 0, 'человек получает текст, а не тишину');
   const [row] = store.listAnalyzerObservations();
   assert.equal(row.route.action, 'redirect');
+});
+
+withRuntime('dispatch rollback (NEVER_REFUSE=false): a refusal with silent detectors is served as an abstention', async ({ store }) => {
+  const actions = [];
+  const { adapter } = stubAnalyzer({ text: verdictJson(['out_of_corpus']), mode: ANALYZER_MODES.DISPATCH });
+  const { provider, routerCalls } = countedProvider();
+  const runtime = createTelegramRuntime({
+    config: config({ assistantNeverRefuse: false }), store, provider, knowledge: availableKnowledge(),
+    analyzer: adapter, ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask Посоветуйте CRM для салона красоты');
+  assert.equal(result.kind, 'answered');
+  assert.equal(result.abstained, true);
+  assert.equal(routerCalls.length, 0);
+  assert.ok(actions.at(-1)[1].text.length > 0, 'человек получает текст, а не тишину');
 });
 
 // Деградация fail-open: сбой анализатора откатывает ход на прежний путь

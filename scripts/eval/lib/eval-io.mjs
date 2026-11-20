@@ -41,7 +41,8 @@ export function retrievalReport(rows) {
     const ks = rows.filter((r) => r.kind === kind);
     const withGold = ks.filter((r) => r.gold_units.length);
     const recalls = withGold.map((r) => r.gold_units.filter((u) => r.unit_ids.includes(u)).length / r.gold_units.length);
-    const abstained = ks.filter((r) => r.status === 'abstained');
+    // A knowledge-gap row is a retrieval refusal too (no grounding); only the reply changed.
+    const abstained = ks.filter((r) => r.status === 'abstained' || r.knowledge_gap === true);
     byKind[kind] = {
       n: ks.length,
       recall_at_12_mean: recalls.length ? Math.round((1000 * recalls.reduce((a, b) => a + b, 0)) / recalls.length) / 1000 : null,

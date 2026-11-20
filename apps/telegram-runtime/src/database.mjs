@@ -372,7 +372,15 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_answer_records (
   output_tokens INTEGER,
   total_tokens INTEGER,
   delivery TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- Ход, где прежний путь ответил бы отказом (правило владельца 20.11.2026:
+  -- отказа нет, модель рассуждает). 1 — такой ход; gap_reason — вид:
+  -- in_domain_gap (дыра внутри покрытой темы) | off_domain (вне всех баз);
+  -- gap_detail — исходная причина отказа; ближайший материал — served_unit_ids.
+  -- NULL у прежних строк: признак тогда не писался.
+  knowledge_gap INTEGER,
+  gap_reason TEXT,
+  gap_detail TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_assistant_answer_records_dialogue
   ON runtime_assistant_answer_records(chat_id, user_id, created_at);
@@ -483,8 +491,11 @@ export function ensureRuntimeDatabaseSchema(db) {
   }
   if (!observationColumns.has('route_model_id')) db.exec('ALTER TABLE runtime_assistant_analyzer_observations ADD COLUMN route_model_id TEXT');
   const answerColumns = new Set(db.prepare('PRAGMA table_info(runtime_assistant_answer_records)').all().map((row) => row.name));
-  for (const column of ['input_tokens', 'output_tokens', 'total_tokens']) {
+  for (const column of ['input_tokens', 'output_tokens', 'total_tokens', 'knowledge_gap']) {
     if (!answerColumns.has(column)) db.exec(`ALTER TABLE runtime_assistant_answer_records ADD COLUMN ${column} INTEGER`);
+  }
+  for (const column of ['gap_reason', 'gap_detail']) {
+    if (!answerColumns.has(column)) db.exec(`ALTER TABLE runtime_assistant_answer_records ADD COLUMN ${column} TEXT`);
   }
   // Тем же приёмом — записи модерации. Боевая база накопила их больше всего
   // (вызов на каждом сообщении), поэтому перестройка таблицы здесь особенно
@@ -922,11 +933,11 @@ export function createRuntimeStore(db, {
   const insertAnswerRecord = db.prepare(`INSERT OR IGNORE INTO runtime_assistant_answer_records
     (event_id, chat_id, user_id, question, answer, route_action, route_source_id,
      knowledge_source_id, served_unit_ids, model_id, input_tokens, output_tokens, total_tokens,
-     delivery, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     delivery, created_at, knowledge_gap, gap_reason, gap_detail)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const listAnswerRecordRows = db.prepare(`SELECT event_id, chat_id, user_id, question, answer,
       route_action, route_source_id, knowledge_source_id, served_unit_ids, model_id,
-      input_tokens, output_tokens, total_tokens, delivery, created_at
+      input_tokens, output_tokens, total_tokens, delivery, created_at, knowledge_gap, gap_reason, gap_detail
     FROM runtime_assistant_answer_records ORDER BY created_at DESC, event_id DESC LIMIT ?`);
   const deleteExpiredDialogueTurns = db.prepare(`DELETE FROM runtime_assistant_turns
     WHERE dialogue_id IN (SELECT id FROM runtime_assistant_dialogues WHERE last_activity_at <= ?)`);
@@ -1749,7 +1760,7 @@ export function createRuntimeStore(db, {
      */
     recordAssistantAnswer({
       eventId, chatId, userId, question, answer, route = null, knowledge = null,
-      modelId = null, usage = null, delivery = null,
+      modelId = null, usage = null, delivery = null, knowledgeGap = null,
     }) {
       const action = typeof route === 'string' ? route : (route?.action || null);
       const sourceId = typeof route === 'string' ? null : (route?.sourceId || null);
@@ -1775,6 +1786,9 @@ export function createRuntimeStore(db, {
         answerCost.inputTokens, answerCost.outputTokens, answerCost.totalTokens,
         delivery == null ? null : String(delivery).slice(0, 120),
         now(),
+        knowledgeGap ? 1 : 0,
+        knowledgeGap ? String(knowledgeGap.kind || 'unknown').slice(0, 40) : null,
+        knowledgeGap?.detail == null ? null : String(knowledgeGap.detail).slice(0, 200),
       );
     },
     listAssistantAnswers({ limit = 100 } = {}) {
@@ -1792,6 +1806,9 @@ export function createRuntimeStore(db, {
         usage: usageOf(row),
         delivery: row.delivery,
         createdAt: row.created_at,
+        knowledgeGap: row.knowledge_gap == null ? null : row.knowledge_gap === 1,
+        gapReason: row.gap_reason,
+        gapDetail: row.gap_detail,
       }));
     },
     /** Ходы одного человека для накопления уровня (траектория). */

@@ -166,10 +166,31 @@ withRuntime('an answered turn is stored with its question, route and served know
 // Воздержание — настоящий ответ на настоящий вопрос, и именно на нём чаще
 // всего ломается форма. Не записывать его значило бы прятать от судьи худший
 // класс ходов.
-withRuntime('an abstention is recorded too, with its string route and no units', async ({ store }) => {
+withRuntime('an off-domain answer is recorded as a knowledge gap with no units', async ({ store }) => {
   const actions = [];
   const runtime = createTelegramRuntime({
     config: config(), store, knowledge: availableKnowledge(),
+    provider: fakeProvider({ route: { action: 'redirect', sourceId: null } }),
+    analyzer: stubAnalyzer(), ...adapters(actions),
+  });
+  const result = await runQuestion(runtime, '/ask расскажите про Sora от OpenAI');
+  assert.equal(result.knowledgeGap.kind, 'off_domain');
+
+  const [row] = store.listAssistantAnswers();
+  assert.equal(row.answer, assistantReleaseText(actions.at(-1)[1].text));
+  assert.deepEqual(row.route, { action: 'redirect', sourceId: null });
+  assert.equal(row.knowledgeSourceId, null);
+  assert.deepEqual(row.servedUnitIds, []);
+  assert.equal(row.knowledgeGap, true);
+  assert.equal(row.gapReason, 'off_domain');
+  assert.equal(row.gapDetail, 'domain_no_signal');
+  assert.equal(row.modelId, 'answer-fake');
+});
+
+withRuntime('rollback (NEVER_REFUSE=false): an abstention is recorded too, with its string route and no units', async ({ store }) => {
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config({ assistantNeverRefuse: false }), store, knowledge: availableKnowledge(),
     provider: fakeProvider({ route: { action: 'redirect', sourceId: null } }),
     analyzer: stubAnalyzer(), ...adapters(actions),
   });
@@ -182,6 +203,8 @@ withRuntime('an abstention is recorded too, with its string route and no units',
   assert.equal(row.route.sourceId, null);
   assert.equal(row.knowledgeSourceId, null);
   assert.deepEqual(row.servedUnitIds, []);
+  assert.equal(row.knowledgeGap, false);
+  assert.equal(row.gapReason, null);
 });
 
 // Главное свойство: запись переживает ту память, вместо которой заведена.

@@ -309,10 +309,13 @@ test('mock run with --rewrite --rewrite-no-signal: no-signal questions may be re
   }
 });
 
-// Pinned before the levers were added (2026-11-19): sha256 over the per-request sha256 lines
-// (URL + headers + body) of the 100-question default mock run, against this exact book database.
+// sha256 over the per-request sha256 lines (URL + headers + body) of the 100-question default mock
+// run, against this exact book database. First pinned before the levers were added (2026-11-19:
+// 81 requests, 34ed7345…). Re-pinned deliberately on 2026-11-20 for the owner's never-refuse and
+// paradox rules: the answer system prompt changed, and the 19 former abstentions now reach the model
+// as knowledge gaps (100 requests). The levers themselves still add nothing to the default run.
 const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';
-const PINNED_DEFAULT_REQUESTS_SHA256 = '34ed73457f68ce44c4e1987815b8ef2cbfec8b182d55b1c5f66ae007ca8aa0a5';
+const PINNED_DEFAULT_REQUESTS_SHA256 = '333b81998a5c7197aafa07a17863ca94b89d4ccd0a95a5b2dd2f86cd0547c753';
 const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
 
 test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {
@@ -330,6 +333,32 @@ test('default run (no lever flags) sends byte-identical requests to the pre-leve
   try {
     for (const q of loadQuestions(DONOR)) { stack.setTag(q.q); await assistant.ask(q.question, { userId: `eval-${q.q}` }); }
   } finally { assistant.close(); }
-  assert.equal(lines.length, 81);
+  assert.equal(lines.length, 100);
   assert.equal(createHash('sha256').update(`${lines.join('\n')}\n`).digest('hex'), PINNED_DEFAULT_REQUESTS_SHA256);
+});
+
+test('knowledge gaps go to the model with the gap flag; neverRefuse:false restores the abstention', { skip: skipBook }, async () => {
+  const calls = [];
+  const stack = buildProviderStack(parseArgs(['--mode', 'mock']), { transport: fakeAnthropicTransport({ calls }) });
+  const assistant = createOfflineAssistant({ databasePath: database, provider: stack.provider });
+  const rollback = createOfflineAssistant({ databasePath: database, provider: stack.provider, neverRefuse: false });
+  try {
+    let gaps = 0;
+    for (const q of loadQuestions(DONOR)) {
+      const r = await assistant.ask(q.question, { userId: `g-${q.q}` });
+      assert.notEqual(r.status, 'abstained', `${q.q}: never refuse`);
+      if (!r.knowledgeGap) { assert.equal(r.gapReason, null); continue; }
+      gaps += 1;
+      assert.equal(r.status, 'answered');
+      assert.equal(r.gapReason, 'in_domain_gap');
+      assert.ok(r.gapDetail);
+      const body = calls.at(-1).body;
+      assert.match(body.system, /knowledgeGap\)/u);
+      assert.equal(JSON.parse(body.messages[0].content).knowledgeGap, 'in_domain_gap');
+      const old = await rollback.ask(q.question, { userId: `r-${q.q}` });
+      assert.equal(old.status, 'abstained');
+      assert.equal(old.knowledgeGap, false);
+    }
+    assert.ok(gaps > 0, 'the stand has at least one former abstention');
+  } finally { assistant.close(); rollback.close(); }
 });

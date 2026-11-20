@@ -288,6 +288,8 @@ async function main() {
         status: args.mode === 'retrieval' ? (r.status === 'not_called' ? 'retrieved' : r.status) : r.status,
         answer: r.answer, unit_ids: r.unitIds, chunk_ids: r.chunkIds, gold_units: q.gold_units,
         route_reason: r.routeReason, error: r.error ?? null, pack_status: r.trace?.status ?? null,
+        // The old path would have refused here; now the model reasons with the "no direct answer" caveat.
+        knowledge_gap: r.knowledgeGap === true, gap_reason: r.gapReason ?? null, gap_detail: r.gapDetail ?? null,
         confidence: r.trace?.confidence ?? null, domain_signal: r.trace?.domain ?? null,
         input_tokens: r.receipt?.inputTokens ?? null, output_tokens: r.receipt?.outputTokens ?? null,
         stop_reason: journal.at(-1)?.stopReason ?? null,

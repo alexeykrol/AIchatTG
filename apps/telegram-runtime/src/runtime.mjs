@@ -29,7 +29,7 @@ import { assistantDialogue } from './assistant-dialogue.mjs';
 import { ASSISTANT_RELEASE_LINE, assistantReleaseText } from './assistant-release.mjs';
 import { ANALYZER_MODES } from './analyzer-adapter.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from './assistant-domains.mjs';
-import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainDecision, selectDomainRoutes } from './assistant-domain-routing.mjs';
+import { domainQuestionHints, normalizeDomainSelection, resolveDomainSelection, domainBoundaryReply, diagnosticDomainDecision, selectDomainRoutes, knowledgeGapRouting } from './assistant-domain-routing.mjs';
 import {
   ASSISTANT_EMPTY_ASK_TEXT,
   ASSISTANT_HELP_TEXT,
@@ -1199,7 +1199,7 @@ export function createTelegramRuntime({
    * настоящий ответ на настоящий вопрос, он остаётся в истории.
    */
   async function sendAssistantTurn(eventId, question, answer, route = null,
-    { persist = true, markup = false, knowledge = null, forceReply = false } = {}) {
+    { persist = true, markup = false, knowledge = null, forceReply = false, knowledgeGap = null } = {}) {
     if (!answer || typeof answer.text !== 'string' || !answer.text.trim()) {
       throw new Error('assistant adapter returned an empty answer');
     }
@@ -1248,7 +1248,7 @@ export function createTelegramRuntime({
       // (`persist: false`) в стенограмму не попадает, потому что вопроса за ним
       // нет и судить там нечего.
       recordAssistantAnswerRecord({
-        eventId, question, text: assistantReleaseText(answer.text.trim()), route, knowledge,
+        eventId, question, text: assistantReleaseText(answer.text.trim()), route, knowledge, knowledgeGap,
         modelId: answer.modelId || null, transport,
         // Цена ответа берётся из квитанции провайдера. У детерминированного
         // текста (граница, воздержание, служебный ответ) квитанции нет —
@@ -1299,7 +1299,8 @@ export function createTelegramRuntime({
    * Запись обёрнута: сенсор не имеет права стоить человеку ответа. Её отказ
    * виден в логе процесса, а не в молчании бота.
    */
-  function recordAssistantAnswerRecord({ eventId, question, text, route, knowledge, modelId, transport, usage }) {
+  function recordAssistantAnswerRecord({ eventId, question, text, route, knowledge, knowledgeGap = null,
+    modelId, transport, usage }) {
     if (!durableAnswerReceipts && (!analyzer?.enabled || !analyzer.appliesTo(question.chatId))) return;
     try {
       store.recordAssistantAnswer({
@@ -1310,6 +1311,7 @@ export function createTelegramRuntime({
         answer: text,
         route,
         knowledge,
+        knowledgeGap,
         modelId,
         usage,
         // Деградация доставки обязана доехать до стенограммы: судить текст,
@@ -1321,6 +1323,22 @@ export function createTelegramRuntime({
     } catch (error) {
       console.error(`[runtime] assistant answer record failed event=${eventId} ${runtimeErrorSummary(error)}`);
     }
+  }
+
+  /**
+   * Structured, queryable event for a knowledge-gap turn: one JSON line per
+   * case. It carries no chat or user identifier — only the event id, the kind
+   * (`in_domain_gap` | `off_domain`), the detailed reason the old path would have
+   * refused for, the question and the closest material.
+   */
+  function logAssistantKnowledgeGap(eventId, question, gap) {
+    try {
+      console.log(JSON.stringify({
+        event: 'assistant_knowledge_gap', eventId: String(eventId), reason: gap.kind,
+        detail: gap.detail, domainIds: gap.domainIds, closestIds: gap.closestIds,
+        question: String(question.text || '').slice(0, 2_000),
+      }));
+    } catch { /* журнал не важнее ответа */ }
   }
 
   /** Доставка служебного текста: человек получает ответ, история не трогается. */
@@ -1585,7 +1603,7 @@ export function createTelegramRuntime({
         && analyzer.appliesTo(question.chatId)
         ? await dispatchAssistantQuestion({ eventId, question, hints, dialogue, workingState, routingContext })
         : null;
-      const routing = dispatched ? dispatched.routing
+      let routing = dispatched ? dispatched.routing
         : await routeAssistantQuestion(question, hints, dialogue, workingState, routingContext);
       if (routing.error && routingContext.routingDiagnosis?.error == null) {
         routingContext.routingDiagnosis.error = 'source_resolution_failed';
@@ -1607,6 +1625,28 @@ export function createTelegramRuntime({
         else store.markAssistantRequestUncertain(eventId);
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'skipped' });
         return { kind: 'skipped', reason: routing.error };
+      }
+      // Product rule (owner, 2026-11-20): the assistant never answers "no".
+      // A routed domain that returned nothing (`in_domain_gap`) and a question
+      // outside every domain (`off_domain`) both go to the answer model with an
+      // explicit instruction. The case is the most valuable signal for the
+      // knowledge base, so it is kept as a deficit row, a structured log event
+      // and a flag on the answer record. The code-owned abstention below remains
+      // only as the rollback path (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE=false).
+      let knowledgeGap = null;
+      const gapped = routing.abstain === true && config.assistantNeverRefuse !== false
+        ? knowledgeGapRouting(routing) : null;
+      if (gapped) {
+        store.recordCoverageDeficit({
+          chatId: question.chatId,
+          userId: question.userId,
+          question: question.text,
+          reason: routing.reason,
+          candidateLevel: coverageDeficitCandidateLevel(question.text),
+        });
+        knowledgeGap = gapped.gap;
+        routing = gapped.routing;
+        logAssistantKnowledgeGap(eventId, question, knowledgeGap);
       }
       // The corpus cannot ground this question. The user is told so — the reply
       // is delivered like any other, and the request is completed rather than
@@ -1648,6 +1688,7 @@ export function createTelegramRuntime({
           missingDomains: routing.missingDomains,
           riskFlags: routing.riskFlags,
           registryDigest: routing.registryDigest,
+          ...(knowledgeGap ? { knowledgeGap: knowledgeGap.kind } : {}),
         });
         if (question.answerClaim) store.completeAssistantAnswerProviderAttempt({ claim: question.answerClaim,
           status: 'returned', usage: answer?.receipt });
@@ -1686,9 +1727,10 @@ export function createTelegramRuntime({
       // разметкой (см. `sendAssistantTurn`). Знание передаётся сюда же: в
       // стенограмме должно стоять то, что модель ДЕЙСТВИТЕЛЬНО получила, а не
       // то, что лаборатория найдёт по этому вопросу через неделю.
-      const result = await sendAssistantTurn(eventId, question, answer, routing.route, {
-        markup: true, knowledge: routing.knowledge,
+      const delivered = await sendAssistantTurn(eventId, question, answer, routing.route, {
+        markup: true, knowledge: routing.knowledge, knowledgeGap,
       });
+      const result = knowledgeGap ? { ...delivered, knowledgeGap } : delivered;
       store.completeAssistantRequest(eventId);
       store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: 'answered' });
       // Обойдённая модерация обязана быть видна в квитанции хода, а не

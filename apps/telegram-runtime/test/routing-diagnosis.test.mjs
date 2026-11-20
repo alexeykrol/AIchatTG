@@ -101,8 +101,11 @@ test('analyzer-off receipts persist full compound routing, exclude prose, and re
   assert.deepEqual(diagnosis.riskFlags, ['privacy']);
   assert.equal(diagnosis.registryDigest, catalog.digest);
   assert.deepEqual(diagnosis.override, { applied: false, debt: null });
-  assert.equal(first.reason, 'domain_knowledge_missing');
-  assert.equal(r.calls.answer, 0);
+  // Never-refuse (2026-11-20): the known-domain gap reaches the model; the
+  // receipt carries the gap record but never the question or the answer text.
+  assert.equal(first.knowledgeGap.kind, 'in_domain_gap');
+  assert.equal(first.knowledgeGap.detail, 'knowledge_identity_missing');
+  assert.equal(r.calls.answer, 1);
   assert.equal(r.calls.analyze, 0);
   assert.deepEqual(r.receipt(), first);
   const event = JSON.parse(r.db.prepare('SELECT result_json FROM runtime_inbound_events WHERE event_id = ?').get('assistant:2').result_json);

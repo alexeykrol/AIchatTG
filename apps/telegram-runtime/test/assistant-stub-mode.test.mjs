@@ -45,7 +45,7 @@ function update(updateId, messageId, text, extra = {}) {
   };
 }
 
-function harness(t, scriptedResponses, { stubMode, cooldownSec = 0 }) {
+function harness(t, scriptedResponses, { stubMode, cooldownSec = 0, neverRefuse = true }) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-stub-mode-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const store = createRuntimeStore(db);
@@ -105,7 +105,7 @@ function harness(t, scriptedResponses, { stubMode, cooldownSec = 0 }) {
   const config = {
     ingressEnabled: false, moderationMode: 'live', moderationAntichannelPin: true,
     assistantModerationWaitMs: 0, assistantModerationPollMs: 1,
-    assistantKnowledgeEnabled: true, assistantStubMode: stubMode,
+    assistantKnowledgeEnabled: true, assistantStubMode: stubMode, assistantNeverRefuse: neverRefuse,
     assistantCooldownSec: cooldownSec, assistantDailyPerUser: 100,
     assistantDialogueTurnLimit: 20, assistantDialogueTtlSec: 604800,
     moderator: { chatIds: ['-100'], botToken: '123:fixture-only', botUsername: 'moderator_bot', exemptBotIds: [] },
@@ -229,7 +229,9 @@ for (const stubMode of [false, true]) {
 }
 
 test('flag off keeps the previous model-routed behaviour', async (t) => {
-  const h = harness(t, [safety(), irrelevant()], { stubMode: false });
+  // The off-subject redirect is the NEVER_REFUSE=false rollback path; the default
+  // off_domain answer is covered in assistant-domain-runtime.test.mjs.
+  const h = harness(t, [safety(), irrelevant()], { stubMode: false, neverRefuse: false });
   const results = await h.deliver(80, '/ask Как приготовить борщ?');
   assert.equal(results.assistant.kind, 'answered');
   assert.equal(results.assistant.stub, undefined);

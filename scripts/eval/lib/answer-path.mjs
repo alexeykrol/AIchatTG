@@ -1,7 +1,8 @@
 /**
  * The paid answer branch of the assistant (`apps/telegram-runtime/src/runtime.mjs`, the block after quota
  * reservation: route -> resolveDomainSelection -> abstain reply | modelProvider.answer), without Telegram,
- * without the runtime SQLite and without the router model. Production modules are imported, not copied.
+ * without the runtime SQLite and without the router model. An in-subject knowledge gap goes to the model
+ * with the "no direct answer" instruction exactly as in runtime.mjs (`neverRefuse`, default true). Production modules are imported, not copied.
  *
  * Substitutions (each is reported in the run manifest):
  *   - knowledge admission: a stub `forPackage()` returns the eval package database directly; the manifest
@@ -17,7 +18,7 @@
  */
 import { createKnowledgeRetrieval } from '../../../apps/telegram-runtime/src/knowledge-retrieval.mjs';
 import {
-  domainBoundaryReply, domainQuestionHints, resolveDomainSelection,
+  domainBoundaryReply, domainQuestionHints, knowledgeGapRouting, resolveDomainSelection,
 } from '../../../apps/telegram-runtime/src/assistant-domain-routing.mjs';
 import { DEFAULT_DOMAIN_CATALOG } from '../../../apps/telegram-runtime/src/assistant-domains.mjs';
 import { assistantAbstentionReply } from '../../../apps/telegram-runtime/src/assistant-policy.mjs';
@@ -56,6 +57,8 @@ export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
   rewriteQuestion = null, rewriteOnNoSignal = false,
+  // runtime.mjs: config.assistantNeverRefuse (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE), default true.
+  neverRefuse = true,
 }) {
   const rewriteEnabled = typeof rewriteQuestion === 'function';
   if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
@@ -84,9 +87,15 @@ export function createOfflineAssistant({
 
   /** One question through the answer branch. Never throws for a provider failure: it is a status. */
   async function ask(text, { userId = EVAL_USER_ID } = {}) {
-    const routing = await routeQuestion(text, { userId });
+    let routing = await routeQuestion(text, { userId });
+    const routeReason = routing.reason ?? null;
+    // runtime.mjs: a knowledge gap (in_domain_gap | off_domain) goes to the model with its instruction.
+    const gapped = routing.abstain === true && neverRefuse !== false ? knowledgeGapRouting(routing) : null;
+    if (gapped) routing = gapped.routing;
     const ids = usedIds(routing.knowledge);
-    const base = { ...ids, routeReason: routing.reason ?? null, trace: routing.trace ?? null };
+    const base = { ...ids, routeReason, trace: routing.trace ?? null,
+      knowledgeGap: Boolean(gapped), gapReason: gapped ? gapped.gap.kind : null,
+      gapDetail: gapped ? gapped.gap.detail : null };
     if (routing.error) return { status: 'error', error: routing.error, answer: '', ...base };
     if (routing.abstain === true) {
       const reply = domainBoundaryReply(routing, catalog) || assistantAbstentionReply(routing.reason);
@@ -99,6 +108,7 @@ export function createOfflineAssistant({
         route: routing.route, knowledge: routing.knowledge, domainRoutes: routing.domainRoutes,
         domainCoverage: routing.domainCoverage, missingDomains: routing.missingDomains,
         riskFlags: routing.riskFlags, registryDigest: routing.registryDigest,
+        ...(gapped ? { knowledgeGap: gapped.gap.kind } : {}),
       });
       const textOut = typeof answer?.text === 'string' ? answer.text : '';
       return { status: textOut.trim() ? 'answered' : 'empty', answer: textOut, receipt: answer?.receipt ?? null, ...base };

@@ -62,7 +62,8 @@ function catalogFixture(t) {
   return loadDomainCatalog({ indexPath });
 }
 
-function createRig(t, { catalog, route, knowledge, sourceRetrievals, safetyRoute = 'clean', routerError = null } = {}) {
+function createRig(t, { catalog, route, knowledge, sourceRetrievals, safetyRoute = 'clean', routerError = null,
+  configOverrides = {} } = {}) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-domain-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const store = createRuntimeStore(db);
@@ -75,7 +76,7 @@ function createRig(t, { catalog, route, knowledge, sourceRetrievals, safetyRoute
     },
   };
   const runtime = createTelegramRuntime({
-    config: config(), store, domainCatalog: catalog, sourceRetrievals,
+    config: { ...config(), ...configOverrides }, store, domainCatalog: catalog, sourceRetrievals,
     durableAnswerReceipts: true, knowledge: knowledgeAdapter,
     provider: {
       async moderate({ text }) { return safetyVerdict({ message: text, safetyRoute, confidence: 0.99 }); },
@@ -173,7 +174,8 @@ test('partial multi-domain coverage preserves the requested domains and marks mi
 test('unknown domain and known domain with missing knowledge have distinct safe outcomes', async (t) => {
   const catalog = catalogFixture(t);
   const unknown = createRig(t, { catalog, route: { domainId: 'not-registered' } });
-  const missing = createRig(t, { catalog, route: { domainId: 'archive' } });
+  const missing = createRig(t, { catalog, route: { domainId: 'archive' },
+    configOverrides: { assistantNeverRefuse: false } });
   const unknownResult = await unknown.ask('Расскажите о неизвестном предмете');
   const missingResult = await missing.ask('Что записано в моём архиве?');
   assert.notEqual(unknownResult.kind, 'uncertain_delivery');
@@ -185,6 +187,84 @@ test('unknown domain and known domain with missing knowledge have distinct safe 
   assert.notEqual(unknownResult.reason, missingResult.reason);
   assert.deepEqual(unknown.calls.sources, [], 'an unknown domain must never select a fallback knowledge source');
   assert.deepEqual(missing.calls.sources, ['archive-snapshot-v1']);
+});
+
+test('never-refuse (default): a known domain with missing knowledge reaches the model as a knowledge gap', async (t) => {
+  const catalog = catalogFixture(t);
+  const rig = createRig(t, { catalog, route: { domainId: 'archive' } });
+  const logged = [];
+  const original = console.log;
+  console.log = (line) => { logged.push(String(line)); };
+  let result;
+  try { result = await rig.ask('Что записано в моём архиве?'); } finally { console.log = original; }
+  assert.equal(rig.calls.answer.length, 1);
+  const input = rig.calls.answer[0];
+  assert.equal(input.knowledgeGap, 'in_domain_gap');
+  assert.equal(input.knowledge, null);
+  assert.deepEqual(input.missingDomains, ['archive']);
+  assert.equal(result.knowledgeGap.kind, 'in_domain_gap');
+  assert.equal(result.knowledgeGap.detail, 'knowledge_identity_missing');
+  assert.equal(rig.calls.sent.at(-1).text, 'Answer from the supplied fixture only.');
+  assert.equal(rig.reservation().status, 'completed');
+  const [answerRecord] = rig.store.listAssistantAnswers();
+  assert.equal(answerRecord.knowledgeGap, true);
+  assert.equal(answerRecord.gapReason, 'in_domain_gap');
+  assert.equal(answerRecord.gapDetail, 'knowledge_identity_missing');
+  assert.equal(answerRecord.question, 'Что записано в моём архиве?');
+  assert.deepEqual(answerRecord.servedUnitIds, []);
+  const [deficit] = rig.store.listCoverageDeficits();
+  assert.equal(deficit.reason, 'domain_knowledge_missing');
+  const events = logged.filter((line) => line.startsWith('{')).map((line) => JSON.parse(line))
+    .filter((event) => event.event === 'assistant_knowledge_gap');
+  assert.equal(events.length, 1);
+  assert.deepEqual(Object.keys(events[0]).sort(),
+    ['closestIds', 'detail', 'domainIds', 'event', 'eventId', 'question', 'reason']);
+  assert.equal(events[0].reason, 'in_domain_gap');
+  assert.equal(events[0].question, 'Что записано в моём архиве?');
+  assert.deepEqual(events[0].domainIds, ['archive']);
+  assert.deepEqual(events[0].closestIds, []);
+});
+
+test('never-refuse: an off-subject question reaches the model as off_domain; NEVER_REFUSE=false keeps the redirect', async (t) => {
+  const catalog = catalogFixture(t);
+  const offSubject = createRig(t, { catalog, route: { domains: [], riskFlags: [] } });
+  const logged = [];
+  const original = console.log;
+  console.log = (line) => { logged.push(String(line)); };
+  let result;
+  try { result = await offSubject.ask('Какая завтра погода?'); } finally { console.log = original; }
+  assert.equal(offSubject.calls.answer.length, 1);
+  const input = offSubject.calls.answer[0];
+  assert.equal(input.knowledgeGap, 'off_domain');
+  assert.equal(input.knowledge, null);
+  assert.deepEqual(input.domainRoutes, []);
+  assert.deepEqual(input.route, { action: 'redirect', sourceId: null });
+  assert.equal(result.knowledgeGap.kind, 'off_domain');
+  assert.equal(result.knowledgeGap.detail, 'domain_no_signal');
+  const [record] = offSubject.store.listAssistantAnswers();
+  assert.equal(record.knowledgeGap, true);
+  assert.equal(record.gapReason, 'off_domain');
+  assert.equal(record.gapDetail, 'domain_no_signal');
+  const event = logged.filter((line) => line.startsWith('{')).map((line) => JSON.parse(line))
+    .find((e) => e.event === 'assistant_knowledge_gap');
+  assert.equal(event.reason, 'off_domain');
+
+  const rollback = createRig(t, { catalog, route: { domains: [], riskFlags: [] },
+    configOverrides: { assistantNeverRefuse: false } });
+  const redirected = await rollback.ask('Какая завтра погода?');
+  assert.equal(rollback.calls.answer.length, 0);
+  assert.equal(redirected.abstained, true);
+  assert.equal(redirected.reason, 'domain_no_signal');
+  assert.match(rollback.calls.sent.at(-1).text, /за пределами курса/);
+  assert.equal(rollback.store.listAssistantAnswers()[0].knowledgeGap, false);
+});
+
+test('never-refuse does not touch the moderation refusal', async (t) => {
+  const catalog = catalogFixture(t);
+  const blocked = createRig(t, { catalog, route: { domainId: 'archive' }, safetyRoute: 'threat' });
+  const denied = await blocked.ask('Что записано в моём архиве?');
+  assert.equal(denied.reason, 'moderator_blocked');
+  assert.equal(blocked.calls.answer.length, 0, 'a moderation refusal is not a knowledge gap');
 });
 
 test('a known domain paired with another source or action cannot unlock knowledge', async (t) => {

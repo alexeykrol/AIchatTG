@@ -325,13 +325,13 @@ function provider({ onAnswer = null, sourceId = 'course-content-v1', action = 't
   };
 }
 
-async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300, providerRoute = {} }) {
+async function runOnce({ question, contentRetrieval, onAnswer, messageId = 300, providerRoute = {}, configOverrides = {} }) {
   const folder = mkdtempSync(join(tmpdir(), 'aichattg-retrieval-runtime-'));
   const db = openRuntimeDatabase(join(folder, 'runtime.db'));
   const actions = [];
   const answers = [];
   const runtime = createTelegramRuntime({
-    config: config(),
+    config: config(configOverrides),
     store: createRuntimeStore(db),
     provider: provider({ ...providerRoute, onAnswer: (input) => { answers.push(input); onAnswer?.(input); } }),
     knowledge: admittedKnowledge(),
@@ -372,7 +372,7 @@ test('a course question reaches the model with retrieved entries carrying title 
   assert.equal(actions.at(-1)[0], 'send');
 });
 
-test('a router-unknown question delivers the exact approved copy and journals it without retrieval', async () => {
+test('rollback (NEVER_REFUSE=false): a router-unknown question delivers the exact approved copy and journals it without retrieval', async () => {
   // Scope is the router's verdict; empty retrieval is not an unknown domain.
   const retriever = fakeRetriever({ status: 'not_found' });
   const layer = retrieval({}, { retriever });
@@ -381,6 +381,7 @@ test('a router-unknown question delivers the exact approved copy and journals it
     contentRetrieval: layer,
     messageId: 320,
     providerRoute: { action: 'redirect', sourceId: null },
+    configOverrides: { assistantNeverRefuse: false },
   });
 
   assert.equal(result.kind, 'answered');
@@ -404,27 +405,36 @@ test('a router-unknown question delivers the exact approved copy and journals it
   assert.equal(deficits[0].candidate_level, null);
 });
 
-test('an out-of-coverage business question is journaled with the L2 candidate label', async () => {
-  const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
-  const { result, deficits } = await runOnce({
+test('an out-of-coverage business question is answered off_domain and journaled with the L2 candidate label', async () => {
+  const retriever = fakeRetriever({ status: 'not_found' });
+  const layer = retrieval({}, { retriever });
+  const { result, answers, deficits, reservation } = await runOnce({
     question: '/ask как поднять продажи в моем салоне',
     contentRetrieval: layer,
     messageId: 330,
     providerRoute: { action: 'redirect', sourceId: null },
   });
 
-  assert.equal(result.abstained, true);
+  // Owner rule 2026-11-20: no redirect — the model answers from general knowledge.
+  assert.equal(result.abstained, undefined);
+  assert.equal(result.knowledgeGap.kind, 'off_domain');
+  assert.equal(answers.length, 1);
+  assert.equal(answers[0].knowledgeGap, 'off_domain');
+  assert.equal(answers[0].knowledge, null);
+  assert.equal(retriever.asked.length, 0);
+  assert.equal(reservation.status, 'completed');
   assert.equal(deficits.length, 1);
   // The label is a queue marker for the lab, never a routing decision.
   assert.equal(deficits[0].candidate_level, 'L2');
 });
 
-test('a question the corpus cannot ground is abstained rather than answered from nothing', async () => {
+test('rollback (NEVER_REFUSE=false): a question the corpus cannot ground is abstained rather than answered', async () => {
   const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
   const { result, answers, actions, deficits } = await runOnce({
     question: '/ask что такое ии-агент',
     contentRetrieval: layer,
     messageId: 340,
+    configOverrides: { assistantNeverRefuse: false },
   });
 
   assert.equal(result.abstained, true);
@@ -436,6 +446,26 @@ test('a question the corpus cannot ground is abstained rather than answered from
   assert.match(actions.at(-1)[1].text, /нет достаточных сведений/);
   assert.match(actions.at(-1)[1].text, /не буду заменять.*догадкой/);
   assert.equal(result.route, 'boundary:domain_knowledge_missing');
+  assert.equal(deficits.length, 1);
+  assert.equal(deficits[0].reason, 'domain_knowledge_missing');
+});
+
+test('never-refuse (default): a question the corpus cannot ground reaches the model as an in-domain gap', async () => {
+  const layer = retrieval({}, { retriever: fakeRetriever({ status: 'not_found' }) });
+  const { result, answers, actions, deficits, reservation } = await runOnce({
+    question: '/ask что такое ии-агент',
+    contentRetrieval: layer,
+    messageId: 345,
+  });
+
+  assert.equal(result.kind, 'answered');
+  assert.equal(result.knowledgeGap.kind, 'in_domain_gap');
+  assert.equal(result.knowledgeGap.detail, 'grounding_not_found');
+  assert.equal(answers.length, 1);
+  assert.equal(answers[0].knowledgeGap, 'in_domain_gap');
+  assert.equal(answers[0].knowledge, null);
+  assert.doesNotMatch(actions.at(-1)[1].text, /нет достаточных сведений/);
+  assert.equal(reservation.status, 'completed');
   assert.equal(deficits.length, 1);
   assert.equal(deficits[0].reason, 'domain_knowledge_missing');
 });

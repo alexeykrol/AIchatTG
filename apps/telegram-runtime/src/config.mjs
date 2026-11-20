@@ -267,6 +267,12 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     // without a provider, knowledge or hint message. Off by default so a
     // deployment changes nothing until the env is flipped explicitly.
     assistantStubMode: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_STUB_MODE', false),
+    // Product rule (owner, 2026-11-20): an in-subject question is never refused
+    // for lack of knowledge — the answer model reasons with a "no direct answer"
+    // caveat. On by default; `false` restores the old code-owned abstention as a
+    // rollback switch. Off-subject redirects and safety/quota refusals are not
+    // affected by this switch.
+    assistantNeverRefuse: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE', true),
     assistantDomainIndexPath: String(env.TELEGRAM_RUNTIME_DOMAIN_INDEX_PATH || '').trim()
       ? resolve(cwd, String(env.TELEGRAM_RUNTIME_DOMAIN_INDEX_PATH).trim()) : undefined,
     // The retriever over the admitted v2 content package. Off by default like
@@ -281,6 +287,10 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
       // Input-layer step 5. Off by default: it is one extra model call per
       // ungrounded question, so switching it on is a cost decision.
       rewriteEnabled: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ENABLED', false),
+      // Lets a question with no dictionary signal reach the paid rewrite step too
+      // (only after the free local search came back weak). Off by default; it has
+      // effect only together with REWRITE_ENABLED.
+      rewriteOnNoSignal: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL', false),
       // Contract self-check, on by default; the switch exists so an operator can
       // drop it without a code change if it ever becomes a latency problem.
       validatePacks: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_VALIDATE_PACKS', true),
