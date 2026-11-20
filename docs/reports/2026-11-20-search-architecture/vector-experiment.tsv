@@ -1,0 +1,101 @@
+q	kind	gold_records	lexical_all	vector_all_k12	hybrid_all	best_cos	signal_weak
+Q001	answerable	0955148bf523-01	1	1	1	0.6773	0
+Q002	answerable	0955148bf523-01	1	1	1	0.6078	0
+Q003	answerable	0955148bf523-01	1	1	1	0.6626	0
+Q004	answerable	0955148bf523-01	1	1	1	0.6986	0
+Q005	answerable	0955148bf523-02	1	1	1	0.7725	0
+Q006	answerable	0955148bf523-02	1	1	1	0.7252	0
+Q007	answerable	0955148bf523-02	0	1	1	0.5901	1
+Q008	answerable	1620c40359b4-01	1	1	1	0.8502	0
+Q009	answerable	1620c40359b4-02	1	1	1	0.7334	0
+Q010	answerable	1620c40359b4-02	1	1	1	0.7393	0
+Q011	answerable	1620c40359b4-02	1	1	1	0.6565	0
+Q012	answerable	1632fcc0dd02	1	1	1	0.7819	0
+Q013	answerable	1632fcc0dd02	1	1	1	0.6935	0
+Q014	answerable	1632fcc0dd02	0	1	1	0.6344	1
+Q015	answerable	1632fcc0dd02	0	1	1	0.6242	1
+Q016	answerable	3a91d6694e94-01	1	1	1	0.618	0
+Q017	answerable	3a91d6694e94-01	1	1	1	0.6061	0
+Q018	answerable	3a91d6694e94-01	1	1	1	0.7672	0
+Q019	answerable	3a91d6694e94-01	1	1	1	0.5642	0
+Q020	answerable	3a91d6694e94-02	1	0	1	0.7426	0
+Q021	answerable	3a91d6694e94-02	1	0	1	0.6877	0
+Q022	answerable	3a91d6694e94-02	1	1	1	0.7631	0
+Q023	answerable	3a91d6694e94-02	1	1	1	0.7031	0
+Q024	answerable	518f5e184a2d	1	1	1	0.7517	0
+Q025	answerable	518f5e184a2d	1	1	1	0.6762	0
+Q026	answerable	518f5e184a2d	1	1	1	0.7316	0
+Q027	answerable	518f5e184a2d	1	1	1	0.8285	0
+Q028	answerable	6ce617d214e8-01	1	1	1	0.8087	0
+Q029	answerable	6ce617d214e8-01	1	1	1	0.7648	0
+Q030	answerable	6ce617d214e8-01	1	1	1	0.7525	0
+Q031	answerable	6ce617d214e8-01	0	1	1	0.5901	1
+Q032	answerable	6ce617d214e8-02	1	1	1	0.7802	0
+Q033	answerable	a84ce2b25fcd-01	1	1	1	0.5623	0
+Q034	answerable	a84ce2b25fcd-01	1	1	1	0.7314	0
+Q035	answerable	a84ce2b25fcd-01	0	0	0	0.5691	0
+Q036	answerable	a84ce2b25fcd-01	1	1	1	0.7649	0
+Q037	answerable	a84ce2b25fcd-02	0	1	1	0.6766	1
+Q038	answerable	a84ce2b25fcd-02	1	1	1	0.6818	0
+Q039	answerable	a84ce2b25fcd-02	0	1	1	0.6297	1
+Q040	answerable	a84ce2b25fcd-02	1	1	1	0.6733	0
+Q041	answerable	dfc0371b7155-01	0	1	1	0.6984	1
+Q042	answerable	dfc0371b7155-01	0	1	1	0.777	1
+Q043	answerable	dfc0371b7155-01	0	1	1	0.6281	1
+Q044	answerable	dfc0371b7155-02	0	1	1	0.7817	1
+Q045	answerable	dfc0371b7155-02	0	1	1	0.6082	1
+Q046	answerable	dfc0371b7155-02	0	1	1	0.689	1
+Q047	answerable	dfc0371b7155-02	1	0	1	0.6212	0
+Q048	answerable	e211a2881a1f-01	0	1	1	0.8174	1
+Q049	answerable	e211a2881a1f-01	1	1	1	0.8052	0
+Q050	answerable	e211a2881a1f-01	1	1	1	0.5973	0
+Q051	answerable	e211a2881a1f-02	0	1	1	0.8304	1
+Q052	answerable	ea9cec29115d	1	1	1	0.5984	0
+Q053	answerable	ea9cec29115d	1	1	1	0.7584	0
+Q054	answerable	ea9cec29115d	1	1	1	0.7791	0
+Q055	answerable	ea9cec29115d	1	1	1	0.6912	0
+Q056	answerable	fab347d86cf7-01	1	1	1	0.6366	0
+Q057	answerable	fab347d86cf7-01	1	1	1	0.6356	0
+Q058	answerable	fab347d86cf7-01	1	1	1	0.6621	0
+Q059	answerable	fab347d86cf7-01	1	1	1	0.7579	0
+Q060	answerable	fab347d86cf7-02	0	1	1	0.6464	0
+Q061	unanswerable					0.5053	0
+Q062	unanswerable					0.5038	1
+Q063	unanswerable					0.6601	0
+Q064	unanswerable					0.592	0
+Q065	unanswerable					0.5922	0
+Q066	unanswerable					0.6274	1
+Q067	unanswerable					0.6829	0
+Q068	unanswerable					0.7015	0
+Q069	unanswerable					0.6156	0
+Q070	unanswerable					0.4501	0
+Q071	conflicting	0955148bf523-01,3a91d6694e94-02	1	0	1	0.7686	0
+Q072	conflicting	0955148bf523-01,fab347d86cf7-02	1	0	1	0.6574	0
+Q073	conflicting	0955148bf523-02,0955148bf523-01	1	1	1	0.7764	0
+Q074	conflicting	1620c40359b4-01,1632fcc0dd02	1	1	1	0.6287	0
+Q075	conflicting	1620c40359b4-02,1620c40359b4-01	1	1	1	0.7153	0
+Q076	conflicting	1632fcc0dd02,3a91d6694e94-01	1	1	1	0.6293	0
+Q077	conflicting	3a91d6694e94-02,3a91d6694e94-01	1	1	1	0.711	0
+Q078	conflicting	518f5e184a2d,1632fcc0dd02	1	1	1	0.727	0
+Q079	conflicting	518f5e184a2d,e211a2881a1f-01	1	1	1	0.6876	0
+Q080	conflicting	6ce617d214e8-02,6ce617d214e8-01	1	1	1	0.7897	0
+Q081	conflicting	a84ce2b25fcd-01,dfc0371b7155-01	0	1	1	0.6126	1
+Q082	conflicting	a84ce2b25fcd-02,a84ce2b25fcd-01	1	1	1	0.7212	0
+Q083	conflicting	a84ce2b25fcd-02,dfc0371b7155-02	1	1	1	0.7964	0
+Q084	conflicting	dfc0371b7155-02,dfc0371b7155-01	0	0	0	0.7454	0
+Q085	conflicting	e211a2881a1f-01,dfc0371b7155-02	1	0	1	0.6479	0
+Q086	conflicting	e211a2881a1f-02,1632fcc0dd02	1	1	1	0.7505	0
+Q087	conflicting	e211a2881a1f-02,e211a2881a1f-01	1	1	1	0.7632	0
+Q088	conflicting	ea9cec29115d,6ce617d214e8-01	1	1	1	0.6171	0
+Q089	conflicting	fab347d86cf7-01,6ce617d214e8-01	1	1	1	0.7223	0
+Q090	conflicting	fab347d86cf7-02,fab347d86cf7-01	1	0	1	0.7605	0
+Q091	conflicting	0955148bf523-01,518f5e184a2d	1	1	1	0.6856	0
+Q092	conflicting	1620c40359b4-01,6ce617d214e8-01	0	1	1	0.7278	0
+Q093	conflicting	1632fcc0dd02,a84ce2b25fcd-01	1	1	1	0.7166	0
+Q094	conflicting	3a91d6694e94-02,dfc0371b7155-01	0	0	0	0.6375	0
+Q095	conflicting	5a0da6806bcf,e211a2881a1f-01	1	0	1	0.6321	0
+Q096	conflicting	6ce617d214e8-02,ea9cec29115d	0	1	1	0.7529	0
+Q097	conflicting	a84ce2b25fcd-02,fab347d86cf7-02	1	1	1	0.6288	0
+Q098	conflicting	dfc0371b7155-02,0955148bf523-02	1	0	1	0.6732	0
+Q099	conflicting	e211a2881a1f-02,1620c40359b4-02	0	0	1	0.7165	0
+Q100	conflicting	fab347d86cf7-01,3a91d6694e94-01	1	0	1	0.7099	0
