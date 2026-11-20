@@ -50,7 +50,7 @@ API_URL = "https://api.anthropic.com/v1/messages"
 KINDS = ("answerable", "unanswerable", "conflicting")
 CODES = ("N1", "N2", "N3", "N4", "N5")
 OVERHEAD_TOKENS = 64
-MAX_TOKENS = 600
+MAX_TOKENS = 2000  # adaptive thinking can use 600+ tokens before the verdict (calibration 20.11: G01 hit max_tokens)
 RETRYABLE = {408, 429, 500, 502, 503, 504, 529}
 
 
