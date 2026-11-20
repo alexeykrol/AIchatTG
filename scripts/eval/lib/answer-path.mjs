@@ -11,7 +11,7 @@
  *     the exact-example hints of the catalog still apply as in production;
  *   - dialogue history empty, no working state, no analyzer, no moderation, no address detection, no quota;
  *   - delivery (footer, Markdown rendering, chunking for Telegram) is not applied: the text is the model's.
- * Retrieval business logic is unchanged: 12 entries / 6000 tokens, packs validated. Rewrite (input-layer
+ * Retrieval defaults to 12 entries / 6000 tokens with validated packs. Rewrite (input-layer
  * step 5) is off as in production unless a `rewriteQuestion` is given; then it is wired exactly as
  * `server.mjs` wires it (`rewriteEnabled: true` + the rewriter port into `createKnowledgeRetrieval`).
  * `rewriteOnNoSignal: true` (experiment only, never set in production) also lets no-signal questions reach it.
@@ -57,14 +57,15 @@ export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
   rewriteQuestion = null, rewriteOnNoSignal = false,
+  noConceptGate,
   // runtime.mjs: config.assistantNeverRefuse (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE), default true.
   neverRefuse = true,
 }) {
   const rewriteEnabled = typeof rewriteQuestion === 'function';
   if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
-  // The opt-in key is passed only when set, so the default call is the pre-lever call.
   const retrieval = createKnowledgeRetrieval(
     { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true,
+      noConceptGate,
       ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}) },
     { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );
@@ -129,6 +130,10 @@ export function createOfflineAssistant({
       ftsCandidates: t.fts_path_candidates ?? null, mergedCount: t.merged_count ?? null,
       topScore: r.pack?.selected?.[0]?.score ?? null, significantTerms: (t.significant_terms || []).length,
       tokenBudget: r.pack?.token_budget ?? null,
+      ...(noConceptGate === 'pass' ? {
+        noConceptSignalAbsent: r.trace?.noConceptSignalAbsent ?? null,
+        noConceptGateBypassed: r.trace?.noConceptGateBypassed === true,
+      } : {}),
       gaps: r.pack?.gaps || [],
     };
   }

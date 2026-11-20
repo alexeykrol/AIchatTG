@@ -73,8 +73,7 @@ function errorPack(reason) {
  */
 function withTrace(answer, trace) {
   return Object.freeze({
-    available: answer.available,
-    reason: answer.reason,
+    ...answer,
     pack: { ...answer.pack, rewrite_trace: trace },
   });
 }
@@ -93,6 +92,7 @@ export function createRetrieverAdapter(
     databasePath,
     domainId = DEFAULT_DOMAIN_ID,
     rewriteEnabled = false,
+    noConceptGate = 'refuse',
     // The directory holding the package's own `contracts/*.schema.json`. When
     // absent the schemas are looked up beside the database, which is where a
     // v2 package puts them.
@@ -114,6 +114,9 @@ export function createRetrieverAdapter(
     readFile = readFileSync,
   } = {},
 ) {
+  if (noConceptGate !== 'refuse' && noConceptGate !== 'pass') {
+    throw new TypeError('noConceptGate must be refuse or pass');
+  }
   let db = null;
   let openReason = null;
   try {
@@ -314,6 +317,8 @@ export function createRetrieverAdapter(
     for (const norm of matchConcepts(tail, dictionary)) {
       if (!run.conceptMatches.includes(norm)) run.conceptMatches.push(norm);
     }
+    run.noConceptSignalAbsent = run.conceptMatches.length === 0;
+    run.noConceptGateBypassed = false;
 
     const terms = buildTerms(searchTokens, { documentFrequency, nChunks });
     const pool = new Map();
@@ -416,7 +421,8 @@ export function createRetrieverAdapter(
     run.bestScore = ranked.ordered[0].score;
     run.bestCov = Math.max(...ranked.ordered.map((cand) => cand.cov));
 
-    if (!run.conceptMatches.length && run.strongUnits < NO_CONCEPT_MIN_UNITS) {
+    const wouldRefuse = run.noConceptSignalAbsent && run.strongUnits < NO_CONCEPT_MIN_UNITS;
+    if (noConceptGate === 'refuse' && wouldRefuse) {
       run.gaps = notFoundGaps(terms, run.conceptMatches);
       return run;
     }
@@ -428,6 +434,7 @@ export function createRetrieverAdapter(
     const budgeted = selectWithinBudget(
       ranked.ordered, ranked.diverse, ranked.overflow, { budget, maxEntries });
     run.selected = budgeted.selected;
+    run.noConceptGateBypassed = wouldRefuse && run.selected.length > 0;
     run.usedTokens = budgeted.used;
     run.budgetSkipped = budgeted.budgetSkipped;
     run.neighborsAdded = budgeted.neighborsAdded;
@@ -589,7 +596,8 @@ export function createRetrieverAdapter(
         pack.cache_trace = {
           cache_hit: true, cache_reason: 'session_repeat', topic_switch_detected: false,
         };
-        return Object.freeze({ available: true, reason: null, pack });
+        return Object.freeze({ available: true, reason: null, pack,
+          ...(cached.trace ? { trace: cached.trace } : {}) });
       }
       sess.packs.delete(key);
       cacheReason = 'expired';
@@ -615,7 +623,12 @@ export function createRetrieverAdapter(
     if (invalid) return errorPack(invalid);
     pack.citations = citationsFor(pack);
 
-    sess.packs.set(key, { pack: structuredClone(pack), at: now() });
+    // The package contract closes both the pack and its retrieval_trace.
+    const trace = noConceptGate === 'pass' ? Object.freeze({
+      noConceptSignalAbsent: run.noConceptSignalAbsent,
+      noConceptGateBypassed: run.noConceptGateBypassed,
+    }) : null;
+    sess.packs.set(key, { pack: structuredClone(pack), at: now(), trace });
     while (sess.packs.size > PACKS_PER_SESSION_MAX) {
       sess.packs.delete(sess.packs.keys().next().value);
     }
@@ -623,7 +636,7 @@ export function createRetrieverAdapter(
       const base = (topicSwitch || sess.topics === null) ? new Set() : sess.topics;
       sess.topics = new Set([...base, ...topicTokens]);
     }
-    return Object.freeze({ available: true, reason: null, pack });
+    return Object.freeze({ available: true, reason: null, pack, ...(trace ? { trace } : {}) });
   }
 
   /**
@@ -690,8 +703,15 @@ export function createRetrieverAdapter(
     }
 
     const chosen = chooseBetterPack(first.pack, second.pack);
+    const [winner, other] = chosen.winner === 'second' ? [second, first] : [first, second];
+    // A better pack can depend on the bypass even when the other wording
+    // already supplied context that would survive the gate.
+    const answer = winner.trace?.noConceptGateBypassed && other.pack.entries.length > 0
+      && !other.trace?.noConceptGateBypassed
+      ? { ...winner, trace: Object.freeze({ ...winner.trace, noConceptGateBypassed: false }) }
+      : winner;
     return withTrace(
-      { available: true, reason: null, pack: chosen.pack },
+      answer,
       rewriteTrace({
         attempted: true,
         rewrittenQuestion: checked.question,

@@ -49,6 +49,7 @@ export function createKnowledgeRetrieval(
     // TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL (config.mjs);
     // server.mjs passes `config.assistantRetrieval` through unchanged.
     rewriteOnNoSignal = false,
+    noConceptGate,
     validatePacks = true,
   } = {},
   {
@@ -79,6 +80,7 @@ export function createKnowledgeRetrieval(
       domainId: pkg.domainId,
       rewriteEnabled,
       validatePacks,
+      ...(noConceptGate !== undefined ? { noConceptGate } : {}),
     },
     rewriteQuestion ? { rewriteQuestion } : {},
   );
@@ -169,6 +171,7 @@ export function createKnowledgeRetrieval(
           evidence: decision.evidence,
           status: answer.pack.status,
           grounding: projected.trace,
+          ...answer.trace,
         }),
       });
     }
@@ -185,6 +188,7 @@ export function createKnowledgeRetrieval(
         packageVersion: answer.pack.package_version,
         grounding: projected.trace,
         ...(answer.pack.rewrite_trace ? { rewrite: answer.pack.rewrite_trace } : {}),
+        ...answer.trace,
       }),
     });
   }

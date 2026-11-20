@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { answerSystemPrompt } from '../../../apps/telegram-runtime/src/provider-adapter.mjs';
@@ -89,6 +90,44 @@ test('live mode requires a key env name, a cap and a price', () => {
   assert.throws(() => priceFor({ ...parseArgs(['--model', 'claude-unknown-9']) }), /--price-input/);
   assert.equal(parseArgs([]).model, DEFAULT_MODEL);
   assert.equal(parseArgs([]).effort, DEFAULT_EFFORT);
+});
+
+test('no-concept gate is accepted in all modes and rejects invalid values', () => {
+  assert.equal(parseArgs([]).noConceptGate, 'refuse');
+  for (const mode of ['retrieval', 'mock', 'live']) {
+    assert.equal(parseArgs(['--mode', mode, '--no-concept-gate', 'pass']).noConceptGate, 'pass');
+  }
+  assert.throws(() => parseArgs(['--no-concept-gate', 'off']), /must be refuse or pass/);
+  assert.throws(() => parseArgs(['--no-concept-gate']), /must be refuse or pass/);
+});
+
+const gatePackage = process.env.AICHATTG_EVAL_GATE_PACKAGE || database;
+test('no-concept gate reaches the run manifest and answers rows', {
+  skip: gatePackage && existsSync(gatePackage) && existsSync(join(DONOR, 'evals/baseline/id_map.json'))
+    ? false : 'book package or donor missing',
+}, (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aichattg-eval-gate-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const noConceptGate of ['refuse', 'pass']) {
+    const out = join(root, noConceptGate);
+    execFileSync(process.execPath, [
+      join(REPO, 'scripts/eval/ask-offline.mjs'), '--mode', 'retrieval',
+      '--package', gatePackage, '--donor', DONOR, '--out', out,
+      '--no-concept-gate', noConceptGate,
+    ]);
+    const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.retrieval.no_concept_gate, noConceptGate);
+    const rows = readFileSync(join(out, 'answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.ok(rows.length > 0);
+    assert.ok(rows.every((row) => typeof row.no_concept_gate_bypassed === 'boolean'));
+    const bypassed = rows.filter((row) => row.no_concept_gate_bypassed);
+    if (noConceptGate === 'pass') {
+      assert.ok(bypassed.length > 0);
+      assert.ok(bypassed.every((row) => row.chunk_ids.length > 0 && row.diagnostics.noConceptSignalAbsent));
+    } else {
+      assert.equal(bypassed.length, 0);
+    }
+  }
 });
 
 test('answers markdown matches the stand format', () => {

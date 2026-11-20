@@ -111,6 +111,73 @@ test('A question with no dictionary match and no corroborating coverage is not_f
   assert.ok(answer.pack.gaps.includes('вопрос не совпал ни с одним концептом словаря домена'));
 });
 
+test('The no-concept gate is opt-in and a bypass survives cache hits and the rewrite wrapper', async () => {
+  const db = fakeDatabase({
+    chunks: [chunk('lesson:1:a:001', 'чугунная сковорода')],
+  });
+  const build = (options) => createRetrieverAdapter(
+    { databasePath: '/ai.db', ...options }, { openDatabase: () => db },
+  );
+  const input = { question: 'чугунная сковорода' };
+  for (const options of [{}, { noConceptGate: 'refuse' }]) {
+    const answer = build(options).forQuestion(input);
+    assert.equal(answer.pack.retrieval_trace.fts_path_candidates, 1);
+    assert.equal(answer.pack.status, 'not_found');
+    assert.deepEqual(answer.pack.entries, []);
+    assert.equal(answer.trace, undefined);
+  }
+
+  const retriever = build({ noConceptGate: 'pass' });
+  const first = retriever.forQuestion(input);
+  assert.equal(first.pack.status, 'ready');
+  assert.equal(first.pack.entries.length, 1);
+  assert.deepEqual(first.trace, { noConceptSignalAbsent: true, noConceptGateBypassed: true });
+  const repeat = await retriever.forQuestionWithRewrite(input);
+  assert.equal(repeat.pack.cache_trace.cache_hit, true);
+  assert.deepEqual(repeat.trace, first.trace);
+});
+
+test('A bypass-dependent rewrite can improve a question that already had context', async () => {
+  const db = fakeDatabase({
+    chunks: [chunk('lesson:1:a:001', 'чугунная сковорода')],
+    concepts: [{ domain_id: 'ai', canonical: 'агент', n_units: 1 }],
+  });
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/ai.db', noConceptGate: 'pass', rewriteEnabled: true },
+    { openDatabase: () => db, rewriteQuestion: async () => 'чугунная сковорода' },
+  );
+  const input = { question: 'чугунная сковорода агент рецепт перец' };
+  const first = retriever.forQuestion(input);
+  assert.equal(first.pack.status, 'insufficient_context');
+  assert.ok(first.pack.entries.length > 0);
+  assert.equal(first.trace.noConceptSignalAbsent, false);
+  const answer = await retriever.forQuestionWithRewrite(input);
+  assert.equal(answer.pack.rewrite_trace.winner, 'second');
+  assert.equal(answer.pack.status, 'ready');
+  assert.deepEqual(answer.trace, { noConceptSignalAbsent: true, noConceptGateBypassed: false });
+});
+
+test('Pass mode still refuses lexical candidates below the score threshold', () => {
+  const db = fakeDatabase({ chunks: [chunk('lesson:1:a:001', 'заголовок без совпадений')] });
+  const retriever = createRetrieverAdapter(
+    { databasePath: '/ai.db', noConceptGate: 'pass' }, { openDatabase: () => db },
+  );
+  const answer = retriever.forQuestion({ question: 'чугунная сковорода' });
+  assert.equal(answer.pack.retrieval_trace.fts_path_candidates, 1);
+  assert.equal(answer.pack.retrieval_trace.reranking.title_only_demoted, 1);
+  assert.equal(answer.pack.status, 'not_found');
+  assert.deepEqual(answer.pack.entries, []);
+  assert.deepEqual(answer.trace, { noConceptSignalAbsent: true, noConceptGateBypassed: false });
+});
+
+test('An invalid noConceptGate value throws at construction', () => {
+  for (const noConceptGate of ['off', null, true]) {
+    assert.throws(() => createRetrieverAdapter({ noConceptGate }), {
+      name: 'TypeError', message: 'noConceptGate must be refuse or pass',
+    });
+  }
+});
+
 test('A grounded question returns a contract pack with entries, trace and capped scores', () => {
   const body = 'ии-агент это программа которая сама решает задачи ии-агент работает циклом';
   const db = fakeDatabase({
