@@ -10,6 +10,7 @@ import { openRuntimeDatabase, createRuntimeStore } from '../src/database.mjs';
 import { createKnowledgeRetrieval } from '../src/knowledge-retrieval.mjs';
 import { createTelegramRuntime } from '../src/runtime.mjs';
 import { ASSISTANT_OUT_OF_COVERAGE_TEXT } from '../src/assistant-policy.mjs';
+import { createManagedPackage } from './fixtures/managed-package.mjs';
 
 /**
  * The whole answer path on hand-built ports: an admitted package, a retriever
@@ -153,6 +154,34 @@ test('a no-signal question the corpus can serve is answered, not refused', async
   assert.equal(served.grounded, true);
   assert.equal(served.domainId, 'ai');
   assert.equal(served.trace.domain, 'domain_no_signal');
+});
+
+test('Pass mode grounds a no-signal question through the admitted SQLite package', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aichattg-retrieval-gate-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const databasePath = join(createManagedPackage(join(root, 'package')), 'ai.db');
+  const knowledge = {
+    forPackage: () => ({
+      available: true, package: { domainId: 'ai', sourceId: PACKAGE_SOURCE, databasePath },
+    }),
+  };
+  const input = { question: 'clear instructions recipes' };
+  for (const noConceptGate of ['refuse', 'pass']) {
+    const layer = createKnowledgeRetrieval({ noConceptGate }, { knowledge });
+    try {
+      const result = await layer.forQuestion(input);
+      assert.equal(result.trace.domain, 'domain_no_signal');
+      assert.equal(result.grounded, noConceptGate === 'pass');
+      if (noConceptGate === 'pass') {
+        assert.ok(result.pack.entries.length > 0);
+        assert.equal(result.trace.noConceptSignalAbsent, true);
+        assert.equal(result.trace.noConceptGateBypassed, true);
+      } else {
+        assert.equal(result.reason, 'domain_no_signal');
+        assert.deepEqual(result.pack.entries, []);
+      }
+    } finally { layer.close(); }
+  }
 });
 
 test('an empty dictionary is a deployment defect, not an out-of-domain verdict', async () => {

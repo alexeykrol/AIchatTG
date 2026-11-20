@@ -29,6 +29,8 @@
  *                              --rewrite-price-output (required for a model without a published price here).
  *   --max-entries N / --max-context-tokens N  retrieval width (production env TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_*;
  *                              defaults 12 / 6000). Recorded in manifest.retrieval.
+ *   --no-concept-gate refuse|pass  skip the no-concept coverage gate in pass mode (default refuse).
+ *                              Recorded in manifest.retrieval; answers.jsonl flags context gained by the bypass.
  *   --rewrite-no-signal        (only with --rewrite) passes `rewriteOnNoSignal: true` to createKnowledgeRetrieval:
  *                              no-signal questions may be rewritten too (still only when the free local search is
  *                              weak). Off in production; recorded in manifest.retrieval and manifest.rewrite.
@@ -69,7 +71,7 @@ export function parseArgs(argv) {
     anthropicVersion: DEFAULT_ANTHROPIC_VERSION, keyEnv: null, capUsd: null, priceInput: null, priceOutput: null,
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
     rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
-    maxEntries: null, maxContextTokens: null,
+    maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse',
   };
   const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
@@ -79,7 +81,7 @@ export function parseArgs(argv) {
     '--price-input': 'priceInput', '--price-output': 'priceOutput', '--already-spent-usd': 'alreadySpentUsd',
     '--rewrite': 'rewrite', '--rewrite-effort': 'rewriteEffort', '--rewrite-price-input': 'rewritePriceInput',
     '--rewrite-price-output': 'rewritePriceOutput', '--prompt-addendum': 'promptAddendum',
-    '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens',
+    '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens', '--no-concept-gate': 'noConceptGate',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
@@ -97,6 +99,7 @@ export function parseArgs(argv) {
     if (a[k] != null) a[k] = Number(a[k]);
   }
   if (!['retrieval', 'mock', 'live'].includes(a.mode)) throw new Error('--mode must be retrieval, mock or live');
+  if (!['refuse', 'pass'].includes(a.noConceptGate)) throw new Error('--no-concept-gate must be refuse or pass');
   if ((a.rewrite || a.promptAddendum) && a.mode === 'retrieval') {
     throw new Error('--rewrite and --prompt-addendum need --mode mock or live (they go through the spend guard)');
   }
@@ -267,6 +270,7 @@ async function main() {
   });
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
     rewriteQuestion: stack?.rewriteQuestion ?? null,
+    noConceptGate: args.noConceptGate,
     ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}),
     ...(args.maxEntries != null ? { maxEntries: args.maxEntries } : {}),
     ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}) });
@@ -291,6 +295,7 @@ async function main() {
         // The old path would have refused here; now the model reasons with the "no direct answer" caveat.
         knowledge_gap: r.knowledgeGap === true, gap_reason: r.gapReason ?? null, gap_detail: r.gapDetail ?? null,
         confidence: r.trace?.confidence ?? null, domain_signal: r.trace?.domain ?? null,
+        no_concept_gate_bypassed: r.trace?.noConceptGateBypassed === true && r.chunkIds.length > 0,
         input_tokens: r.receipt?.inputTokens ?? null, output_tokens: r.receipt?.outputTokens ?? null,
         stop_reason: journal.at(-1)?.stopReason ?? null,
         cost_usd: journal.length ? journal.reduce((n, j) => n + j.costUsd, 0) : (stack ? 0 : null),
@@ -319,6 +324,7 @@ async function main() {
     database: databasePath, database_sha256: sha256File(databasePath),
     retrieval: { maxEntries: args.maxEntries ?? RETRIEVAL_MAX_ENTRIES,
       maxContextTokens: args.maxContextTokens ?? RETRIEVAL_MAX_CONTEXT_TOKENS,
+      no_concept_gate: args.noConceptGate,
       rewrite: Boolean(stack?.rewriteQuestion),
       rewrite_on_no_signal: Boolean(args.rewriteNoSignal) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,
