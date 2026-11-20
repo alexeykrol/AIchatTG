@@ -1,0 +1,26 @@
+q	kind	source	gold_records	stage	fix_alias	fix_graph	fix_vector	fix_second_query	fix_hypothetical	exp_alt_query_hit	exp_hypothetical_hit
+Q007	answerable	w12	0955148bf523-02	F	да	нет	да	да	да	да	да
+Q009	answerable	judge	1620c40359b4-02	E	нет	да	да	да	да	да	да
+Q014	answerable	w12	1632fcc0dd02	F	да	нет	да	да	да	да	да
+Q015	answerable	w12	1632fcc0dd02	F	да	нет	да	да	да	да	да
+Q030	answerable	judge	6ce617d214e8-01	D	нет	да	да	да	да	да	да
+Q031	answerable	w12	6ce617d214e8-01	F	да	нет	возможно	да	да	да	да
+Q035	answerable	w12+judge	a84ce2b25fcd-01	B	нет	возможно	нет	да	да	да	да: только вопрос вместе с ответом; один ответ срезан правилом отказа
+Q037	answerable	w12+judge	a84ce2b25fcd-02	F+A	да	нет	да	нет	да	нет: не найден и место 23	да
+Q039	answerable	w12	a84ce2b25fcd-02	F	да	нет	да	да	возможно	да	нет: место 2, срезано правилом отказа
+Q041	answerable	w12	dfc0371b7155-01	F	да	нет	да	да	да	да	да
+Q042	answerable	w12+judge	dfc0371b7155-01	F	да	нет	да	да	возможно	да	нет: место 1, срезано правилом отказа
+Q043	answerable	w12+judge	dfc0371b7155-01	F	да	нет	да	да	да	да	да
+Q044	answerable	w12+judge	dfc0371b7155-02	F	да	нет	да	да	да	да	да
+Q045	answerable	w12+judge	dfc0371b7155-02	A	нет	нет	да	да	да	да	да
+Q046	answerable	w12+judge	dfc0371b7155-02	F	да	нет	да	да	возможно	да	нет: место 1, срезано правилом отказа
+Q048	answerable	w12	e211a2881a1f-01	F	да	нет	да	да	нет	да	нет: места 18 и 16
+Q051	answerable	w12	e211a2881a1f-02	F	да	нет	да	возможно	да	нет: место 1 у обоих перезапросов, срезано правилом отказа	да
+Q060	answerable	w12	fab347d86cf7-02	A	нет	нет	да	возможно	нет	да: место 12, на границе окна	нет: места 14 и 17
+Q081	conflicting	w12	a84ce2b25fcd-01;dfc0371b7155-01	F+B	возможно	нет	нет	да	нет	да	нет: найдена только сторона А
+Q084	conflicting	w12+judge	dfc0371b7155-02;dfc0371b7155-01	B	нет	возможно	нет	да	нет	да	нет: найдена только сторона А
+Q090	conflicting	judge	fab347d86cf7-02;fab347d86cf7-01	C	нет	да	да	да	да	да	да
+Q092	conflicting	w12+judge	1620c40359b4-01;6ce617d214e8-01	B	нет	нет	да	нет	нет	нет: найдена только сторона А	нет: найдена только сторона А
+Q094	conflicting	w12	3a91d6694e94-02;dfc0371b7155-01	A	нет	да	нет	да	нет	да	нет: найдена только сторона Б
+Q096	conflicting	w12	6ce617d214e8-02;ea9cec29115d	A	нет	да	да	нет	нет	нет: найдена только сторона Б	нет: найдена только сторона Б
+Q099	conflicting	w12	e211a2881a1f-02;1620c40359b4-02	C	нет	нет	возможно	да	нет	да	нет: найдена только сторона А
