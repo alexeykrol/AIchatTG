@@ -314,8 +314,12 @@ test('mock run with --rewrite --rewrite-no-signal: no-signal questions may be re
 // 81 requests, 34ed7345…). Re-pinned deliberately on 2026-11-20 for the owner's never-refuse and
 // paradox rules: the answer system prompt changed, and the 19 former abstentions now reach the model
 // as knowledge gaps (100 requests). The levers themselves still add nothing to the default run.
+// Re-pinned again later on 2026-11-20 (333b8199… -> 443862d1…): the digest written with the never-refuse
+// commit did not match that commit's own code — it was taken before the last prompt edit of that session.
+// No tracked source of the request path differs between that commit and this pin, and the digest is stable
+// across runs.
 const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';
-const PINNED_DEFAULT_REQUESTS_SHA256 = '333b81998a5c7197aafa07a17863ca94b89d4ccd0a95a5b2dd2f86cd0547c753';
+const PINNED_DEFAULT_REQUESTS_SHA256 = '443862d11b794f45884f4a8e005f23db2c6993279ae864f2c7817163b93bf119';
 const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
 
 test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {
