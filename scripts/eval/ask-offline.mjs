@@ -303,7 +303,7 @@ async function main() {
           rewrite_no_signal_attempted: r.trace?.domain === DOMAIN_ROUTE_REASONS.NO_SIGNAL
             && (rw?.attempted === true || rewriteCalls.length > 0),
           rewrite_attempted: rw?.attempted ?? false, rewrite_reason: rw?.reason ?? null,
-          rewrite_question: rw?.rewrittenQuestion ?? null, rewrite_winner: rw?.winner ?? null,
+          rewrite_question: rw?.rewritten_question ?? rw?.rewrittenQuestion ?? null, rewrite_winner: rw?.winner ?? null,
           rewrite_calls: rewriteCalls.length, rewrite_cost_usd: rewriteCalls.reduce((n, j) => n + j.costUsd, 0),
         } : {}),
       });

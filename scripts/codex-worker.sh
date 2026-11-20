@@ -20,6 +20,29 @@ command -v codex >/dev/null || { echo "codex CLI not found" >&2; exit 3; }
 EFFORT="${CODEX_EFFORT:-medium}"; MODEL="${CODEX_MODEL:-gpt-6.2-sol}"
 ARGS=(-s workspace-write -c 'sandbox_workspace_write.network_access=false' -c "model_reasoning_effort=\"$EFFORT\"" -m "$MODEL" --json)
 
+# A fresh worktree has no node_modules and the worker has no network. Give it the main tree's third-party
+# modules by absolute symlink, and recreate workspace links (e.g. @aichattg/telegram-core -> ../../../../packages/
+# telegram-core) as the same RELATIVE links, so the worktree's tests import the worktree's own packages, not main's.
+link_deps() {
+  local nm rel entry name sub
+  while IFS= read -r nm; do
+    rel="${nm#"$REPO"/}"; mkdir -p "$DIR/$rel"
+    for entry in "$nm"/* "$nm"/.bin; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      name="$(basename "$entry")"
+      if [ -L "$entry" ]; then cp -P "$entry" "$DIR/$rel/$name"
+      elif [[ "$name" == @* ]]; then
+        mkdir -p "$DIR/$rel/$name"
+        for sub in "$entry"/*; do
+          [ -e "$sub" ] || [ -L "$sub" ] || continue
+          if [ -L "$sub" ]; then cp -P "$sub" "$DIR/$rel/$name/$(basename "$sub")"
+          else ln -s "$sub" "$DIR/$rel/$name/$(basename "$sub")"; fi
+        done
+      else ln -s "$entry" "$DIR/$rel/$name"; fi
+    done
+  done < <(find "$REPO" -maxdepth 3 -name node_modules -type d -not -path '*/node_modules/*' -not -path "$REPO/.claude/*" -not -path "$REPO/output/*")
+}
+
 case "$MODE" in
   report)
     DIR="$REPO/output/codex/$TASK"; mkdir -p "$DIR"; LOG="$DIR"
@@ -30,6 +53,7 @@ case "$MODE" in
     if [ ! -d "$DIR" ]; then
       mkdir -p "$WT_ROOT"
       git -C "$REPO" worktree add -b "$BRANCH" "$DIR" HEAD >&2
+      link_deps
     fi
     LOG="$REPO/output/codex/$TASK"; mkdir -p "$LOG"
     # The sandbox keeps git metadata read-only, so the worker cannot commit (measured 2026-11-20, also with
