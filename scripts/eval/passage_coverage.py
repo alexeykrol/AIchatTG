@@ -96,8 +96,9 @@ def load_cases(path, by_unit):
             raise ValueError(f"{location}: expected a nonempty case id")
         if case_id in cases:
             raise ValueError(f"{location}: duplicate case id {case_id}")
-        if (not isinstance(kind, str) or kind not in KINDS
-                or not isinstance(supports, list) or len(supports) != KINDS[kind]):
+        # An answerable question may need two records (held-out set); the other kinds are exact.
+        if (not isinstance(kind, str) or kind not in KINDS or not isinstance(supports, list)
+                or not (len(supports) == KINDS[kind] or (kind == "answerable" and len(supports) == 2))):
             raise ValueError(f"{location}: invalid kind or support count for case {case_id}")
         located = []
         for support in supports:

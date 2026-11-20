@@ -1,0 +1,252 @@
+[
+ {
+  "q": "H001",
+  "case_id": "held-ans-001",
+  "kind": "answerable"
+ },
+ {
+  "q": "H002",
+  "case_id": "held-ans-002",
+  "kind": "answerable"
+ },
+ {
+  "q": "H003",
+  "case_id": "held-ans-003",
+  "kind": "answerable"
+ },
+ {
+  "q": "H004",
+  "case_id": "held-ans-004",
+  "kind": "answerable"
+ },
+ {
+  "q": "H005",
+  "case_id": "held-ans-005",
+  "kind": "answerable"
+ },
+ {
+  "q": "H006",
+  "case_id": "held-ans-006",
+  "kind": "answerable"
+ },
+ {
+  "q": "H007",
+  "case_id": "held-ans-007",
+  "kind": "answerable"
+ },
+ {
+  "q": "H008",
+  "case_id": "held-ans-008",
+  "kind": "answerable"
+ },
+ {
+  "q": "H009",
+  "case_id": "held-ans-009",
+  "kind": "answerable"
+ },
+ {
+  "q": "H010",
+  "case_id": "held-ans-010",
+  "kind": "answerable"
+ },
+ {
+  "q": "H011",
+  "case_id": "held-ans-011",
+  "kind": "answerable"
+ },
+ {
+  "q": "H012",
+  "case_id": "held-ans-012",
+  "kind": "answerable"
+ },
+ {
+  "q": "H013",
+  "case_id": "held-ans-013",
+  "kind": "answerable"
+ },
+ {
+  "q": "H014",
+  "case_id": "held-ans-014",
+  "kind": "answerable"
+ },
+ {
+  "q": "H015",
+  "case_id": "held-ans-015",
+  "kind": "answerable"
+ },
+ {
+  "q": "H016",
+  "case_id": "held-ans-016",
+  "kind": "answerable"
+ },
+ {
+  "q": "H017",
+  "case_id": "held-ans-017",
+  "kind": "answerable"
+ },
+ {
+  "q": "H018",
+  "case_id": "held-ans-018",
+  "kind": "answerable"
+ },
+ {
+  "q": "H019",
+  "case_id": "held-ans-019",
+  "kind": "answerable"
+ },
+ {
+  "q": "H020",
+  "case_id": "held-ans-020",
+  "kind": "answerable"
+ },
+ {
+  "q": "H021",
+  "case_id": "held-ans-021",
+  "kind": "answerable"
+ },
+ {
+  "q": "H022",
+  "case_id": "held-ans-022",
+  "kind": "answerable"
+ },
+ {
+  "q": "H023",
+  "case_id": "held-ans-023",
+  "kind": "answerable"
+ },
+ {
+  "q": "H024",
+  "case_id": "held-ans-024",
+  "kind": "answerable"
+ },
+ {
+  "q": "H025",
+  "case_id": "held-ans-025",
+  "kind": "answerable"
+ },
+ {
+  "q": "H026",
+  "case_id": "held-ans-026",
+  "kind": "answerable"
+ },
+ {
+  "q": "H027",
+  "case_id": "held-ans-027",
+  "kind": "answerable"
+ },
+ {
+  "q": "H028",
+  "case_id": "held-ans-028",
+  "kind": "answerable"
+ },
+ {
+  "q": "H029",
+  "case_id": "held-ans-029",
+  "kind": "answerable"
+ },
+ {
+  "q": "H030",
+  "case_id": "held-ans-030",
+  "kind": "answerable"
+ },
+ {
+  "q": "H031",
+  "case_id": "held-con-001",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H032",
+  "case_id": "held-con-002",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H033",
+  "case_id": "held-con-003",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H034",
+  "case_id": "held-con-004",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H035",
+  "case_id": "held-con-005",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H036",
+  "case_id": "held-con-006",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H037",
+  "case_id": "held-con-007",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H038",
+  "case_id": "held-con-008",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H039",
+  "case_id": "held-con-009",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H040",
+  "case_id": "held-con-010",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H041",
+  "case_id": "held-con-011",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H042",
+  "case_id": "held-con-012",
+  "kind": "conflicting"
+ },
+ {
+  "q": "H043",
+  "case_id": "held-una-001",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H044",
+  "case_id": "held-una-002",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H045",
+  "case_id": "held-una-003",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H046",
+  "case_id": "held-una-004",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H047",
+  "case_id": "held-una-005",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H048",
+  "case_id": "held-una-006",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H049",
+  "case_id": "held-una-007",
+  "kind": "unanswerable"
+ },
+ {
+  "q": "H050",
+  "case_id": "held-una-008",
+  "kind": "unanswerable"
+ }
+]

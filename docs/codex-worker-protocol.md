@@ -50,7 +50,7 @@ with the Codex sandbox (`workspace-write`: writes only inside the task directory
 7. **Read-only outside your write area.** Other projects (`~/Code/agi`, `~/Code/agi2claude`,
    `~/Code/allcourses`, `~/Code/Доноры`, `~/Code/BestMentor_Plugin`) are read-only reference.
 8. **Evaluation hygiene.** A task that builds or enriches a knowledge base must not read the test
-   questions or their reference answers (`~/Code/agi2claude/evals/`, `output/eval/runs/`,
+   questions or their reference answers (`~/Code/agi2claude/evals/`, `scripts/eval/heldout/`, `output/eval/runs/`,
    `output/eval/judge*`), unless the charter says the task is about them.
 9. **Evidence, not optimism.** Report every check as exactly one of `passed`, `failed`, `not_run`,
    `inconclusive`, with the command and exit status. Run a check at most three times, and retry
