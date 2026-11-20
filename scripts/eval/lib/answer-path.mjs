@@ -57,7 +57,7 @@ export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
   rewriteQuestion = null, rewriteOnNoSignal = false,
-  noConceptGate,
+  noConceptGate, coverageText,
   // runtime.mjs: config.assistantNeverRefuse (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE), default true.
   neverRefuse = true,
 }) {
@@ -65,7 +65,7 @@ export function createOfflineAssistant({
   if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
   const retrieval = createKnowledgeRetrieval(
     { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true,
-      noConceptGate,
+      noConceptGate, coverageText,
       ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}) },
     { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );

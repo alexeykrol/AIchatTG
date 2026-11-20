@@ -19,7 +19,7 @@
  *   --price-input / --price-output (USD per MTok; required for a model without a published price here),
  *   --already-spent-usd (money of the same tranche spent before this run).
  *
- * Experiment levers (mock / live only; each off by default, so a run without them is the baseline):
+ * Experiment levers (defaults reproduce the baseline):
  *   --rewrite <model>          production query rewrite (input-layer step 5, off in production) switched on:
  *                              `createRewriterAdapter` -> `createKnowledgeRetrieval({ rewriteEnabled: true })`,
  *                              exactly as server.mjs wires it, its transport through the same Anthropic shim and
@@ -31,6 +31,8 @@
  *                              defaults 12 / 6000). Recorded in manifest.retrieval.
  *   --no-concept-gate refuse|pass  skip the no-concept coverage gate in pass mode (default refuse).
  *                              Recorded in manifest.retrieval; answers.jsonl flags context gained by the bypass.
+ *   --coverage-text content|content+alias  include search aliases in coverage (default content; all modes).
+ *                              Recorded as manifest.retrieval.coverage_text.
  *   --rewrite-no-signal        (only with --rewrite) passes `rewriteOnNoSignal: true` to createKnowledgeRetrieval:
  *                              no-signal questions may be rewritten too (still only when the free local search is
  *                              weak). Off in production; recorded in manifest.retrieval and manifest.rewrite.
@@ -71,7 +73,7 @@ export function parseArgs(argv) {
     anthropicVersion: DEFAULT_ANTHROPIC_VERSION, keyEnv: null, capUsd: null, priceInput: null, priceOutput: null,
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
     rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
-    maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse',
+    maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse', coverageText: 'content',
   };
   const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
@@ -82,6 +84,7 @@ export function parseArgs(argv) {
     '--rewrite': 'rewrite', '--rewrite-effort': 'rewriteEffort', '--rewrite-price-input': 'rewritePriceInput',
     '--rewrite-price-output': 'rewritePriceOutput', '--prompt-addendum': 'promptAddendum',
     '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens', '--no-concept-gate': 'noConceptGate',
+    '--coverage-text': 'coverageText',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
@@ -100,6 +103,7 @@ export function parseArgs(argv) {
   }
   if (!['retrieval', 'mock', 'live'].includes(a.mode)) throw new Error('--mode must be retrieval, mock or live');
   if (!['refuse', 'pass'].includes(a.noConceptGate)) throw new Error('--no-concept-gate must be refuse or pass');
+  if (!['content', 'content+alias'].includes(a.coverageText)) throw new Error('--coverage-text must be content or content+alias');
   if ((a.rewrite || a.promptAddendum) && a.mode === 'retrieval') {
     throw new Error('--rewrite and --prompt-addendum need --mode mock or live (they go through the spend guard)');
   }
@@ -271,6 +275,7 @@ async function main() {
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
     rewriteQuestion: stack?.rewriteQuestion ?? null,
     noConceptGate: args.noConceptGate,
+    coverageText: args.coverageText,
     ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}),
     ...(args.maxEntries != null ? { maxEntries: args.maxEntries } : {}),
     ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}) });
@@ -325,6 +330,7 @@ async function main() {
     retrieval: { maxEntries: args.maxEntries ?? RETRIEVAL_MAX_ENTRIES,
       maxContextTokens: args.maxContextTokens ?? RETRIEVAL_MAX_CONTEXT_TOKENS,
       no_concept_gate: args.noConceptGate,
+      coverage_text: args.coverageText,
       rewrite: Boolean(stack?.rewriteQuestion),
       rewrite_on_no_signal: Boolean(args.rewriteNoSignal) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,

@@ -178,6 +178,43 @@ test('An invalid noConceptGate value throws at construction', () => {
   }
 });
 
+test('Alias-only matches are demoted by default and selected with alias coverage', () => {
+  const source = {
+    ...chunk('lesson:1:a:001', 'Описание исходного материала.'),
+    search_alias: 'ЧУГУННАЯ СКОВОРОДА',
+  };
+  const question = 'чугунная сковорода';
+  const retrieve = (options) => {
+    const retriever = createRetrieverAdapter(
+      { databasePath: '/ai.db', noConceptGate: 'pass', ...options },
+      { openDatabase: () => fakeDatabase({ chunks: [source] }) },
+    );
+    return retriever.forQuestion({ question }).pack;
+  };
+
+  for (const options of [{}, { coverageText: 'content' }]) {
+    const pack = retrieve(options);
+    assert.equal(pack.retrieval_trace.fts_path_candidates, 1);
+    assert.equal(pack.retrieval_trace.reranking.title_only_demoted, 1);
+    assert.equal(pack.status, 'not_found');
+    assert.deepEqual(pack.entries, []);
+  }
+
+  const pack = retrieve({ coverageText: 'content+alias' });
+  assert.equal(pack.retrieval_trace.reranking.title_only_demoted, 0);
+  assert.equal(pack.status, 'ready');
+  assert.deepEqual(pack.entries, [{ id: source.chunk_id, content: source.content }]);
+  assert.equal(pack.token_budget.used, source.token_count);
+});
+
+test('An invalid coverageText value throws at construction', () => {
+  for (const coverageText of ['alias', null, true]) {
+    assert.throws(() => createRetrieverAdapter({ coverageText }), {
+      name: 'TypeError', message: 'coverageText must be content or content+alias',
+    });
+  }
+});
+
 test('A grounded question returns a contract pack with entries, trace and capped scores', () => {
   const body = 'ии-агент это программа которая сама решает задачи ии-агент работает циклом';
   const db = fakeDatabase({

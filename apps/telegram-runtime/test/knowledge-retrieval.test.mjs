@@ -156,6 +156,22 @@ test('a no-signal question the corpus can serve is answered, not refused', async
   assert.equal(served.trace.domain, 'domain_no_signal');
 });
 
+test('The knowledge layer forwards an explicit coverage mode to the adapter', () => {
+  const knowledge = admittedKnowledge();
+  const { adapter } = fakeRetriever();
+  const received = [];
+  const buildRetriever = (options) => {
+    received.push(options);
+    return adapter;
+  };
+  for (const options of [{}, { coverageText: 'content' }, { coverageText: 'content+alias' }]) {
+    createKnowledgeRetrieval(options, { knowledge, buildRetriever }).close();
+  }
+  assert.equal(Object.hasOwn(received[0], 'coverageText'), false);
+  assert.equal(received[1].coverageText, 'content');
+  assert.equal(received[2].coverageText, 'content+alias');
+});
+
 test('Pass mode grounds a no-signal question through the admitted SQLite package', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aichattg-retrieval-gate-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

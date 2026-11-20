@@ -50,6 +50,7 @@ export function createKnowledgeRetrieval(
     // server.mjs passes `config.assistantRetrieval` through unchanged.
     rewriteOnNoSignal = false,
     noConceptGate,
+    coverageText,
     validatePacks = true,
   } = {},
   {
@@ -81,6 +82,7 @@ export function createKnowledgeRetrieval(
       rewriteEnabled,
       validatePacks,
       ...(noConceptGate !== undefined ? { noConceptGate } : {}),
+      ...(coverageText !== undefined ? { coverageText } : {}),
     },
     rewriteQuestion ? { rewriteQuestion } : {},
   );

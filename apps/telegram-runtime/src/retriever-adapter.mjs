@@ -93,6 +93,7 @@ export function createRetrieverAdapter(
     domainId = DEFAULT_DOMAIN_ID,
     rewriteEnabled = false,
     noConceptGate = 'refuse',
+    coverageText = 'content',
     // The directory holding the package's own `contracts/*.schema.json`. When
     // absent the schemas are looked up beside the database, which is where a
     // v2 package puts them.
@@ -117,6 +118,11 @@ export function createRetrieverAdapter(
   if (noConceptGate !== 'refuse' && noConceptGate !== 'pass') {
     throw new TypeError('noConceptGate must be refuse or pass');
   }
+  if (coverageText !== 'content' && coverageText !== 'content+alias') {
+    throw new TypeError('coverageText must be content or content+alias');
+  }
+  const includeAlias = coverageText === 'content+alias';
+  const chunkColumns = SQL_CHUNK_COLUMNS + (includeAlias ? ', c.search_alias' : '');
   let db = null;
   let openReason = null;
   try {
@@ -191,7 +197,7 @@ export function createRetrieverAdapter(
         df: db.prepare(
           'SELECT COUNT(*) n FROM chunks_fts WHERE search_text MATCH ?'),
         fts: db.prepare(
-          `SELECT ${SQL_CHUNK_COLUMNS}
+          `SELECT ${chunkColumns}
              FROM chunks_fts f
              JOIN chunks c ON c.chunk_id = f.chunk_id
              JOIN units u ON u.unit_id = c.unit_id
@@ -209,7 +215,7 @@ export function createRetrieverAdapter(
               AND u.state = 'canonical' AND d.domain_id = ?
             ORDER BY bm25(docs_fts) LIMIT ?`),
         docPull: db.prepare(
-          `SELECT ${SQL_CHUNK_COLUMNS}
+          `SELECT ${chunkColumns}
              FROM chunks_fts f
              JOIN chunks c ON c.chunk_id = f.chunk_id
             WHERE chunks_fts MATCH ? AND c.unit_id = ?
@@ -288,8 +294,7 @@ export function createRetrieverAdapter(
                      ORDER BY hits.rank_score, hits.chunk_id
                  ) AS rn
           FROM (
-              SELECT c.chunk_id, c.unit_id, c.content, c.token_count,
-                     c.section_path, c.ord, c.overlap_prev, c.content_sha256,
+              SELECT ${chunkColumns},
                      c.search_text, bm25(chunks_fts) AS rank_score
               FROM chunks_fts f
               JOIN chunks c ON c.chunk_id = f.chunk_id
@@ -300,6 +305,12 @@ export function createRetrieverAdapter(
         WHERE rn <= ?
         ORDER BY rank_score, chunk_id LIMIT ?`)
       .all(phrase, ...unitIds, ENTITY_PER_UNIT, ENTITY_LIMIT);
+  }
+
+  function candidateFromRow(row) {
+    const cand = createCandidate(row);
+    if (includeAlias) cand.searchAlias = row.search_alias;
+    return cand;
   }
 
   function runQuery(question, tail, domain, budget, maxEntries) {
@@ -325,7 +336,10 @@ export function createRetrieverAdapter(
     const bodyCache = new Map();
     const body = (cand) => {
       if (!bodyCache.has(cand.chunkId)) {
-        bodyCache.set(cand.chunkId, normalizeText(cand.content));
+        const content = normalizeText(cand.content);
+        const alias = includeAlias ? normalizeText(cand.searchAlias) : '';
+        // Preserve the boundary between the source passage and its enrichment.
+        bodyCache.set(cand.chunkId, alias ? `${content}\n${alias}` : content);
       }
       return bodyCache.get(cand.chunkId);
     };
@@ -335,7 +349,7 @@ export function createRetrieverAdapter(
       const rows = statements.fts.all(expr, domain, FTS_LIMIT);
       run.ftsCandidates = rows.length;
       rows.forEach((row, rank) => {
-        const cand = createCandidate(row);
+        const cand = candidateFromRow(row);
         cand.ftsRank = rank;
         cand.bm25Norm = (FTS_LIMIT - rank) / FTS_LIMIT;
         pool.set(cand.chunkId, cand);
@@ -354,7 +368,7 @@ export function createRetrieverAdapter(
           return;
         }
         for (const row of statements.docPull.all(expr, docRow.unit_id)) {
-          const cand = createCandidate(row);
+          const cand = candidateFromRow(row);
           cand.docRank = docRank;
           cand.docBonus = DOC_PULL_BASE * weight;
           if (!pool.has(cand.chunkId)) pool.set(cand.chunkId, cand);
@@ -386,7 +400,7 @@ export function createRetrieverAdapter(
       const inflRe = inflectedFormRegExp(norm);
 
       for (const row of entityRows(phrase, unitIds)) {
-        const cand = pool.get(row.chunk_id) || createCandidate(row);
+        const cand = pool.get(row.chunk_id) || candidateFromRow(row);
         if (!inflRe.test(body(cand))) {
           // The form is absent from the body. If it lives in the base
           // search_text it is a title-only pseudo hit and not entity evidence;
