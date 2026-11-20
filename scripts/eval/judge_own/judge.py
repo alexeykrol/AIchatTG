@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import sqlite3
 import sys
 import threading
 import time
@@ -44,6 +45,7 @@ DONOR = Path.home() / "Code" / "agi2claude"
 DEFAULT_CASES = DONOR / "evals" / "golden" / "cases.jsonl"
 DEFAULT_ID_MAP = DONOR / "evals" / "baseline" / "id_map.json"
 RUBRIC = HERE / "rubric.md"
+DEFAULT_BUILD = REPO / "output" / "eval" / "tcr-book-v4" / "build.json"
 KNOWN = HERE / "known-bad.jsonl"
 SPEND_GUARD_JS = REPO / "scripts" / "eval" / "lib" / "spend-guard.mjs"
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -177,13 +179,29 @@ def estimate_tokens(text: str) -> int:
 
 def mock_transport(verdict_fn=None):
     """$0 transport. verdict_fn(request) -> verdict dict; default is a LENIENT judge that passes everything,
-    so `--calibrate --mock` must fail: it proves the calibration gate catches a judge that cannot say no."""
+    so `--calibrate --mock` must fail: it proves the calibration gate catches a judge that cannot say no.
+
+    Usage imitates prompt caching: the system prefix up to the block with cache_control is written to the cache on
+    the first call of a model and read on the following ones; the rest is plain input."""
+    seen: set[tuple[str, str]] = set()
+    lock = threading.Lock()
+
     def send(request: dict):
-        verdict = (verdict_fn or (lambda _r: {"pass": True, "correct": True, "failures": [], "reason": "mock"}))(request)
-        system = request["system"][0]["text"] if isinstance(request["system"], list) else request["system"]
+        verdict = (verdict_fn or (lambda _r: {"pass": True, "correct": True, "failures": [], "book_chunks": [],
+                                               "reason": "mock"}))(request)
+        blocks = request["system"] if isinstance(request["system"], list) else [{"type": "text",
+                                                                                   "text": request["system"]}]
+        cut = max((i for i, b in enumerate(blocks) if b.get("cache_control")), default=-1)
+        cached = "".join(b["text"] for b in blocks[:cut + 1])
+        plain = "".join(b["text"] for b in blocks[cut + 1:]) + request["messages"][0]["content"]
+        key = (request["model"], hashlib.sha256(cached.encode()).hexdigest())
+        with lock:
+            hit = key in seen
+            seen.add(key)
         text = json.dumps(verdict, ensure_ascii=False)
-        usage = {"input_tokens": estimate_tokens(system) + estimate_tokens(request["messages"][0]["content"]),
-                 "output_tokens": estimate_tokens(text)}
+        usage = {"input_tokens": estimate_tokens(plain), "output_tokens": estimate_tokens(text),
+                 "cache_creation_input_tokens": 0 if (hit or not cached) else estimate_tokens(cached),
+                 "cache_read_input_tokens": estimate_tokens(cached) if (hit and cached) else 0}
         return 200, {"model": request["model"], "stop_reason": "end_turn", "usage": usage,
                      "content": [{"type": "text", "text": text}]}
     return send
@@ -236,21 +254,143 @@ def join(answers: list[dict], cases: dict[str, dict], id_map: list[dict]) -> tup
             item["status"] = "question_mismatch"
         else:
             item["answer"] = a.get("answer") or ""
+            item["chunk_ids"] = parse_id_list(a.get("chunk_ids"))
+            item["unit_ids"] = parse_id_list(a.get("unit_ids"))
         items.append(item)
     return items, problems
 
 
-def user_message(item: dict) -> str:
+def parse_id_list(v) -> list[str]:
+    """chunk_ids / unit_ids as written by ask-offline (a JSON list; tolerate a JSON or Python-repr string)."""
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    s = str(v).strip()
+    try:
+        return [str(x) for x in json.loads(s)]
+    except json.JSONDecodeError:
+        return re.findall(r"'([^']+)'", s)
+
+
+# ---------------------------------------------------------------- the book (the package, read-only)
+
+GAP_CLASSES = ("in_base_found", "in_base_missed", "not_in_base")
+
+
+def resolve_package(arg: Path | None) -> Path:
+    """--package as a package dir or an ai.db file; default: `database` of output/eval/tcr-book-v4/build.json."""
+    if arg is None:
+        build = json.loads(DEFAULT_BUILD.read_text("utf-8"))
+        arg = Path(build["database"])
+    arg = Path(arg).expanduser()
+    db = arg / "ai.db" if arg.is_dir() else arg
+    if not db.is_file():
+        raise FileNotFoundError(f"package database not found: {db}")
+    return db.resolve()
+
+
+def _order_key(order_path: str | None, unit_id: str):
+    try:
+        return (json.loads(order_path or "[]"), unit_id)
+    except json.JSONDecodeError:
+        return ([], unit_id)
+
+
+class Book:
+    """The whole knowledge base as one static text block, plus a chunk index for the gap bookkeeping.
+
+    Every record is headed `=== RECORD <unit_id> — <title> ===`, every chunk `[chunk <chunk_id>] <section>`, so the
+    judge can name the exact places that hold an answer; code maps them back to records."""
+
+    def __init__(self, db: Path):
+        self.db = db
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            units = sorted(con.execute("SELECT unit_id, order_path, title FROM units").fetchall(),
+                           key=lambda u: _order_key(u["order_path"], u["unit_id"]))
+            self.chunks: dict[str, dict] = {}
+            self.unit_titles: dict[str, str] = {}
+            parts = []
+            for u in units:
+                self.unit_titles[u["unit_id"]] = u["title"]
+                parts.append(f"=== RECORD {u['unit_id']} — {u['title']} ===")
+                for c in con.execute("SELECT chunk_id, section_path, content FROM chunks WHERE unit_id = ? "
+                                     "ORDER BY ord", (u["unit_id"],)):
+                    self.chunks[c["chunk_id"]] = {"unit_id": u["unit_id"], "title": u["title"],
+                                                  "section": c["section_path"] or ""}
+                    parts.append(f"[chunk {c['chunk_id']}]" + (f" {c['section_path']}" if c["section_path"] else "")
+                                 + f"\n{c['content'].strip()}")
+                parts.append("")
+        finally:
+            con.close()
+        self.text = ("THE BOOK — the complete knowledge base («Теория каст и ролей»), "
+                     f"{len(self.unit_titles)} records:\n\n" + "\n\n".join(parts).strip() + "\n")
+
+    def material_list(self, item: dict) -> str:
+        """What the assistant had: ids and short titles only (the content is in the book block)."""
+        chunk_ids = item.get("chunk_ids") or []
+        if chunk_ids:
+            lines = []
+            for cid in chunk_ids:
+                c = self.chunks.get(cid)
+                lines.append(f"- {cid} — {c['title']}" + (f" / {c['section']}" if c and c["section"] else "")
+                             if c else f"- {cid} — (not in the book index)")
+            return "\n".join(lines)
+        unit_ids = item.get("unit_ids") or []
+        if unit_ids:
+            return "\n".join(f"- record {u} — {self.unit_titles.get(u, '(unknown)')}" for u in unit_ids)
+        return "(none)"
+
+    def classify_gap(self, cited: list[str], item: dict) -> dict:
+        """Code-side bookkeeping: where the answer is in the book vs what the assistant had.
+
+        `cited` are the chunk (or record) ids the judge named as containing the answer. Unknown ids are dropped.
+        Assistant coverage is compared at chunk level when the answer row carries chunk ids, else at record level."""
+        chunks, units, unknown = [], [], []
+        for x in cited:
+            if x in self.chunks:
+                chunks.append(x)
+                units.append(self.chunks[x]["unit_id"])
+            elif x in self.unit_titles:
+                units.append(x)
+            else:
+                unknown.append(x)
+        chunks, units = sorted(set(chunks)), sorted(set(units))
+        had_chunks = set(item.get("chunk_ids") or [])
+        had_units = set(item.get("unit_ids") or []) | {self.chunks[c]["unit_id"] for c in had_chunks
+                                                         if c in self.chunks}
+        if not units:
+            cls = "not_in_base"
+        elif had_chunks:
+            # a record-level citation counts as found only if the assistant had some chunk of that record
+            hit = any(c in had_chunks for c in chunks) or any(
+                u in had_units for u in units if not any(self.chunks[c]["unit_id"] == u for c in chunks))
+            cls = "in_base_found" if hit else "in_base_missed"
+        else:
+            cls = "in_base_found" if any(u in had_units for u in units) else "in_base_missed"
+        return {"gap_class": cls, "gap_records": units, "gap_chunks": chunks, "gap_unknown_ids": unknown}
+
+
+def user_message(item: dict, book: Book | None = None) -> str:
     quotes = "\n".join(f"- [{s.get('unit_id', '?')}] «{s.get('quote', '')}»" for s in item["support"]) or "(none)"
+    had = book.material_list(item) if book else "(not supplied)"
     return (f"Case kind: {item['kind']}\n\nQuestion:\n{item['question']}\n\nReference (what a good answer contains, "
             f"from the book):\n{item['reference']}\n\nSupporting book quotes:\n{quotes}\n\n"
+            f"Material the assistant had when answering (ids and titles only; the text is in THE BOOK):\n{had}\n\n"
             f"<reply>\n{item['answer']}\n</reply>\n\nReturn the JSON object only.")
 
 
-def build_request(rubric: str, item: dict, model: str) -> dict:
-    return {"model": model, "max_tokens": MAX_TOKENS,
-            "system": [{"type": "text", "text": rubric, "cache_control": {"type": "ephemeral"}}],
-            "messages": [{"role": "user", "content": user_message(item)}]}
+def build_request(rubric: str, item: dict, model: str, book: Book | None = None) -> dict:
+    """Static prefix (rubric, then the whole book) is cached; everything per question is in the user message."""
+    if book:
+        system = [{"type": "text", "text": rubric},
+                  {"type": "text", "text": book.text, "cache_control": {"type": "ephemeral"}}]
+    else:
+        system = [{"type": "text", "text": rubric, "cache_control": {"type": "ephemeral"}}]
+    return {"model": model, "max_tokens": MAX_TOKENS, "system": system,
+            "messages": [{"role": "user", "content": user_message(item, book)}]}
 
 
 def normalize_code(c) -> str | None:
@@ -259,7 +399,7 @@ def normalize_code(c) -> str | None:
 
 
 def parse_verdict(text: str) -> dict:
-    """Strict: one JSON object with pass/correct booleans, failures from the closed list, reason string."""
+    """Strict: pass/correct booleans, failures from the closed list, book_chunks a list of ids, reason string."""
     m = re.search(r"\{.*\}", text or "", re.S)
     if not m:
         raise ValueError("no JSON object in judge output")
@@ -271,8 +411,11 @@ def parse_verdict(text: str) -> dict:
     codes = [normalize_code(c) for c in v["failures"]]
     if any(c is None for c in codes):
         raise ValueError(f"unknown failure code in {v['failures']}")
+    cited = v.get("book_chunks", [])
+    if not isinstance(cited, list) or not all(isinstance(x, str) for x in cited):
+        raise ValueError("book_chunks must be a list of id strings")
     return {"model_pass": v["pass"], "correct": v["correct"], "failures": sorted(set(codes)),
-            "reason": str(v.get("reason", ""))}
+            "book_chunks": cited, "reason": str(v.get("reason", ""))}
 
 
 # ---------------------------------------------------------------- judging
@@ -304,15 +447,17 @@ def call_judge(send, guard: SpendGuard, request: dict, price: dict, tag: str, sl
             v = parse_verdict(text)
         except (ValueError, json.JSONDecodeError) as e:
             return {"status": "judge_error", "error": f"parse: {e}", "raw": text[:500], "cost_usd": cost,
-                    "usage": usage}
+                    "usage": usage, "stop_reason": body.get("stop_reason")}
         v["pass"] = v["correct"] and not v["failures"]  # code decides pass from the parts
         return {"status": "judged", **v, "cost_usd": cost, "usage": usage, "model": body.get("model")}
     return {"status": "judge_error", "error": f"retries exhausted ({last})", "cost_usd": 0.0}
 
 
 def judge_items(items: list[dict], send, guard: SpendGuard, rubric: str, model: str, prices: dict,
-                workers: int = 4, sleep=time.sleep) -> tuple[list[dict], str | None]:
-    """Judge every pending item; returns (results in item order, stop reason or None)."""
+                workers: int = 2, sleep=time.sleep, book: Book | None = None) -> tuple[list[dict], str | None]:
+    """Judge every pending item; returns (results in item order, stop reason or None).
+
+    The first pending item runs alone so the cached prefix (rubric + book) is written once; the rest then read it."""
     price = prices[model]
     results: list[dict | None] = [None] * len(items)
     stop: dict = {}
@@ -327,7 +472,7 @@ def judge_items(items: list[dict], send, guard: SpendGuard, rubric: str, model: 
             results[i] = {**base, "status": "not_judged", "pass": False, "error": stop["reason"]}
             return
         try:
-            res = call_judge(send, guard, build_request(rubric, it, model), price, f"{it['q']}:{model}", sleep)
+            res = call_judge(send, guard, build_request(rubric, it, model, book), price, f"{it['q']}:{model}", sleep)
         except SpendCapReached as e:
             stop.setdefault("reason", f"spend cap: {e}")
             res = {"status": "not_judged", "error": "spend cap reached"}
@@ -335,39 +480,62 @@ def judge_items(items: list[dict], send, guard: SpendGuard, rubric: str, model: 
             stop.setdefault("reason", f"auth error (not retried): {e}")
             res = {"status": "not_judged", "error": str(e)}
         res.setdefault("pass", False)
+        if res["status"] == "judged" and book:
+            res.update(book.classify_gap(res["book_chunks"], it))
         results[i] = {**base, "judge_model": model, **res}
 
+    pending = [i for i, it in enumerate(items) if it["status"] == "pending"]
+    first = pending[:1]
+    for i in first:
+        one(i)
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        list(ex.map(one, range(len(items))))
+        list(ex.map(one, [i for i in range(len(items)) if i not in first]))
     return [r for r in results if r is not None], stop.get("reason")
 
 
-def audit(items: list[dict], main: list[dict], send, guard, rubric, model, prices, every: int, workers, sleep):
-    """Re-judge every `every`-th judged case with a second model; agreement on pass and on the failure set."""
+def audit(items, main, send, guard, rubric, model, prices, every: int, workers, sleep, book=None):
+    """Re-judge every `every`-th judged case with a second model; agreement on pass, failure set and gap class."""
     if every <= 0:
         return [], None
     pick = [i for i in range(0, len(items), every) if main[i]["status"] == "judged"]
     sub = [items[i] for i in pick]
-    res, stop = judge_items(sub, send, guard, rubric, model, prices, workers, sleep)
+    res, stop = judge_items(sub, send, guard, rubric, model, prices, workers, sleep, book)
     rows = []
     for i, r in zip(pick, res):
         m = main[i]
+        ok = r["status"] == "judged"
         rows.append({"q": m["q"], "case_id": m["case_id"], "kind": m["kind"], "main_pass": m["pass"],
-                     "main_failures": m.get("failures"), "audit_status": r["status"], "audit_pass": r.get("pass"),
-                     "audit_failures": r.get("failures"), "audit_reason": r.get("reason"),
-                     "agree_pass": r["status"] == "judged" and r["pass"] == m["pass"],
-                     "agree_failures": r["status"] == "judged" and r.get("failures") == m.get("failures"),
+                     "main_failures": m.get("failures"), "main_gap": m.get("gap_class"),
+                     "audit_status": r["status"], "audit_pass": r.get("pass"), "audit_failures": r.get("failures"),
+                     "audit_gap": r.get("gap_class"), "audit_reason": r.get("reason"),
+                     "agree_pass": ok and r["pass"] == m["pass"],
+                     "agree_failures": ok and r.get("failures") == m.get("failures"),
+                     "agree_gap": ok and r.get("gap_class") == m.get("gap_class"),
                      "cost_usd": r.get("cost_usd", 0.0)})
     return rows, stop
 
 
 # ---------------------------------------------------------------- reporting
 
+def cache_stats(guard: SpendGuard) -> dict:
+    out = {"calls": 0, "input": 0, "cache_write": 0, "cache_read": 0, "output": 0}
+    for j in guard.journal:
+        u = j.get("usage") or {}
+        if j.get("event") != "call":
+            continue
+        out["calls"] += 1
+        out["input"] += u.get("input_tokens") or 0
+        out["cache_write"] += u.get("cache_creation_input_tokens") or 0
+        out["cache_read"] += u.get("cache_read_input_tokens") or 0
+        out["output"] += u.get("output_tokens") or 0
+    return out
+
+
 def summarize(results: list[dict], audit_rows: list[dict], guard: SpendGuard, meta: dict) -> str:
     lines = [f"# Own judge — {meta['title']}", "",
              f"- answers: `{meta.get('answers')}`", f"- judge: `{meta['model']}`, audit: `{meta.get('audit_model')}` "
              f"every {meta.get('audit_every')}th", f"- rubric sha256: `{meta['rubric_sha256'][:12]}`",
-             f"- mock: {meta['mock']}", ""]
+             f"- book: `{meta.get('package_db')}`", f"- mock: {meta['mock']}", ""]
     lines += ["| Kind | Pass | Correct | Judged | Total |", "| --- | --- | --- | --- | --- |"]
     for kind in (*KINDS, None):
         rows = [r for r in results if kind is None or r["kind"] == kind]
@@ -380,6 +548,14 @@ def summarize(results: list[dict], audit_rows: list[dict], guard: SpendGuard, me
     for code in CODES:
         per = [sum(code in (r.get("failures") or []) for r in results if r["kind"] == k) for k in KINDS]
         lines.append(f"| {code} | " + " | ".join(map(str, per)) + f" | {sum(per)} |")
+    if any(r.get("gap_class") for r in results):
+        lines += ["", "| Gap class | " + " | ".join(KINDS) + " | all |", "| --- |" + " --- |" * (len(KINDS) + 1)]
+        for g in GAP_CLASSES:
+            per = [sum(r.get("gap_class") == g for r in results if r["kind"] == k) for k in KINDS]
+            lines.append(f"| {g} | " + " | ".join(map(str, per)) + f" | {sum(per)} |")
+        missed = [r["q"] for r in results if r.get("gap_class") == "in_base_missed"]
+        if missed:
+            lines += ["", "Retrieval defects (in_base_missed): " + ", ".join(missed)]
     other = {}
     for r in results:
         if r["status"] != "judged":
@@ -389,9 +565,13 @@ def summarize(results: list[dict], audit_rows: list[dict], guard: SpendGuard, me
     if audit_rows:
         ok = [a for a in audit_rows if a["audit_status"] == "judged"]
         lines += ["", f"Audit: pass agreement {sum(a['agree_pass'] for a in ok)}/{len(ok)}, "
-                      f"failure-set agreement {sum(a['agree_failures'] for a in ok)}/{len(ok)}"]
-    lines += ["", f"Spend this run: ${guard.spent_this_run():.4f}; tranche total ${guard.settled:.4f} of cap "
-                  f"${guard.cap:.2f}" + (f"; STOPPED: {meta['stop']}" if meta.get("stop") else "")]
+                      f"failure-set agreement {sum(a['agree_failures'] for a in ok)}/{len(ok)}, "
+                      f"gap-class agreement {sum(a['agree_gap'] for a in ok)}/{len(ok)}"]
+    cs = cache_stats(guard)
+    lines += ["", f"Tokens: input {cs['input']}, cache write {cs['cache_write']}, cache read {cs['cache_read']}, "
+                  f"output {cs['output']} over {cs['calls']} calls",
+              f"Spend this run: ${guard.spent_this_run():.4f}; tranche total ${guard.settled:.4f} of cap "
+              f"${guard.cap:.2f}" + (f"; STOPPED: {meta['stop']}" if meta.get("stop") else "")]
     return "\n".join(lines) + "\n"
 
 
@@ -402,7 +582,8 @@ def sha256(path: Path) -> str:
 # ---------------------------------------------------------------- calibration
 
 def check_calibration(entries: list[dict], results: list[dict]) -> list[str]:
-    """Every bad entry must fail with one of its expected codes; every good entry must pass."""
+    """Bad entries must fail with one of their expected codes; good ones must pass; `expect: any` checks only the
+    gap class; an `expect_gap` is checked on any entry that has it."""
     errors = []
     by_id = {r["id"]: r for r in results}
     for e in entries:
@@ -413,12 +594,15 @@ def check_calibration(entries: list[dict], results: list[dict]) -> list[str]:
         if e["expect"] == "pass":
             if not r["pass"]:
                 errors.append(f"{e['id']}: good answer failed {r.get('failures')} correct={r.get('correct')}")
-        else:
+        elif e["expect"] == "fail":
             want = {normalize_code(c) for c in e["expect_codes"]}
             if r["pass"]:
                 errors.append(f"{e['id']}: bad answer PASSED (expected {sorted(want)})")
             elif not want & set(r.get("failures") or []):
                 errors.append(f"{e['id']}: failed with {r.get('failures')} but expected one of {sorted(want)}")
+        if e.get("expect_gap") and r.get("gap_class") != e["expect_gap"]:
+            errors.append(f"{e['id']}: gap_class {r.get('gap_class')} (records {r.get('gap_records')}), "
+                          f"expected {e['expect_gap']}")
     return errors
 
 
@@ -428,7 +612,7 @@ def calibration_items(entries: list[dict], cases: dict[str, dict]) -> list[dict]
         c = cases[e["case_id"]]
         items.append({"q": e["id"], "case_id": c["id"], "kind": c["kind"], "question": c["question"],
                       "reference": c.get("expected", ""), "support": c.get("support") or [],
-                      "answer": e["answer"], "status": "pending"})
+                      "answer": e["answer"], "status": "pending", "chunk_ids": list(e.get("assistant_chunks") or [])})
     return items
 
 
@@ -446,10 +630,16 @@ def parse_args(argv):
     ap.add_argument("--cap-usd", type=float, required=True, help="tranche cap, USD")
     ap.add_argument("--already-spent-usd", type=float, default=0.0, help="money already spent in this tranche")
     ap.add_argument("--out", type=Path, default=None)
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--workers", type=int, default=2,
+                    help="parallel calls after the first (each reserves a ~$0.86/$1.72 ceiling)")
     ap.add_argument("--mock", action="store_true", help="$0 lenient mock transport")
     ap.add_argument("--calibrate", action="store_true", help="judge known-bad.jsonl; non-zero exit unless all hold")
     ap.add_argument("--known", type=Path, default=KNOWN)
+    ap.add_argument("--package", type=Path, default=None,
+                    help="knowledge package dir or ai.db (read-only); the judge gets the WHOLE book from it; "
+                         "default: database of output/eval/tcr-book-v4/build.json")
+    ap.add_argument("--no-book", action="store_true",
+                    help="no book for the judge (old behaviour; N1 then over-fires and no gap class)")
     return ap.parse_args(argv)
 
 
@@ -473,27 +663,37 @@ def main(argv=None, send=None, sleep=time.sleep) -> int:
     guard = SpendGuard(args.cap_usd, args.already_spent_usd, out / "journal.jsonl")
     rubric = RUBRIC.read_text("utf-8")
     cases = load_cases(args.cases)
+    book = None if args.no_book else Book(resolve_package(args.package))
     meta = {"model": args.model, "mock": args.mock, "rubric_sha256": sha256(RUBRIC),
-            "cases_sha256": sha256(args.cases), "created_at": stamp}
+            "cases_sha256": sha256(args.cases), "created_at": stamp,
+            "package_db": str(book.db) if book else None,
+            "package_db_sha256": sha256(book.db) if book else None,
+            "book_chars": len(book.text) if book else 0, "book_bytes": len(book.text.encode()) if book else 0}
 
     if args.calibrate:
         entries = read_jsonl(args.known)
         items = calibration_items(entries, cases)
-        results, stop = judge_items(items, send, guard, rubric, args.model, prices, args.workers, sleep)
+        results, stop = judge_items(items, send, guard, rubric, args.model, prices, args.workers, sleep, book)
         for r in results:
             r["id"] = r.pop("q")
         errors = check_calibration(entries, results)
         with (out / "results.jsonl").open("w", encoding="utf-8") as f:
             for e, r in zip(entries, results):
-                f.write(json.dumps({**r, "expect": e["expect"], "expect_codes": e.get("expect_codes", [])},
-                                   ensure_ascii=False) + "\n")
+                f.write(json.dumps({**r, "expect": e["expect"], "expect_codes": e.get("expect_codes", []),
+                                    "expect_gap": e.get("expect_gap")}, ensure_ascii=False) + "\n")
         report = [f"# Own judge calibration ({len(entries)} entries)" + (" — MOCK" if args.mock else ""), "",
-                  "| Id | Case | Expect | Got pass | Failures |", "| --- | --- | --- | --- | --- |"]
+                  "| Id | Case | Expect | Got pass | Failures | Gap |", "| --- | --- | --- | --- | --- | --- |"]
         for e, r in zip(entries, results):
-            exp = "pass" if e["expect"] == "pass" else "fail " + "/".join(e["expect_codes"])
-            report.append(f"| {e['id']} | {e['case_id']} | {exp} | {r.get('pass')} | {r.get('failures')} |")
-        report += ["", "Result: " + ("OK" if not errors else "FAILED"), *[f"- {x}" for x in errors],
-                   "", f"Spend: ${guard.spent_this_run():.4f} (tranche total ${guard.settled:.4f} of ${guard.cap:.2f})"
+            exp = {"pass": "pass", "any": "any"}.get(e["expect"]) or "fail " + "/".join(e["expect_codes"])
+            if e.get("expect_gap"):
+                exp += f", gap {e['expect_gap']}"
+            report.append(f"| {e['id']} | {e['case_id']} | {exp} | {r.get('pass')} | {r.get('failures')} | "
+                          f"{r.get('gap_class')} |")
+        cs = cache_stats(guard)
+        report += ["", "Result: " + ("OK" if not errors else "FAILED"), *[f"- {x}" for x in errors], "",
+                   f"Tokens: input {cs['input']}, cache write {cs['cache_write']}, cache read {cs['cache_read']}, "
+                   f"output {cs['output']}",
+                   f"Spend: ${guard.spent_this_run():.4f} (tranche total ${guard.settled:.4f} of ${guard.cap:.2f})"
                    + (f"; STOPPED: {stop}" if stop else "")]
         (out / "summary.md").write_text("\n".join(report) + "\n", encoding="utf-8")
         (out / "manifest.json").write_text(json.dumps({**meta, "known_sha256": sha256(args.known)}, indent=2) + "\n")
@@ -507,9 +707,14 @@ def main(argv=None, send=None, sleep=time.sleep) -> int:
     answers = read_jsonl(args.answers)
     id_map = json.loads(args.id_map.read_text("utf-8"))
     items, problems = join(answers, cases, id_map)
-    results, stop = judge_items(items, send, guard, rubric, args.model, prices, args.workers, sleep)
+    if book:
+        for it in items:
+            unknown = [c for c in it.get("chunk_ids") or [] if c not in book.chunks]
+            if unknown:
+                problems.append(f"{it['q']}: chunk ids not in the book: {unknown}")
+    results, stop = judge_items(items, send, guard, rubric, args.model, prices, args.workers, sleep, book)
     audit_rows, audit_stop = ([], None) if stop else audit(items, results, send, guard, rubric, args.audit_model,
-                                                          prices, args.audit_every, args.workers, sleep)
+                                                          prices, args.audit_every, args.workers, sleep, book)
     meta.update({"title": f"{len(items)} questions", "answers": str(args.answers),
                  "answers_sha256": sha256(args.answers), "audit_model": args.audit_model,
                  "audit_every": args.audit_every, "stop": stop or audit_stop, "join_problems": problems})
