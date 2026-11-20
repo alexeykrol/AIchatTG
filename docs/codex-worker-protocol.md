@@ -82,7 +82,11 @@ Status: passed | failed | not_run | inconclusive
 ## Rules for the integrator
 
 - One charter per task: goal, context, files to read, exact output paths, allowed changes, checks to
-  run, stop conditions. Without a charter the worker is not launched.
+  run, stop conditions. Without a charter the worker is not launched. The worker obeys stop
+  conditions literally (measured 2026-11-20: two stops on a missing file in the allowed list and on
+  a baseline number quoted for the wrong setting), so name only real blockers, list every file the
+  change can touch, and quote only numbers you verified together with their settings; for a
+  mismatch of an expected number prefer "report and continue".
 - Parallel workers only on tasks that do not write the same files; one writer per shared contract.
 - Nothing from a worker reaches `main` without review: read the diff and run the relevant tests
   (`npm test` for runtime code). Code mode: commit the named paths on the worker's branch
