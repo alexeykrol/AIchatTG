@@ -1,0 +1,54 @@
+{
+  "alias_fields": [
+    "title",
+    "gist",
+    "questions",
+    "phrasings"
+  ],
+  "counts": {
+    "atoms": 770,
+    "links": 0,
+    "passages": 220,
+    "records": 20,
+    "source_chunks": 60
+  },
+  "input_sha256": {
+    "/Users/alexeykrolmini/Code/AIchatTG/output/codex/kb-markup-1/passages.jsonl": "f88b8017db323e69b4a9814bcbe801cb0e8b1f67261895cf31418b42fa16be71",
+    "/Users/alexeykrolmini/Code/AIchatTG/output/codex/kb-markup-2/passages.jsonl": "e38c5060ae159ed590c71e78f33e5eb0b6f23665c9c8684fd8f5954288950cd5",
+    "/Users/alexeykrolmini/Code/AIchatTG/output/codex/kb-markup-3/passages.jsonl": "41d831f58deba00b2707031231ce6e84eecf28ea703bd19812293b136691d983",
+    "/Users/alexeykrolmini/Code/AIchatTG/output/codex/kb-markup-4/passages.jsonl": "f62bde59500eb4beecda8928cd07210e07328b2bdc83bce049ee79137bfca32e",
+    "/Users/alexeykrolmini/Code/AIchatTG/output/eval/tcr-book-v4/packages/tcr-59025ab82058/ai.db": "4957782917a84d43031c4311600f04dd2626d3d4e2322baefc681d65489f8c91",
+    "/Users/alexeykrolmini/Code/AIchatTG/output/kb/tcr-passages-v1/atoms.jsonl": "57477d13688fb7ed353a5bea44e4fe6ac1e97c6aad25ae5a86e77c2209072f5e"
+  },
+  "links_per_type": {},
+  "mode": "markup",
+  "note": "Package manifests still describe the source package.",
+  "passage_size_chars": {
+    "max": 1805,
+    "median": 733.0,
+    "min": 170
+  },
+  "records": {
+    "0955148bf523-01": 15,
+    "0955148bf523-02": 6,
+    "1620c40359b4-01": 15,
+    "1620c40359b4-02": 14,
+    "1632fcc0dd02": 12,
+    "3a91d6694e94-01": 22,
+    "3a91d6694e94-02": 11,
+    "518f5e184a2d": 17,
+    "5a0da6806bcf": 8,
+    "6ce617d214e8-01": 15,
+    "6ce617d214e8-02": 1,
+    "a84ce2b25fcd-01": 12,
+    "a84ce2b25fcd-02": 6,
+    "dfc0371b7155-01": 13,
+    "dfc0371b7155-02": 6,
+    "e211a2881a1f-01": 13,
+    "e211a2881a1f-02": 2,
+    "ea9cec29115d": 15,
+    "fab347d86cf7-01": 15,
+    "fab347d86cf7-02": 2
+  },
+  "source": "/Users/alexeykrolmini/Code/AIchatTG/output/eval/tcr-book-v4/packages/tcr-59025ab82058"
+}
