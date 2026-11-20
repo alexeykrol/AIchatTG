@@ -18,7 +18,7 @@ every task; `AGENTS.md` points here.
 | Mode | Use | Where the worker writes | Result |
 | --- | --- | --- | --- |
 | `report` | research, analysis, data generation, review, judging | only `output/codex/<task>/` (not in git) | files there + `REPORT.md` |
-| `code` | an isolated code change | only its own git worktree on branch `codex/<task>` | commit(s) on that branch + `REPORT.md` in the worktree root (untracked) |
+| `code` | an isolated code change | only its own git worktree on branch `codex/<task>` | uncommitted changes in that worktree + `REPORT.md` in the worktree root (untracked); the integrator commits them on the branch |
 
 The worker never writes to the main working tree at `~/Code/AIchatTG`. The launcher enforces this
 with the Codex sandbox (`workspace-write`: writes only inside the task directory, network off).
@@ -28,15 +28,17 @@ with the Codex sandbox (`workspace-write`: writes only inside the task directory
 1. **Stay inside the charter.** Do exactly the task described. If the charter is ambiguous or the
    task needs a file outside your write area, stop and say so in `REPORT.md`; do not guess and do
    not widen the scope.
-2. **Isolation.** Change only the paths the charter lists. Never touch shared contracts unless the
-   charter names them explicitly: `AGENTS.md`, `CLAUDE.md`, `.claude/`, `package.json` and lock
-   files, `infra/`, database schema (`apps/telegram-runtime/src/database.mjs`),
-   `apps/telegram-runtime/src/assistant-release.json`, CI and release scripts, this protocol. The
-   integrator is the single writer of those.
-3. **Commits (code mode only).** Commit only on your own branch, only the files you changed, with
-   `git add <path>` per file — never `git add -A` or `git add .`. Small meaningful commits; message
-   in English, prefixed `codex(<task>):`. If the sandbox refuses the commit, leave the changes
-   uncommitted and say so — the integrator commits them on your branch.
+2. **Isolation.** Change only the paths the charter lists. The integrator alone edits shared
+   contracts: `AGENTS.md`, `CLAUDE.md`, `.claude/`, `package.json` and lock files, `infra/`,
+   database schema (`apps/telegram-runtime/src/database.mjs`),
+   `apps/telegram-runtime/src/assistant-release.json`, CI and release scripts, this protocol. A
+   charter may name them as read-only inputs, never as files to change.
+3. **Commits (code mode only).** The sandbox keeps git metadata read-only (measured 2026-11-20:
+   the index lock of a worktree is refused), so do not try to commit: leave your changes
+   uncommitted in the worktree, list every changed path in `REPORT.md`, and write
+   `uncommitted: sandbox` in its Commits section. The integrator reviews them and commits the named
+   paths on your branch `codex/<task>` with the prefix `codex(<task>):`. Never run `git add -A`,
+   `git add .`, `git stash` or `git checkout` of other paths.
 4. **Never** push, pull, fetch, merge, rebase, tag, switch or delete branches, or change the main
    branch. Never deploy, never open SSH or any remote connection, never touch production.
 5. **No network and no paid calls.** No model or API calls of any kind, no package installs. Local
@@ -51,16 +53,18 @@ with the Codex sandbox (`workspace-write`: writes only inside the task directory
    questions or their reference answers (`~/Code/agi2claude/evals/`, `output/eval/runs/`,
    `output/eval/judge*`), unless the charter says the task is about them.
 9. **Evidence, not optimism.** Report every check as exactly one of `passed`, `failed`, `not_run`,
-   `inconclusive`, with the command and exit status. Red tests after three attempts → report
-   `failed` and stop. Never claim something you did not run.
+   `inconclusive`, with the command and exit status. Run a check at most three times, and retry
+   only after a relevant fix or a transient local error; still red → report `failed` and stop.
+   Single-shot probes are never retried. Never claim something you did not run.
 
 ## Sandbox probe (handshake tasks only)
 
 A charter may authorise one out-of-area write probe and one network probe, with the exact commands
 named in that charter. This is a test of the launcher, not a breach of rules 4, 5 and 7: run each
-command once, record the exact outcome, do not retry, do not work around a refusal, do not clean up
-outside the task directory. If either operation succeeds, say so prominently — the launcher is
-misconfigured.
+command once, record the exit code and the visible output, do not retry, do not work around a
+refusal, do not clean up outside the task directory. A refused operation is `passed`; an outcome
+whose cause cannot be observed is `inconclusive`; an operation that succeeds is `failed` — say so
+prominently, the launcher is misconfigured.
 
 ## `REPORT.md` (the worker's last act)
 
@@ -69,8 +73,9 @@ misconfigured.
 Status: passed | failed | not_run | inconclusive
 ## What was done            (3–10 lines)
 ## Files                    (path — created/changed)
-## Checks                   (command — exit status — passed/failed/not_run)
-## Commits                  (code mode: hash + subject, or "uncommitted: sandbox refused")
+## Checks                   (command — exit status — passed/failed/not_run/inconclusive;
+                             for a command not run, the reason in place of the exit status)
+## Commits                  (code mode: "uncommitted: sandbox"; report mode: "report mode")
 ## Deviations and open questions
 ```
 
@@ -79,9 +84,11 @@ Status: passed | failed | not_run | inconclusive
 - One charter per task: goal, context, files to read, exact output paths, allowed changes, checks to
   run, stop conditions. Without a charter the worker is not launched.
 - Parallel workers only on tasks that do not write the same files; one writer per shared contract.
-- Nothing from a worker reaches `main` without review: read the diff, run the relevant tests
-  (`npm test` for runtime code), then merge the branch (or copy the report output), commit with
-  named paths, push. A `failed` or `inconclusive` result is not merged as done.
+- Nothing from a worker reaches `main` without review: read the diff and run the relevant tests
+  (`npm test` for runtime code). Code mode: commit the named paths on the worker's branch
+  (`codex(<task>): …`), then merge that branch. Report mode: copy only the approved deliverables
+  into tracked paths and commit them. Only the integrator pushes. A `failed` or `inconclusive`
+  result is not merged as done.
 - The integrator records the result in project state (`.claude/SNAPSHOT.md`, backlog, reports).
 - **Resource discipline (Product Owner, 2026-11-20).** The subscription quota is shared with the
   owner's own work. Default is `gpt-6.2-sol` with `medium` reasoning — the everyday coding model.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launch one Codex worker task under docs/codex-worker-protocol.md (subscription compute, no API spend).
 #   scripts/codex-worker.sh report <task> <charter.md>   worker writes only output/codex/<task>/
-#   scripts/codex-worker.sh code   <task> <charter.md>   worker writes only its git worktree, branch codex/<task>
+#   scripts/codex-worker.sh code   <task> <charter.md>   worker writes only its git worktree (branch codex/<task>),
+#                                                        uncommitted; the integrator commits on that branch
 # Environment: CODEX_MODEL (default gpt-6.2-sol — the everyday coding model), CODEX_EFFORT (low|medium|high|xhigh,
 #              default medium), CODEX_WORKTREES (default ~/.codex/worktrees).
 # Resource rule (Product Owner, 2026-11-20): Sol + medium for all routine work; raise the effort to high, or the model
@@ -31,9 +32,9 @@ case "$MODE" in
       git -C "$REPO" worktree add -b "$BRANCH" "$DIR" HEAD >&2
     fi
     LOG="$REPO/output/codex/$TASK"; mkdir -p "$LOG"
-    # let the worker commit on its own branch: the worktree's git metadata lives under the main .git
-    ARGS+=(--add-dir "$REPO/.git")
-    WHERE="Mode: code. Your write area is this git worktree ($DIR), branch $BRANCH, and nothing else. The main working tree $REPO is read-only for you. Write REPORT.md in the worktree root and do not commit it."
+    # The sandbox keeps git metadata read-only, so the worker cannot commit (measured 2026-11-20, also with
+    # --add-dir "$REPO/.git"). It leaves changes uncommitted; the integrator commits them on $BRANCH after review.
+    WHERE="Mode: code. Your write area is this git worktree ($DIR), branch $BRANCH, and nothing else. The main working tree $REPO is read-only for you. Do not commit: leave your changes uncommitted and write REPORT.md in the worktree root."
     ;;
   *) echo "mode must be report or code" >&2; exit 2;;
 esac
