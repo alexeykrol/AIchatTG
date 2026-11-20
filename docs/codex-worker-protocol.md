@@ -54,6 +54,14 @@ with the Codex sandbox (`workspace-write`: writes only inside the task directory
    `inconclusive`, with the command and exit status. Red tests after three attempts → report
    `failed` and stop. Never claim something you did not run.
 
+## Sandbox probe (handshake tasks only)
+
+A charter may authorise one out-of-area write probe and one network probe, with the exact commands
+named in that charter. This is a test of the launcher, not a breach of rules 4, 5 and 7: run each
+command once, record the exact outcome, do not retry, do not work around a refusal, do not clean up
+outside the task directory. If either operation succeeds, say so prominently — the launcher is
+misconfigured.
+
 ## `REPORT.md` (the worker's last act)
 
 ```

@@ -148,3 +148,10 @@ code in the same session.
   it.
 - Subagents spawned by the integrator return a bounded result to it; they do
   not commit, deploy, or hold production access.
+- Codex worker (Product Owner decision, 2026-11-20): when Claude Code is the
+  integrator it may run Codex as extra compute for isolated tasks through
+  `scripts/codex-worker.sh`. Such a worker follows
+  `docs/codex-worker-protocol.md`: it writes only its task directory or its own
+  worktree, may commit only on its own `codex/<task>` branch, and never pushes,
+  merges, deploys or holds production access. Only the integrator merges and
+  pushes. A Codex worker is not a root session and needs no handoff.
