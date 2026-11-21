@@ -173,16 +173,74 @@ describe('probation', () => {
     assert.equal(result.reason, 'dm_inconclusive');
   });
 
-  test('restrict failure is recorded loudly, state stays probation', async () => {
+  test('approved but restriction unconfirmed is NOT probation: it joins the visible discrepancy queue', async () => {
     h = harness();
     h.telegram.failNext('sendMessage', definiteError());
     h.telegram.failNext('restrictChatMember', ambiguousError('restrictChatMember'));
     const result = await h.joinRequest();
-    assert.equal(result.action, 'probation');
+    assert.equal(result.action, 'restrict_unconfirmed');
     const stored = h.store.getApplication(result.applicationId);
-    assert.equal(stored.state, 'probation');
+    assert.equal(stored.state, 'manual_review');
+    assert.equal(stored.decision_reason, 'restrict_unconfirmed');
     assert.equal(stored.telegram_action_state, 'inconclusive');
     assert.equal(stored.restrict_state, 'inconclusive');
+    assert.deepEqual(h.store.listRestrictionDiscrepancies().map((a) => a.id), [result.applicationId]);
+    assert.equal(h.store.countByState().probation, undefined);
+    assert.deepEqual(h.store.admissionMetrics(), {
+      approved: 1, restriction_confirmed: 0, can_ask_first_question: 0, restriction_unconfirmed: 1,
+    });
+    // Not retried blindly; /start does not run a questionnaire for it; expiry does not remove it.
+    assert.equal(h.telegram.byMethod('restrictChatMember').length, 1);
+    assert.equal((await h.say('/start gate')).action, 'start_info');
+    h.clock.now = T0 + 30 * DAY;
+    const sweep = await h.service.sweep();
+    assert.equal(sweep.probationExpired, 0);
+    assert.equal(h.telegram.byMethod('banChatMember').length, 0);
+    // Retention keeps the discrepancy visible with its identity.
+    assert.deepEqual(h.store.listRestrictionDiscrepancies().map((a) => a.id), [result.applicationId]);
+  });
+
+  test('definite restrict failure also goes to the discrepancy queue', async () => {
+    h = harness();
+    h.telegram.failNext('sendMessage', definiteError());
+    h.telegram.failNext('restrictChatMember', definiteError('restrictChatMember'));
+    const result = await h.joinRequest();
+    assert.equal(result.action, 'restrict_unconfirmed');
+    assert.equal(h.store.getApplication(result.applicationId).restrict_state, 'failed');
+  });
+
+  test('a verified token releases a restriction discrepancy by lifting (idempotent), not merely closing it', async () => {
+    h = harness();
+    h.telegram.failNext('sendMessage', definiteError());
+    h.telegram.failNext('restrictChatMember', ambiguousError('restrictChatMember'));
+    const { applicationId } = await h.joinRequest();
+    const result = await h.say(`/start ${issue()}`);
+    assert.equal(result.lifted, 1);
+    assert.equal(result.closed, 0);
+    const stored = h.store.getApplication(applicationId);
+    assert.equal(stored.state, 'probation_passed');
+    assert.equal(stored.restrict_state, 'lifted');
+    assert.deepEqual(h.store.listRestrictionDiscrepancies(), []);
+  });
+
+  test('legacy probation rows with an unconfirmed restriction are listed in the queue', async () => {
+    h = harness();
+    const { applicationId } = await toProbation();
+    h.store.updateApplication(applicationId, { restrict_state: 'inconclusive' });
+    assert.deepEqual(h.store.listRestrictionDiscrepancies().map((a) => a.id), [applicationId]);
+  });
+
+  test('admission metrics count approved, restriction confirmed and can-ask separately', async () => {
+    h = harness();
+    const first = await toProbation();
+    await toProbation({ id: OTHER_USER });
+    assert.deepEqual(h.store.admissionMetrics(), {
+      approved: 2, restriction_confirmed: 2, can_ask_first_question: 0, restriction_unconfirmed: 0,
+    });
+    await h.service.passProbation(h.store.getApplication(first.applicationId), 'answers_passed');
+    assert.deepEqual(h.store.admissionMetrics(), {
+      approved: 2, restriction_confirmed: 2, can_ask_first_question: 1, restriction_unconfirmed: 0,
+    });
   });
 
   test('approve failure on probation entry → manual_review, no restrict', async () => {

@@ -5,6 +5,7 @@ import { parseCallbackData, reasonText } from './scenario.mjs';
 import { precheckApplicant } from './screening.mjs';
 import { isAmbiguousTelegramError, isNoRequestError, permissions } from './telegram-api.mjs';
 import { hashToken, isTokenFormat } from './tokens.mjs';
+import { RESTRICT_UNCONFIRMED } from './store.mjs';
 
 const SILENT_LOGGER = Object.freeze({ info() {}, warn() {}, error() {} });
 const MAX_STORED_ANSWER_CHARS = 1000;
@@ -244,22 +245,40 @@ export class JoinGatekeeperService {
       return { action: 'manual_review', reason, applicationId: application.id, telegramActionState: approve };
     }
     const restricted = await this.restrict(application.chat_id, application.user_id);
-    this.store.updateApplication(application.id, {
-      state: 'probation',
-      dm_state: reason === 'missing_user_chat_id' ? application.dm_state : 'failed',
-      decided_at: now,
-      decision_reason: reason,
-      telegram_action_state: restricted,
-      restrict_state: restricted === 'done' ? 'restricted' : restricted,
-      probation_deadline_at: now + this.scenario.limits.probationDays * DAY_MS,
-      questionnaire_state: 'none',
-    });
+    const dmState = reason === 'missing_user_chat_id' ? application.dm_state : 'failed';
     if (restricted !== 'done') {
-      // The person is in the group WITHOUT restriction: operator must check.
+      // Approved, but the restriction is NOT confirmed: the person may be in
+      // the group without probation rights. This is not probation — it goes
+      // to the visible discrepancy queue for the operator to reconcile.
+      this.store.updateApplication(application.id, {
+        state: 'manual_review',
+        dm_state: dmState,
+        decided_at: now,
+        decision_reason: RESTRICT_UNCONFIRMED,
+        telegram_action_state: restricted,
+        restrict_state: restricted,
+        probation_deadline_at: now + this.scenario.limits.probationDays * DAY_MS,
+        questionnaire_state: 'none',
+      });
+      this.store.addJournal({
+        event: RESTRICT_UNCONFIRMED, userId: application.user_id, siteRecordId: null,
+        details: { application_id: application.id, chat_id: application.chat_id, dm_reason: reason, state: restricted }, now,
+      });
       this.logger.error('probation_restrict_failed', {
         application_id: application.id, chat_id: application.chat_id, user_id: application.user_id, state: restricted,
       });
+      return { action: RESTRICT_UNCONFIRMED, reason, applicationId: application.id, restrictState: restricted };
     }
+    this.store.updateApplication(application.id, {
+      state: 'probation',
+      dm_state: dmState,
+      decided_at: now,
+      decision_reason: reason,
+      telegram_action_state: restricted,
+      restrict_state: 'restricted',
+      probation_deadline_at: now + this.scenario.limits.probationDays * DAY_MS,
+      questionnaire_state: 'none',
+    });
     return { action: 'probation', reason, applicationId: application.id, restrictState: restricted };
   }
 
@@ -802,7 +821,8 @@ export class JoinGatekeeperService {
     }
 
     // Close open questionnaires / pending reviews as approved_token.
-    const open = this.store.listByUserAndStates(userId, ['screening', 'asking', 'manual_review']);
+    const open = this.store.listByUserAndStates(userId, ['screening', 'asking', 'manual_review'])
+      .filter((application) => application.decision_reason !== RESTRICT_UNCONFIRMED);
     for (const application of open) {
       const outcome = approvals[application.chat_id];
       this.store.updateApplication(application.id, {
@@ -816,7 +836,11 @@ export class JoinGatekeeperService {
 
     // Lift any probation restriction.
     const lifted = [];
-    for (const probation of this.store.listByUserAndStates(userId, ['probation'])) {
+    // A restriction discrepancy may still hold an (unconfirmed) restriction:
+    // lifting is idempotent, so a verified member is released either way.
+    const discrepancies = this.store.listByUserAndStates(userId, ['manual_review'])
+      .filter((application) => application.decision_reason === RESTRICT_UNCONFIRMED);
+    for (const probation of [...this.store.listByUserAndStates(userId, ['probation']), ...discrepancies]) {
       lifted.push(await this.passProbation(probation, 'token'));
     }
 
