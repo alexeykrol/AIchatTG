@@ -18,6 +18,12 @@ import {
 } from './safety-v3.mjs';
 
 const OPENAI_VENDOR = 'openai';
+const ANTHROPIC_VENDOR = 'anthropic';
+export const ANTHROPIC_DEFAULT_ENDPOINT = 'https://api.anthropic.com/v1/';
+export const ANTHROPIC_API_VERSION = '2023-06-01';
+// Messages API `output_config.effort` knows only these levels; `none`/`minimal`
+// would need a silent remapping, so they are a configuration error instead.
+const ANTHROPIC_EFFORTS = new Set(['low', 'medium', 'high']);
 const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 const MAX_OUTPUT_TOKENS = 4_096;
@@ -91,6 +97,21 @@ export const OFF_DOMAIN_INSTRUCTION = [
 ].join(' ');
 
 const GAP_KINDS = new Set(['in_domain_gap', 'off_domain']);
+
+/**
+ * Дисциплина ответа «v2-cited» (замер 2026-11, `scripts/eval/addenda/answer-discipline-v2-cited.md`):
+ * полнота перечня, позиции рядом без вердикта за автора, «парадокс» только по двум
+ * цитатам, своё рассуждение помечено. Текст перенесён дословно и стоит в КОНЦЕ
+ * системного промпта ответа после пустой строки — ровно там, где его мерили
+ * (`--prompt-addendum`), для обоих вендоров ответа.
+ */
+export const ANSWER_DISCIPLINE_RULES = [
+  'Уточнения к правилам выше.',
+  '1. Сначала прямо и полностью ответь на сам вопрос тем, что сказано в переданных материалах: если там названы шаги, роли, условия или перечень — назови их все и в том порядке, в каком они даны.',
+  '2. Если в материалах есть места, которые говорят о спрошенном по-разному или противоположно, — покажи каждую позицию рядом с другой, со ссылкой на её место в материалах, и скажи, что в книге они стоят рядом без примирения. Не выноси вердикт за автора: не пиши «противоречия нет», «это лишь разные акценты», «они сводятся друг к другу». Исключение одно: если в переданных материалах есть место, где сам автор связывает эти позиции (объясняет, ставит условие, делает исключение, говорит о разных случаях), — процитируй это место и покажи связку как авторскую. Без такого места связку автору не приписывай; своё объяснение помечай как своё рассуждение.',
+  '3. Слово «парадокс» и фразы вроде «автор не примиряет» используй, только если можешь процитировать два места, которые прямо отвечают на этот вопрос и утверждают противоположное, и в материалах нет места, где автор их связывает. Не ищи напряжения между местами о разных вещах и не придумывай его там, где материалы говорят одно и то же.',
+  '4. Книге приписывай только то, что есть в переданных материалах: факты, цифры, правила, роли, касты, примеры, связи между ними. Любой вывод, обобщение или пример, которого в материалах нет, прямо отмечай как своё рассуждение, а не слова книги.',
+].join('\n');
 
 const ANSWER_SYSTEM_PROMPT = [
   'You are the AIchatTG Assistant. Answer in the user\'s language, relying on',
@@ -185,6 +206,8 @@ export function validateProviderRuntimeConfig(config) {
     modelTuples[tupleName] = tuple;
   }
   if (!isSafetyTuple(modelTuples.moderatorSafety)) return invalid('provider_safety_tuple_invalid');
+  const answer = answerVendorConfig(config, modelTuples.assistantAnswer);
+  if (!answer.valid) return answer;
   const requestTimeoutMs = config.requestTimeoutMs == null
     ? PROVIDER_REQUEST_TIMEOUT_MS : Number(config.requestTimeoutMs);
   if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1_000 || requestTimeoutMs > 120_000) {
@@ -195,8 +218,34 @@ export function validateProviderRuntimeConfig(config) {
     config: Object.freeze({
       enabled: true, vendor: OPENAI_VENDOR, endpoint, apiKey,
       requestTimeoutMs, modelTuples: Object.freeze(modelTuples),
+      // Present only when the answer role leaves OpenAI: an unset or `openai`
+      // answer vendor yields exactly the previous validated configuration.
+      ...answer.fields,
     }),
   };
+}
+
+/**
+ * Per-role vendor for the ANSWER role only. Moderator safety, router and
+ * analyzer stay on the global OpenAI vendor by construction: nothing else reads
+ * these fields. Absent/empty means "the global vendor".
+ */
+function answerVendorConfig(config, answerTuple) {
+  const raw = config.answerVendor == null ? '' : config.answerVendor;
+  if (typeof raw !== 'string') return invalid('provider_answer_vendor_invalid');
+  const vendor = raw.trim() || OPENAI_VENDOR;
+  if (vendor === OPENAI_VENDOR) return { valid: true, fields: {} };
+  if (vendor !== ANTHROPIC_VENDOR) return invalid('provider_answer_vendor_invalid');
+  const rawEndpoint = config.anthropicEndpoint == null || config.anthropicEndpoint === ''
+    ? ANTHROPIC_DEFAULT_ENDPOINT : config.anthropicEndpoint;
+  const anthropicEndpoint = normalizeEndpoint(rawEndpoint);
+  if (!anthropicEndpoint) return invalid('provider_anthropic_endpoint_invalid');
+  const anthropicApiKey = typeof config.anthropicApiKey === 'string' ? config.anthropicApiKey.trim() : '';
+  if (!anthropicApiKey || anthropicApiKey.length > 4_096 || /[\r\n]/.test(anthropicApiKey)) {
+    return invalid('provider_anthropic_api_key_invalid');
+  }
+  if (!ANTHROPIC_EFFORTS.has(answerTuple.reasoningEffort)) return invalid('provider_answer_effort_invalid');
+  return { valid: true, fields: { answerVendor: ANTHROPIC_VENDOR, anthropicEndpoint, anthropicApiKey } };
 }
 
 export function isProviderUnavailableError(error) { return error instanceof ProviderUnavailableError; }
@@ -526,6 +575,10 @@ function userInput(operation, payload, catalog) {
  * операционный снимок — единственное, что даёт право на операционный ответ.
  */
 export function answerSystemPrompt(payload, catalog = DEFAULT_DOMAIN_CATALOG) {
+  return `${answerPolicyPrompt(payload, catalog)}\n\n${ANSWER_DISCIPLINE_RULES}`;
+}
+
+function answerPolicyPrompt(payload, catalog) {
   const selected = answerDomains(payload, catalog);
   // Compatibility for policy inspection without an invocation payload. Actual
   // answer calls must pass answerDomains before any provider transport starts.
@@ -587,6 +640,80 @@ async function callOnce({ config, fetchFn, operation, tuple, system, input, maxO
   const text = completionText(result);
   if (text == null) throw new ProviderRequestError('provider_response_invalid', receipt);
   return { text, receipt, ...(completion ? { completion } : {}) };
+}
+
+function anthropicUsageFrom(result) {
+  if (result?.usage == null) {
+    return { inputTokens: null, outputTokens: null, totalTokens: null,
+      cacheReadInputTokens: null, cacheCreationInputTokens: null };
+  }
+  if (!plainObject(result.usage)) return null;
+  const base = tokenCount(result.usage.input_tokens);
+  const outputTokens = tokenCount(result.usage.output_tokens);
+  const cacheField = (name) => (result.usage[name] == null ? 0 : tokenCount(result.usage[name]));
+  const cacheReadInputTokens = cacheField('cache_read_input_tokens');
+  const cacheCreationInputTokens = cacheField('cache_creation_input_tokens');
+  if (base == null || outputTokens == null || cacheReadInputTokens == null || cacheCreationInputTokens == null) return null;
+  // Same meaning as OpenAI prompt_tokens: every input token of the call,
+  // cached or not; the cache split is kept alongside for pricing.
+  const inputTokens = base + cacheReadInputTokens + cacheCreationInputTokens;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens,
+    cacheReadInputTokens, cacheCreationInputTokens };
+}
+
+function anthropicReceiptFor({ operation, tuple, result, response, status }) {
+  const usage = anthropicUsageFrom(result);
+  if (!usage) return null;
+  const responseModel = typeof result?.model === 'string' && MODEL_PATTERN.test(result.model)
+    ? result.model : tuple.model;
+  return Object.freeze({
+    vendor: ANTHROPIC_VENDOR, operation, modelId: responseModel, configuredModelId: tuple.model,
+    reasoningEffort: tuple.reasoningEffort, httpStatus: Number.isSafeInteger(status) ? status : 0,
+    requestId: responseHeader(response, 'request-id'), ...usage, costUsd: null, retryCount: 0,
+  });
+}
+
+/** Messages API request body. Exported for tests; carries no credential. */
+export function anthropicRequestFor({ tuple, system, input, maxOutputTokens }) {
+  return {
+    model: tuple.model,
+    max_tokens: maxOutputTokens,
+    system,
+    messages: [{ role: 'user', content: input }],
+    output_config: { effort: tuple.reasoningEffort },
+  };
+}
+
+/**
+ * One Anthropic Messages call with the same contract as `callOnce`: one POST,
+ * one deadline, no retry; transport failure, non-2xx (401/403/429/5xx/529) and a
+ * malformed envelope map to the same error codes as the OpenAI path, and the
+ * HTTP status stays on the receipt. The key travels only in `x-api-key`.
+ */
+async function callAnthropicOnce({ config, fetchFn, operation, tuple, system, input, maxOutputTokens }) {
+  let response;
+  try {
+    response = await fetchFn(`${config.anthropicEndpoint}messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json', 'x-api-key': config.anthropicApiKey,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+      },
+      body: JSON.stringify(anthropicRequestFor({ tuple, system, input, maxOutputTokens })),
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    });
+  } catch { throw new ProviderRequestError('provider_transport_failed'); }
+  const status = Number(response?.status) || 0;
+  let result = null;
+  try { result = typeof response?.json === 'function' ? await response.json() : null; } catch { result = null; }
+  const receipt = anthropicReceiptFor({ operation, tuple, result, response, status });
+  if (!response?.ok) throw new ProviderRequestError('provider_http_error', receipt);
+  if (!plainObject(result) || !receipt || !Array.isArray(result.content)) {
+    throw new ProviderRequestError('provider_response_invalid', receipt);
+  }
+  const blocks = result.content.filter((block) => plainObject(block) && block.type === 'text' && typeof block.text === 'string');
+  if (!blocks.length) throw new ProviderRequestError('provider_response_invalid', receipt);
+  return { text: blocks.map((block) => block.text).join(''), receipt };
 }
 
 /**
@@ -652,10 +779,16 @@ export function createProviderAdapter(config, {
     const system = (operation === 'assistantRouter'
       ? routerSystemPrompt
       : answerSystemPrompt(payload, domainCatalog)) + (payload.working_state ? `\n\n${STATE_CONTEXT_INSTRUCTION}` : '');
-    const raw = await callOnce({
-      config: validated.config, fetchFn, operation, tuple, system, input,
-      maxOutputTokens: tuple.maxOutputTokens, responseFormat: operation === 'assistantRouter',
-    });
+    const anthropicAnswer = operation === TUPLE_NAMES.assistantAnswer
+      && validated.config.answerVendor === ANTHROPIC_VENDOR;
+    const raw = anthropicAnswer
+      ? await callAnthropicOnce({
+        config: validated.config, fetchFn, operation, tuple, system, input, maxOutputTokens: tuple.maxOutputTokens,
+      })
+      : await callOnce({
+        config: validated.config, fetchFn, operation, tuple, system, input,
+        maxOutputTokens: tuple.maxOutputTokens, responseFormat: operation === 'assistantRouter',
+      });
     if (operation === 'assistantAnswer') return { text: raw.text, modelId: raw.receipt.modelId, receipt: raw.receipt };
     return parseStructuredResult(raw.text, raw.receipt);
   }
@@ -697,6 +830,10 @@ export function createProviderAdapter(config, {
       vendor: validated.config.vendor, endpoint: validated.config.endpoint,
       requestTimeoutMs: validated.config.requestTimeoutMs,
       modelTuples: validated.config.modelTuples,
+      // Absent for an OpenAI answer, so the existing fingerprint is unchanged.
+      ...(validated.config.answerVendor ? {
+        answerVendor: validated.config.answerVendor, anthropicEndpoint: validated.config.anthropicEndpoint,
+      } : {}),
     })).digest('hex'),
     moderate,
     routeAssistant: (payload) => invokeAssistant(TUPLE_NAMES.assistantRouter, payload),

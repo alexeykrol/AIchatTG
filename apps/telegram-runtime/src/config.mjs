@@ -1,6 +1,6 @@
 import { dirname, relative, resolve, sep } from 'node:path';
 import { ASSISTANT_SOURCE_PACKAGES } from '@aichattg/telegram-core';
-import { validateProviderRuntimeConfig } from './provider-adapter.mjs';
+import { ANTHROPIC_DEFAULT_ENDPOINT, validateProviderRuntimeConfig } from './provider-adapter.mjs';
 
 const roleNames = ['MODERATOR', 'ASSISTANT'];
 
@@ -158,6 +158,16 @@ function providerTuple(env, name) {
   };
 }
 
+function answerVendorEnv(env) {
+  const answerVendor = String(env.TELEGRAM_RUNTIME_PROVIDER_ASSISTANT_ANSWER_VENDOR || '').trim();
+  if (!answerVendor) return {};
+  return {
+    answerVendor,
+    anthropicEndpoint: String(env.TELEGRAM_RUNTIME_ANTHROPIC_ENDPOINT || '').trim() || ANTHROPIC_DEFAULT_ENDPOINT,
+    anthropicApiKey: String(env.TELEGRAM_RUNTIME_ANTHROPIC_API_KEY || ''),
+  };
+}
+
 export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {}) {
   if (boolean(env, 'TELEGRAM_RUNTIME_POLLING_ENABLED', false)) {
     throw new Error('TELEGRAM_RUNTIME_POLLING_ENABLED is unsupported: polling is intentionally not implemented');
@@ -193,6 +203,9 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     endpoint: String(env.TELEGRAM_RUNTIME_PROVIDER_ENDPOINT || ''),
     apiKey: String(env.TELEGRAM_RUNTIME_PROVIDER_API_KEY || ''),
     requestTimeoutMs: integer(env, 'TELEGRAM_RUNTIME_PROVIDER_REQUEST_TIMEOUT_MS', 45_000, { min: 1_000, max: 120_000 }),
+    // Only the answer role may leave the global vendor. Unset = global vendor;
+    // the Anthropic key/endpoint are read solely when `anthropic` is selected.
+    ...answerVendorEnv(env),
     modelTuples: {
       moderatorSafety: providerTuple(env, 'MODERATOR_SAFETY'),
       assistantRouter: providerTuple(env, 'ASSISTANT_ROUTER'),
