@@ -365,6 +365,10 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
     },
     assistantCooldownSec: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_COOLDOWN_SEC', 20, 86_400),
     assistantDailyPerUser: nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_PER_USER', 20, 10_000),
+    // Optional ceiling on all assistant answers in a rolling day, every user
+    // and chat together. Empty or unset = off (0).
+    assistantDailyGlobalAnswers: String(env.TELEGRAM_RUNTIME_ASSISTANT_DAILY_GLOBAL_ANSWERS ?? '').trim() === ''
+      ? 0 : nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_DAILY_GLOBAL_ANSWERS', 0, 1_000_000),
     // Отдельный потолок для синтетических отправителей. Замер 2026-08-16: прогон
     // приёмки из 30 вопросов дал 4 ответа и 26 отказов `daily_cap` — человеческая
     // защита от злоупотребления сделала измерительный контур неисполнимым, то есть

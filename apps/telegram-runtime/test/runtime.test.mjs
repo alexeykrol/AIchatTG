@@ -1781,3 +1781,88 @@ test('an uncertain Guard delete is durably quarantined and exact redelivery neve
       WHERE event_id = 'moderator:509'`).get(), { status: 'uncertain', error_code: 'transport_unknown' });
   } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
 });
+
+function countingLlm() {
+  const llm = fakeLlm();
+  let moderations = 0;
+  return { llm: { ...llm, async moderate(input) { moderations += 1; return llm.moderate(input); } },
+    moderations: () => moderations };
+}
+
+function chatUpdate(updateId, messageId, chatId, text, from = { id: 7, first_name: 'Student', is_bot: false }) {
+  return { update_id: updateId, message: { message_id: messageId, chat: { id: chatId }, from, text } };
+}
+
+test('the daily answer limit counts a person across all chats, not per chat', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-user-cap-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db, { now: () => 1_000 });
+  const actions = [];
+  const chats = ['-100', '-200'];
+  const runtime = createTelegramRuntime({
+    config: config({ assistantCooldownSec: 0, assistantDailyPerUser: 2,
+      moderator: { ...config().moderator, chatIds: chats }, assistant: { ...config().assistant, chatIds: chats } }),
+    store, provider: fakeLlm(), ...adapters(actions),
+  });
+  try {
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(301, 31, -100, '/ask Кто ты?'))).kind, 'answered');
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(302, 32, -200, '/ask Кто ты?'))).kind, 'answered');
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(303, 33, -200, '/ask Кто ты?'))).reason, 'daily_cap');
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(304, 34, -100, '/ask Кто ты?'))).reason, 'daily_cap');
+    const other = { id: 8, first_name: 'Other', is_bot: false };
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(305, 35, -100, '/ask Кто ты?', other))).kind, 'answered');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, 3);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('the optional global daily answer cap bounds all users together; empty env means off', async () => {
+  assert.equal(loadRuntimeConfig({}).assistantDailyGlobalAnswers, 0);
+  assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_ASSISTANT_DAILY_GLOBAL_ANSWERS: '' }).assistantDailyGlobalAnswers, 0);
+  assert.equal(loadRuntimeConfig({ TELEGRAM_RUNTIME_ASSISTANT_DAILY_GLOBAL_ANSWERS: '50' }).assistantDailyGlobalAnswers, 50);
+  assert.throws(() => loadRuntimeConfig({ TELEGRAM_RUNTIME_ASSISTANT_DAILY_GLOBAL_ANSWERS: '-1' }));
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-global-cap-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db, { now: () => 1_000 });
+  const actions = [];
+  const runtime = createTelegramRuntime({
+    config: config({ assistantCooldownSec: 0, assistantDailyPerUser: 5, assistantDailyGlobalAnswers: 2 }),
+    store, provider: fakeLlm(), ...adapters(actions),
+  });
+  try {
+    for (const [index, id] of [7, 8].entries()) {
+      const from = { id, first_name: `S${id}`, is_bot: false };
+      assert.equal((await runtime.handleUpdate('assistant', update(400 + index, 40 + index, '/ask Кто ты?', from))).kind, 'answered');
+    }
+    const third = { id: 9, first_name: 'S9', is_bot: false };
+    assert.equal((await runtime.handleUpdate('assistant', update(410, 50, '/ask Кто ты?', third))).reason, 'global_daily_cap');
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, 2);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('over-limit question skips the paid judge only where the judge exists solely for the answer', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'aichattg-assistant-prejudge-'));
+  const db = openRuntimeDatabase(join(folder, 'runtime.db'));
+  const store = createRuntimeStore(db, { now: () => 1_000 });
+  const actions = [];
+  const counting = countingLlm();
+  const runtime = createTelegramRuntime({
+    config: config({ assistantCooldownSec: 0, assistantDailyPerUser: 1,
+      // -300 is an assistant-only chat; -100 is also moderated.
+      assistant: { ...config().assistant, chatIds: ['-100', '-300'] } }),
+    store, provider: counting.llm, ...adapters(actions),
+  });
+  try {
+    assert.equal((await runtime.handleUpdate('assistant', chatUpdate(501, 61, -300, '/ask Кто ты?'))).kind, 'answered');
+    assert.equal(counting.moderations(), 1);
+    const skipped = await runtime.handleUpdate('assistant', chatUpdate(502, 62, -300, '/ask Кто ты?'));
+    assert.equal(skipped.reason, 'daily_cap');
+    assert.equal(skipped.preJudge, true);
+    assert.equal(counting.moderations(), 1, 'an over-limit answer-only question triggers no paid call');
+    // In a moderated chat the judgement is the moderation of the message: unchanged.
+    const moderated = await runtime.handleUpdate('assistant', chatUpdate(503, 63, -100, '/ask Кто ты?'));
+    assert.equal(moderated.reason, 'daily_cap');
+    assert.equal(moderated.preJudge, undefined);
+    assert.equal(counting.moderations(), 2);
+    assert.equal(actions.filter(([kind]) => kind === 'send').length, 1);
+  } finally { db.close(); rmSync(folder, { recursive: true, force: true }); }
+});
