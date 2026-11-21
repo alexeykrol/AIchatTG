@@ -514,6 +514,9 @@ export async function runLocalAssistant({
       abstained: result.abstained === true,
       verdict: abstentionVerdict(turnRoute),
       reason: result.reason ?? null,
+      // Since the «never refuse» rule an empty search no longer abstains: the
+      // question goes on to the model with this knowledge-gap mark.
+      knowledgeGap: result.knowledgeGap ?? null,
       entries: entries == null ? 0 : entries.length,
       // Сколько предыдущих ходов ушло в модель вместе с вопросом. Это
       // наблюдаемое доказательство того, что диалоговая память работает: без

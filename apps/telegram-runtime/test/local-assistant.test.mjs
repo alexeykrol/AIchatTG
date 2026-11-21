@@ -100,7 +100,7 @@ test('the transcript names its substitutions so a lab run is never read as produ
   }
 });
 
-test('dry fallback retrieves course evidence and honestly records missing knowledge without claiming semantic scope', {
+test('dry fallback retrieves course evidence; an empty search goes on with a knowledge-gap mark and a recorded deficit', {
   skip: PACKAGE_DIR ? false : 'AICHATTG_KNOWLEDGE_PACKAGE_DIR is not set',
 }, async () => {
   const transcript = await runLocalAssistant({
@@ -120,13 +120,18 @@ test('dry fallback retrieves course evidence and honestly records missing knowle
   // Роутер в dry подставил первый retrieval-домен, а не распознал предмет.
   // Пустой поиск означает недостаток знания для ЭТОГО маршрута. Он не
   // доказывает правильную модельную классификацию «вне домена».
-  assert.equal(offDomain.abstained, true);
+  // Контракт с f6c7b05 (правило владельца «никогда не отказывать»): пустой
+  // поиск больше не воздерживается — вопрос уходит модели с меткой пробела.
+  assert.equal(offDomain.abstained, false);
+  assert.equal(offDomain.kind, 'answered');
   assert.equal(offDomain.entries, 0);
-  assert.equal(offDomain.verdict, 'domain_knowledge_missing');
-  assert.equal(offDomain.reason, 'domain_knowledge_missing');
-  assert.equal(offDomain.route, 'boundary:domain_knowledge_missing');
-  assert.match(offDomain.answer, /нет достаточных сведений/);
-  assert.doesNotMatch(offDomain.answer, /не уполномочен/);
+  assert.equal(offDomain.verdict, null);
+  assert.equal(offDomain.reason, null);
+  assert.equal(offDomain.route, 'teach:course-content-v1');
+  assert.equal(offDomain.knowledgeGap?.kind, 'in_domain_gap');
+  assert.match(offDomain.answer, /dry-run: модель не вызывалась; в неё ушло бы 0 записей/);
+  assert.doesNotMatch(offDomain.answer, /нет достаточных сведений|не уполномочен/);
+  assert.equal(course.knowledgeGap, null);
   assert.ok(transcript.substitutions.includes(DRY_SUBSTITUTIONS[0]));
   assert.equal(offDomain.model, null);
   assert.equal(offDomain.cost, null);
