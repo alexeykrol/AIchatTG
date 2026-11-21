@@ -1,3 +1,4 @@
+import { deepReadReceipt } from './deep-read.mjs';
 import {
   ASSISTANT_ROLE_ACTIONS,
   ASSISTANT_SOURCE_PACKAGES,
@@ -1730,6 +1731,11 @@ export function createTelegramRuntime({
           return { ...delivered, degraded: true, reason: error.code };
         }
         throw error;
+      }
+      // Deep read (deep-read.mjs) leaves its pass record beside the answer's
+      // own receipt; absent when deep read is off.
+      if (routing.trace?.deepRead && answer?.receipt) {
+        answer = { ...answer, receipt: { ...answer.receipt, deepRead: deepReadReceipt(routing.trace.deepRead) } };
       }
       // Единственное место, где текст написала модель — единственное место с
       // разметкой (см. `sendAssistantTurn`). Знание передаётся сюда же: в

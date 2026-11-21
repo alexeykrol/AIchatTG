@@ -40,7 +40,17 @@
  *                              no-signal questions may be rewritten too (still only when the free local search is
  *                              weak). Off in production; recorded in manifest.retrieval and manifest.rewrite.
  *   --prompt-addendum <file>   the file's text appended (after a blank line) to the end of the production answer
- *                              system prompt; the file's sha256 goes to the manifest.
+ *                              system prompt; the file's sha256 goes to the manifest. The runtime answer prompt already
+ *                              carries the v2-cited discipline (ANSWER_DISCIPLINE_RULES): do not pass
+ *                              addenda/answer-discipline-v2-cited.md again — it would be doubled.
+ *   --retrieval-mode lexical|hybrid, --hybrid-max-context-tokens N, --link-types a,b --link-max N
+ *                              the production search levers (TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MODE / ..._HYBRID_MAX_CONTEXT_TOKENS /
+ *                              ..._LINK_TYPES / ..._LINK_MAX). Production today: hybrid, 12000, contradicts,qualifies, 4
+ *                              (with --max-entries 24 --no-concept-gate pass --coverage-text content+alias).
+ *   --deep-read off|on|force   deep read (apps/telegram-runtime/src/deep-read.mjs); pass 3 goes through the same spend
+ *                              guard (journal rows `kind: "deep_read"`) on the answer model at low effort. `force`
+ *                              (experiment only) reads deeply on every grounded question and still records the gate.
+ *   --case-base <file.jsonl>   local case-base sink for deep read (one record per grounded question).
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -59,6 +69,7 @@ import { OPENAI_PRICE_SOURCE, OPENAI_PUBLISHED_PRICES, PUBLISHED_PRICES, createS
 import { OPENAI_BASE, fakeOpenAITransport, withAnswerAddendum } from './lib/openai-transport.mjs';
 import { loadQuestions, renderAnswersMarkdown, retrievalReport, renderRetrievalMarkdown } from './lib/eval-io.mjs';
 import { loadFixedContext } from './lib/context-from.mjs';
+import { createAnthropicQuerySuggester, createJsonlCaseSink } from '../../apps/telegram-runtime/src/deep-read.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // The donor stand's bot answered with this model and effort (agi2claude config.yaml profiles.normal ->
@@ -79,6 +90,7 @@ export function parseArgs(argv) {
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
     rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
     maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse', coverageText: 'content', contextFrom: null,
+    retrievalMode: null, hybridMaxContextTokens: null, linkTypes: null, linkMax: null, deepRead: 'off', caseBase: null,
   };
   const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
@@ -90,6 +102,8 @@ export function parseArgs(argv) {
     '--rewrite-price-output': 'rewritePriceOutput', '--prompt-addendum': 'promptAddendum',
     '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens', '--no-concept-gate': 'noConceptGate',
     '--coverage-text': 'coverageText', '--context-from': 'contextFrom',
+    '--retrieval-mode': 'retrievalMode', '--hybrid-max-context-tokens': 'hybridMaxContextTokens',
+    '--link-types': 'linkTypes', '--link-max': 'linkMax', '--deep-read': 'deepRead', '--case-base': 'caseBase',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
@@ -106,7 +120,7 @@ export function parseArgs(argv) {
     }
   }
   for (const k of ['limit', 'maxOutputTokens', 'capUsd', 'priceInput', 'priceOutput', 'alreadySpentUsd',
-    'rewritePriceInput', 'rewritePriceOutput', 'maxEntries', 'maxContextTokens']) {
+    'rewritePriceInput', 'rewritePriceOutput', 'maxEntries', 'maxContextTokens', 'hybridMaxContextTokens', 'linkMax']) {
     if (a[k] != null) a[k] = Number(a[k]);
   }
   if (!['retrieval', 'mock', 'live'].includes(a.mode)) throw new Error('--mode must be retrieval, mock or live');
@@ -119,6 +133,11 @@ export function parseArgs(argv) {
   }
   if (a.rewrite != null && !String(a.rewrite).trim()) throw new Error('--rewrite needs a model id');
   if (a.rewriteNoSignal && a.rewrite == null) throw new Error('--rewrite-no-signal is valid only together with --rewrite <model>');
+  if (a.retrievalMode != null && !['lexical', 'hybrid'].includes(a.retrievalMode)) throw new Error('--retrieval-mode must be lexical or hybrid');
+  if (!['off', 'on', 'force'].includes(a.deepRead)) throw new Error('--deep-read must be off, on or force');
+  if (a.deepRead !== 'off' && a.contextFrom) throw new Error('--deep-read on needs live retrieval, not --context-from');
+  if (a.linkTypes != null) a.linkTypes = String(a.linkTypes).split(',').map((t) => t.trim()).filter(Boolean);
+  if (a.linkMax > 0 && !a.linkTypes?.length) throw new Error('--link-max > 0 needs --link-types');
   if (a.only) a.only = new Set(String(a.only).split(',').map((s) => s.trim()));
   return a;
 }
@@ -236,7 +255,7 @@ export function buildProviderStack(args, { transport, journalPath = null, catalo
     const provider = addendum ? { ...adapter, answer: createProviderAdapter(config, {
       fetchFn: withAnswerAddendum(guarded, addendum.text), domainCatalog: catalog,
     }).answer } : adapter;
-    return { provider, rewriteQuestion: null, guard, price, rewritePrice: null, addendum, setTag: (t) => { current = t; } };
+    return { provider, rewriteQuestion: null, guard, price, rewritePrice: null, addendum, setTag: (t) => { current = t; }, currentTag: () => current };
   }
   const shim = createAnthropicChatShim({ apiKey, fetchFn: guarded, anthropicVersion: args.anthropicVersion,
     ...(addendum ? { systemAddendum: addendum.text } : {}) });
@@ -253,7 +272,7 @@ export function buildProviderStack(args, { transport, journalPath = null, catalo
       model: args.rewrite, reasoningEffort: args.rewriteEffort,
     }, { fetchFn: rewriteShim });
   }
-  return { provider, rewriteQuestion, guard, price, rewritePrice, addendum, setTag: (t) => { current = t; } };
+  return { provider, rewriteQuestion, guard, price, rewritePrice, addendum, setTag: (t) => { current = t; }, currentTag: () => current };
 }
 
 /** Manifest block for --rewrite: wiring, effort mapping, price, counts and cost apart from the answers. */
@@ -298,6 +317,11 @@ export async function runOffline(argv, { mockTransport } = {}) {
       : (mockTransport ?? (args.vendor === 'openai' ? fakeOpenAITransport() : fakeAnthropicTransport())),
     journalPath: join(out, 'journal.jsonl'),
   });
+  const deepReadSuggester = args.deepRead !== 'off' && stack ? createAnthropicQuerySuggester({
+    endpoint: ANTHROPIC_MESSAGES_BASE, apiKey: args.mode === 'live' ? process.env[args.keyEnv] : ADAPTER_PLACEHOLDER_KEY,
+    model: args.model, reasoningEffort: 'low',
+  }, { fetchFn: stack.guard.wrapFetch(args.mode === 'live' ? globalThis.fetch
+    : (mockTransport ?? fakeAnthropicTransport()), { tagOf: () => stack.currentTag(), kind: 'deep_read' }) }) : null;
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
     rewriteQuestion: stack?.rewriteQuestion ?? null,
     fixedContext,
@@ -305,7 +329,12 @@ export async function runOffline(argv, { mockTransport } = {}) {
     coverageText: args.coverageText,
     ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}),
     ...(args.maxEntries != null ? { maxEntries: args.maxEntries } : {}),
-    ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}) });
+    ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}),
+    ...(args.retrievalMode ? { retrievalMode: args.retrievalMode } : {}),
+    ...(args.hybridMaxContextTokens != null ? { hybridMaxContextTokens: args.hybridMaxContextTokens } : {}),
+    ...(args.linkMax != null ? { linkExpansion: { types: args.linkTypes || [], max: args.linkMax } } : {}),
+    ...(args.deepRead !== 'off' ? { deepRead: { mode: args.deepRead, suggestQueries: deepReadSuggester,
+      caseSink: args.caseBase ? createJsonlCaseSink(resolve(args.caseBase)) : null } } : {}) });
   const rows = [];
   let stoppedBy = null;
   const originalFetch = globalThis.fetch;
@@ -331,7 +360,9 @@ export async function runOffline(argv, { mockTransport } = {}) {
       const diag = args.mode === 'retrieval' ? await assistant.diagnose(q.question, options) : null;
       if (stack?.guard.stopped()) { stoppedBy = stack.guard.stopped(); break; }
       const tagged = stack ? stack.guard.journal().filter((j) => j.tag === q.q && j.event === 'call') : [];
-      const journal = tagged.filter((j) => j.kind !== 'rewrite');
+      const journal = tagged.filter((j) => j.kind !== 'rewrite' && j.kind !== 'deep_read');
+      const deepCalls = tagged.filter((j) => j.kind === 'deep_read');
+      const dr = r.trace?.deepRead ?? null;
       const answerCall = journal.at(-1);
       const rewriteCalls = tagged.filter((j) => j.kind === 'rewrite');
       const rw = r.trace?.rewrite ?? null;
@@ -355,6 +386,12 @@ export async function runOffline(argv, { mockTransport } = {}) {
         cost_usd: journal.length ? journal.reduce((n, j) => n + j.costUsd, 0) : (stack ? 0 : null),
         latency_ms: Date.now() - t0,
         ...(diag ? { diagnostics: diag } : {}),
+        ...(args.deepRead !== 'off' ? {
+          deep_read: dr?.read === true, deep_read_gate_hard: dr?.hard === true, deep_read_reasons: dr?.reasons ?? [], deep_read_measures: dr?.measures ?? null,
+          deep_read_passes: dr?.passes ?? 1, deep_read_added: dr?.added ?? [], deep_read_added_tokens: dr?.addedTokens ?? 0,
+          deep_read_terms: dr?.researchTerms ?? null, deep_read_pass3: dr?.pass3 ?? null,
+          deep_read_calls: deepCalls.length, deep_read_cost_usd: deepCalls.reduce((n, j) => n + j.costUsd, 0),
+        } : {}),
         ...(stack?.rewriteQuestion ? {
           rewrite_skipped_no_signal: !args.rewriteNoSignal && r.trace?.domain === DOMAIN_ROUTE_REASONS.NO_SIGNAL,
           // A refused no-signal trace carries no rewrite block (production traces unchanged), so the
@@ -385,6 +422,13 @@ export async function runOffline(argv, { mockTransport } = {}) {
       coverage_text: args.coverageText,
       rewrite: Boolean(stack?.rewriteQuestion),
       rewrite_on_no_signal: Boolean(args.rewriteNoSignal),
+      mode: args.retrievalMode ?? 'lexical',
+      ...(args.hybridMaxContextTokens != null ? { hybrid_max_context_tokens: args.hybridMaxContextTokens } : {}),
+      ...(args.linkMax != null ? { link_expansion: { types: args.linkTypes || [], max: args.linkMax } } : {}),
+      deep_read: args.deepRead,
+      ...(args.deepRead !== 'off' ? { deep_read_fired: rows.filter((r) => r.deep_read_gate_hard).length,
+        deep_read_read: rows.filter((r) => r.deep_read).length,
+        deep_read_cost_usd: rows.reduce((n, r) => n + (r.deep_read_cost_usd || 0), 0) } : {}),
       ...(fixedContext ? { context_from: fixedContext.provenance } : {}) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,
     answer_system_prompt_sha256: sha256(answerSystemPrompt(sample, DEFAULT_DOMAIN_CATALOG)),

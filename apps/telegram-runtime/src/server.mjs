@@ -5,6 +5,7 @@ import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
 import { assertSlicesAdmitted, composeKnowledgeSlices } from './knowledge-slices.mjs';
 import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
 import { assertPackageSlotsAdmitted, bindRetrievalsToDomains } from './knowledge-packages.mjs';
+import { deepReadFromEnv } from './deep-read.mjs';
 import { createAnalyzerAdapter } from './analyzer-adapter.mjs';
 import { loadAnalyzerSpec } from './analyzer-spec.mjs';
 import { createRewriterAdapter } from './rewriter-adapter.mjs';
@@ -57,7 +58,9 @@ const knowledge = composed.knowledge;
 // not a rewrite of a running deployment.
 // One lazy embedder per identical model, shared by every hybrid slot.
 const embedderCache = new Map();
-const contentRetrieval = config.assistantRetrieval.enabled === true
+// Deep read (TELEGRAM_RUNTIME_ASSISTANT_DEEP_READ, default off = this exact
+// retrieval object): a 2nd/3rd pass only for hard questions, see deep-read.mjs.
+const contentRetrieval = deepReadFromEnv(config.assistantRetrieval.enabled === true
   ? createKnowledgeRetrieval(config.assistantRetrieval, {
     knowledge: composed.baseKnowledge,
     embedderCache,
@@ -71,7 +74,7 @@ const contentRetrieval = config.assistantRetrieval.enabled === true
       })
       : null,
   })
-  : null;
+  : null, { knowledge: composed.baseKnowledge, provider: config.provider });
 if (contentRetrieval && !contentRetrieval.available) {
   console.error(`[telegram-runtime] content retrieval unavailable: ${contentRetrieval.reason}`);
 }
@@ -87,12 +90,12 @@ assertPackageSlotsAdmitted(packageSlots);
 const slotRetrievals = new Map();
 if (contentRetrieval) slotRetrievals.set(contentRetrieval.sourceId || 'course-knowledge-v2', contentRetrieval);
 for (const slot of config.knowledge.packages.slots) {
-  const retrieval = createKnowledgeRetrieval({
+  const retrieval = deepReadFromEnv(createKnowledgeRetrieval({
     ...slot.retrieval,
     sourceId: slot.sourceId,
     rewriteEnabled: false,
     validatePacks: config.assistantRetrieval.validatePacks,
-  }, { knowledge: composed.baseKnowledge, embedderCache });
+  }, { knowledge: composed.baseKnowledge, embedderCache }), { knowledge: composed.baseKnowledge, provider: config.provider });
   if (!retrieval.available) throw new Error(`knowledge package ${slot.sourceId} retrieval unavailable: ${retrieval.reason}`);
   console.log(`[telegram-runtime] knowledge package ${slot.sourceId} retrieval: mode=${slot.retrieval.retrievalMode}; `
     + `hybrid=${retrieval.hybridLive}; embedderShared=${retrieval.embedderShared}; maxEntries=${slot.retrieval.maxEntries}`);
