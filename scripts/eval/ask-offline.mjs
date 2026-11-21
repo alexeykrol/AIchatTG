@@ -20,6 +20,8 @@
  *   --already-spent-usd (money of the same tranche spent before this run).
  *
  * Experiment levers (defaults reproduce the baseline):
+ *   --context-from <run dir>   use the ordered chunk IDs in the run's answers.jsonl for the selected questions.
+ *                              Bypasses retrieval and rewrite, including retrieval budgets, in all modes.
  *   --rewrite <model>          production query rewrite (input-layer step 5, off in production) switched on:
  *                              `createRewriterAdapter` -> `createKnowledgeRetrieval({ rewriteEnabled: true })`,
  *                              exactly as server.mjs wires it, its transport through the same Anthropic shim and
@@ -40,7 +42,7 @@
  *                              system prompt, in the shim; the file's sha256 goes to the manifest.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +56,7 @@ import { createOfflineAssistant, SUBSTITUTIONS, RETRIEVAL_MAX_ENTRIES, RETRIEVAL
 import { ADAPTER_PLACEHOLDER_KEY, ANTHROPIC_MESSAGES_BASE, DEFAULT_ANTHROPIC_VERSION, createAnthropicChatShim } from './lib/anthropic-shim.mjs';
 import { PUBLISHED_PRICES, createSpendGuard } from './lib/spend-guard.mjs';
 import { loadQuestions, renderAnswersMarkdown, retrievalReport, renderRetrievalMarkdown } from './lib/eval-io.mjs';
+import { loadFixedContext } from './lib/context-from.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // The donor stand's bot answered with this model and effort (agi2claude config.yaml profiles.normal ->
@@ -73,7 +76,7 @@ export function parseArgs(argv) {
     anthropicVersion: DEFAULT_ANTHROPIC_VERSION, keyEnv: null, capUsd: null, priceInput: null, priceOutput: null,
     alreadySpentUsd: 0, rewrite: null, rewriteEffort: DEFAULT_REWRITE_EFFORT, rewritePriceInput: null,
     rewritePriceOutput: null, promptAddendum: null, rewriteNoSignal: false,
-    maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse', coverageText: 'content',
+    maxEntries: null, maxContextTokens: null, noConceptGate: 'refuse', coverageText: 'content', contextFrom: null,
   };
   const booleans = { '--rewrite-no-signal': 'rewriteNoSignal' };
   const map = {
@@ -84,7 +87,7 @@ export function parseArgs(argv) {
     '--rewrite': 'rewrite', '--rewrite-effort': 'rewriteEffort', '--rewrite-price-input': 'rewritePriceInput',
     '--rewrite-price-output': 'rewritePriceOutput', '--prompt-addendum': 'promptAddendum',
     '--max-entries': 'maxEntries', '--max-context-tokens': 'maxContextTokens', '--no-concept-gate': 'noConceptGate',
-    '--coverage-text': 'coverageText',
+    '--coverage-text': 'coverageText', '--context-from': 'contextFrom',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const [flag, inline] = argv[i].split(/=(.*)/s);
@@ -96,6 +99,9 @@ export function parseArgs(argv) {
     const key = map[flag];
     if (!key) throw new Error(`unknown option ${flag}`);
     a[key] = inline ?? argv[++i];
+    if (key === 'contextFrom' && (!a[key]?.trim() || a[key].startsWith('--'))) {
+      throw new Error('--context-from needs a run directory');
+    }
   }
   for (const k of ['limit', 'maxOutputTokens', 'capUsd', 'priceInput', 'priceOutput', 'alreadySpentUsd',
     'rewritePriceInput', 'rewritePriceOutput', 'maxEntries', 'maxContextTokens']) {
@@ -252,28 +258,29 @@ export function rewriteSummary(rows, stack, args) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function runOffline(argv, { mockTransport } = {}) {
+  const args = parseArgs(argv);
   if (args.mode === 'live' && !(args.capUsd > 0)) throw new Error('--cap-usd <tranche cap> is required in live mode');
   const databasePath = resolveDatabase(args.packagePath);
   const donor = resolve(args.donor.replace(/^~(?=\/)/, homedir()));
   let questions = loadQuestions(donor);
   if (args.only) questions = questions.filter((q) => args.only.has(q.q));
   if (args.limit) questions = questions.slice(0, args.limit);
+  const fixedContext = args.contextFrom ? loadFixedContext(args.contextFrom, { questions, databasePath }) : null;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const out = resolve(args.out || join(REPO, 'output', 'eval', 'runs', `${stamp}-${args.mode}`));
+  if (fixedContext && existsSync(out) && realpathSync(out) === realpathSync(fixedContext.provenance.path)) {
+    throw new Error('--out must differ from --context-from');
+  }
   mkdirSync(out, { recursive: true });
 
-  if (args.mode === 'mock') {
-    // Proof of zero network: any use of the real fetch throws and marks the run failed.
-    globalThis.fetch = async () => { throw new Error('network_forbidden_in_mock_mode'); };
-  }
   const stack = args.mode === 'retrieval' ? null : buildProviderStack(args, {
-    transport: args.mode === 'live' ? globalThis.fetch : fakeAnthropicTransport(),
+    transport: args.mode === 'live' ? globalThis.fetch : (mockTransport ?? fakeAnthropicTransport()),
     journalPath: join(out, 'journal.jsonl'),
   });
   const assistant = createOfflineAssistant({ databasePath, provider: stack?.provider ?? null,
     rewriteQuestion: stack?.rewriteQuestion ?? null,
+    fixedContext,
     noConceptGate: args.noConceptGate,
     coverageText: args.coverageText,
     ...(args.rewriteNoSignal ? { rewriteOnNoSignal: true } : {}),
@@ -281,12 +288,27 @@ async function main() {
     ...(args.maxContextTokens != null ? { maxContextTokens: args.maxContextTokens } : {}) });
   const rows = [];
   let stoppedBy = null;
+  const originalFetch = globalThis.fetch;
+  if (args.mode === 'mock') {
+    // Proof of zero network: any use of the real fetch throws and marks the run failed.
+    globalThis.fetch = async () => { throw new Error('network_forbidden_in_mock_mode'); };
+  }
   try {
+    if (fixedContext) {
+      const incompatible = [];
+      for (const { q, question } of questions) {
+        const routing = await assistant.routeQuestion(question, { q });
+        const expected = fixedContext.resultFor(q).knowledge;
+        if (routing.error || JSON.stringify(routing.knowledge ?? null) !== JSON.stringify(expected)) incompatible.push(q);
+      }
+      if (incompatible.length) throw new Error(`--context-from conflicts with answer routing for: ${incompatible.join(', ')}`);
+    }
     for (const q of questions) {
       stack?.setTag(q.q);
       const t0 = Date.now();
-      const r = await assistant.ask(q.question, { userId: `eval-${q.q}` });
-      const diag = args.mode === 'retrieval' ? await assistant.diagnose(q.question, { userId: `eval-${q.q}` }) : null;
+      const options = { userId: `eval-${q.q}`, q: q.q };
+      const r = await assistant.ask(q.question, options);
+      const diag = args.mode === 'retrieval' ? await assistant.diagnose(q.question, options) : null;
       if (stack?.guard.stopped()) { stoppedBy = stack.guard.stopped(); break; }
       const tagged = stack ? stack.guard.journal().filter((j) => j.tag === q.q && j.event === 'call') : [];
       const journal = tagged.filter((j) => j.kind !== 'rewrite');
@@ -296,6 +318,7 @@ async function main() {
         q: q.q, case_id: q.case_id, kind: q.kind, question: q.question,
         status: args.mode === 'retrieval' ? (r.status === 'not_called' ? 'retrieved' : r.status) : r.status,
         answer: r.answer, unit_ids: r.unitIds, chunk_ids: r.chunkIds, gold_units: q.gold_units,
+        ...(fixedContext ? { context_from: true } : {}),
         route_reason: r.routeReason, error: r.error ?? null, pack_status: r.trace?.status ?? null,
         // The old path would have refused here; now the model reasons with the "no direct answer" caveat.
         knowledge_gap: r.knowledgeGap === true, gap_reason: r.gapReason ?? null, gap_detail: r.gapDetail ?? null,
@@ -318,7 +341,10 @@ async function main() {
         } : {}),
       });
     }
-  } finally { assistant.close(); }
+  } finally {
+    if (args.mode === 'mock') globalThis.fetch = originalFetch;
+    assistant.close();
+  }
 
   const sample = { route: DEFAULT_DOMAIN_CATALOG.routeFor('content'),
     knowledge: { sourceId: 'course-knowledge-v2', entries: [{ id: 'x', content: 'x' }] } };
@@ -332,7 +358,8 @@ async function main() {
       no_concept_gate: args.noConceptGate,
       coverage_text: args.coverageText,
       rewrite: Boolean(stack?.rewriteQuestion),
-      rewrite_on_no_signal: Boolean(args.rewriteNoSignal) },
+      rewrite_on_no_signal: Boolean(args.rewriteNoSignal),
+      ...(fixedContext ? { context_from: fixedContext.provenance } : {}) },
     domain_catalog_digest: DEFAULT_DOMAIN_CATALOG.digest,
     answer_system_prompt_sha256: sha256(answerSystemPrompt(sample, DEFAULT_DOMAIN_CATALOG)),
     substitutions: [...SUBSTITUTIONS, ...(args.mode === 'retrieval' ? ['answer_model_not_called'] : []),
@@ -374,5 +401,5 @@ async function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => { console.error(error?.stack || String(error)); process.exitCode = 1; });
+  runOffline(process.argv.slice(2)).catch((error) => { console.error(error?.stack || String(error)); process.exitCode = 1; });
 }
