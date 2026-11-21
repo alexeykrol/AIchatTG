@@ -20,6 +20,12 @@ import {
 const OPENAI_VENDOR = 'openai';
 const ANTHROPIC_VENDOR = 'anthropic';
 export const ANTHROPIC_DEFAULT_ENDPOINT = 'https://api.anthropic.com/v1/';
+// The keyed Anthropic request may only go to an approved endpoint. A config
+// override must still normalize to one of these (https, /v1/).
+export const ANTHROPIC_ENDPOINT_ALLOWLIST = Object.freeze([ANTHROPIC_DEFAULT_ENDPOINT]);
+// Messages API stop reasons that mean the answer was finished by the model.
+// Anything else (max_tokens, refusal, pause_turn, missing, ...) is incomplete.
+const ANTHROPIC_COMPLETE_STOP_REASONS = new Set(['end_turn', 'stop_sequence']);
 export const ANTHROPIC_API_VERSION = '2023-06-01';
 // Messages API `output_config.effort` knows only these levels; `none`/`minimal`
 // would need a silent remapping, so they are a configuration error instead.
@@ -239,7 +245,9 @@ function answerVendorConfig(config, answerTuple) {
   const rawEndpoint = config.anthropicEndpoint == null || config.anthropicEndpoint === ''
     ? ANTHROPIC_DEFAULT_ENDPOINT : config.anthropicEndpoint;
   const anthropicEndpoint = normalizeEndpoint(rawEndpoint);
-  if (!anthropicEndpoint) return invalid('provider_anthropic_endpoint_invalid');
+  if (!anthropicEndpoint || !ANTHROPIC_ENDPOINT_ALLOWLIST.includes(anthropicEndpoint)) {
+    return invalid('provider_anthropic_endpoint_invalid');
+  }
   const anthropicApiKey = typeof config.anthropicApiKey === 'string' ? config.anthropicApiKey.trim() : '';
   if (!anthropicApiKey || anthropicApiKey.length > 4_096 || /[\r\n]/.test(anthropicApiKey)) {
     return invalid('provider_anthropic_api_key_invalid');
@@ -620,6 +628,8 @@ async function callOnce({ config, fetchFn, operation, tuple, system, input, maxO
     response = await fetchFn(`${config.endpoint}chat/completions`, {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify(requestFor({ tuple, system, input, maxOutputTokens, responseFormat })),
+      // A keyed request never follows a redirect.
+      redirect: 'error',
       // One attempt, one deadline. A timeout can happen after the provider has
       // accepted a billable request, so it retains the ambiguous transport
       // classification and is never retried automatically.
@@ -661,15 +671,23 @@ function anthropicUsageFrom(result) {
     cacheReadInputTokens, cacheCreationInputTokens };
 }
 
+function anthropicStopReason(result) {
+  const raw = result?.stop_reason;
+  if (raw == null) return 'missing';
+  return typeof raw === 'string' && /^[a-z_]{1,64}$/.test(raw) ? raw : 'unknown';
+}
+
 function anthropicReceiptFor({ operation, tuple, result, response, status }) {
   const usage = anthropicUsageFrom(result);
   if (!usage) return null;
   const responseModel = typeof result?.model === 'string' && MODEL_PATTERN.test(result.model)
     ? result.model : tuple.model;
+  const stopReason = anthropicStopReason(result);
   return Object.freeze({
     vendor: ANTHROPIC_VENDOR, operation, modelId: responseModel, configuredModelId: tuple.model,
     reasoningEffort: tuple.reasoningEffort, httpStatus: Number.isSafeInteger(status) ? status : 0,
     requestId: responseHeader(response, 'request-id'), ...usage, costUsd: null, retryCount: 0,
+    stopReason, incomplete: !ANTHROPIC_COMPLETE_STOP_REASONS.has(stopReason),
   });
 }
 
@@ -700,6 +718,8 @@ async function callAnthropicOnce({ config, fetchFn, operation, tuple, system, in
         'anthropic-version': ANTHROPIC_API_VERSION,
       },
       body: JSON.stringify(anthropicRequestFor({ tuple, system, input, maxOutputTokens })),
+      // The key must never follow a redirect to another origin.
+      redirect: 'error',
       signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
   } catch { throw new ProviderRequestError('provider_transport_failed'); }
@@ -713,6 +733,10 @@ async function callAnthropicOnce({ config, fetchFn, operation, tuple, system, in
   }
   const blocks = result.content.filter((block) => plainObject(block) && block.type === 'text' && typeof block.text === 'string');
   if (!blocks.length) throw new ProviderRequestError('provider_response_invalid', receipt);
+  // Mirrors the OpenAI completion check (finish_reason must be `stop`): a
+  // non-empty text cut by max_tokens is not a finished answer. The receipt
+  // keeps the stop reason and the incomplete mark for accounting.
+  if (receipt.incomplete) throw new ProviderRequestError('provider_response_incomplete', receipt);
   return { text: blocks.map((block) => block.text).join(''), receipt };
 }
 
