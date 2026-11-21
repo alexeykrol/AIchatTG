@@ -306,6 +306,9 @@ updated: 2026-11-19
   проверка. Основание: `docs/npm-supply-chain-audit-2026-11-21.md`.
 - **VPS-DOCKER-PRUNE (2026-11-21).** На news-vps 5 ГБ неактивных образов и 3,2 ГБ build cache; диск
   62% (19 ГБ свободно), не срочно. Чистить только свои образы aichattg, по подтверждению.
+- **VPS-RAM note (2026-11-21, later).** Сессия News Digest перезапустила `news-server-fetcher` и
+  остановила `news-substack-publisher` (не автостартует; включить: `docker start news-substack-publisher`).
+  Доступно стало ~2,2 ГБ. Это чужой проект — только к сведению.
 - **VPS-RAM (2026-11-21).** Память — узкое место общего VPS: 3,9 ГБ, доступно ~1 ГБ, без swap, 1 CPU.
   Любой новый тяжёлый процесс — с mem_limit контейнера и замером RSS.
 
