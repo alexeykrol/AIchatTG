@@ -187,8 +187,8 @@ test('an adapter without a token stays disabled even when markup is requested', 
 });
 
 test('the public Assistant release metadata is independent and deterministic', () => {
-  assert.deepEqual(ASSISTANT_RELEASE, { version: '2.4.46', releasedOn: '2026-11-18' });
-  assert.equal(ASSISTANT_RELEASE_LINE, 'Версия 2.4.46 от 18.11.2026');
+  assert.deepEqual(ASSISTANT_RELEASE, { version: '2.4.47', releasedOn: '2026-11-21' });
+  assert.equal(ASSISTANT_RELEASE_LINE, 'Версия 2.4.47 от 21.11.2026');
   assert.equal(Object.isFrozen(ASSISTANT_RELEASE), true);
 });
 

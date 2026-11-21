@@ -386,7 +386,8 @@ test('mock run with --rewrite --rewrite-no-signal: no-signal questions may be re
 // No tracked source of the request path differs between that commit and this pin, and the digest is stable
 // across runs.
 const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';
-const PINNED_DEFAULT_REQUESTS_SHA256 = '443862d11b794f45884f4a8e005f23db2c6993279ae864f2c7817163b93bf119';
+// Re-pinned 2026-11-21: the runtime answer prompt now ends with the v2-cited discipline (merge of 358f6dc).
+const PINNED_DEFAULT_REQUESTS_SHA256 = 'a624de3f1c27f9354e30b9ddb291c468e945eb2ca072401f2754383ac429cd71';
 const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
 
 test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {
