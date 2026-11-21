@@ -21,3 +21,16 @@ Known soft deviation: one passage of `markup-3` (line 10, map-reading instructio
 questions free of dictionary words; the worker's own stricter check flags it, the build accepts it.
 
 Measurements: `docs/reports/2026-11-20-search-architecture/heldout-and-gate-results.md`.
+
+## Links (kb-links worker, gpt-6.2-sol, high)
+
+`links.jsonl`: 121 typed links between exact atom ranges — 13 contradicts, 33 qualifies, 49 continues,
+26 applies; all 20 records covered; made without access to evaluation questions. Build with links:
+add `--links scripts/eval/experiments/kb-passages/links.jsonl` (table `passage_links`).
+
+## Measurement helpers (synthetic runs for `passage_coverage.py`)
+
+- `scripts/eval/hybrid_candidates.py` — vector (local MiniLM, text windows + cards) and word+vector fusion;
+  needs a Python with sentence-transformers and the model in the local HF cache.
+- `scripts/eval/expand_neighbors.py` — add ±W neighbouring passages of the same record.
+- `scripts/eval/expand_links.py` — add passages linked to the context by chosen link types.
