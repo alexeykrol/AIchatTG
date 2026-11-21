@@ -61,10 +61,10 @@ RETRYABLE = {408, 429, 500, 502, 503, 504, 529}
 def load_prices(path: Path = SPEND_GUARD_JS) -> dict[str, dict[str, float]]:
     """PUBLISHED_PRICES from spend-guard.mjs (single source of the price table)."""
     text = path.read_text("utf-8")
-    block = text[text.index("PUBLISHED_PRICES"):]
-    block = block[:block.index("});") + 3]
+    # Every `'<model>': Object.freeze({...})` row of the file: the Claude table and the OpenAI table
+    # (OPENAI_PUBLISHED_PRICES, spread into PUBLISHED_PRICES) both count.
     out = {}
-    for m in re.finditer(r"'([\w.-]+)':\s*Object\.freeze\(\{([^}]*)\}\)", block):
+    for m in re.finditer(r"'([\w.-]+)':\s*Object\.freeze\(\{([^}]*)\}\)", text):
         out[m.group(1)] = {k: float(v) for k, v in re.findall(r"(\w+):\s*([\d.]+)", m.group(2))}
     if not out:
         raise ValueError(f"no prices parsed from {path}")
