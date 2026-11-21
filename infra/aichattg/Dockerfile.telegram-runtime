@@ -7,10 +7,23 @@ LABEL org.opencontainers.image.source="https://github.com/alexeykrol/AIchatTG" \
 
 WORKDIR /app/apps/telegram-runtime
 ENV NODE_ENV=production
+# onnxruntime-node (hybrid retrieval embedder) has 1DS telemetry on Linux; off.
+ENV ORT_DISABLE_TELEMETRY=1
 
 COPY apps/telegram-runtime/package.json apps/telegram-runtime/package-lock.json ./
 COPY packages/telegram-core/ /app/packages/telegram-core/
-RUN npm ci --omit=dev
+# Hybrid retrieval embedder (docs/npm-supply-chain-audit-2026-11-21.md):
+# onnxruntime-node ships its CPU binaries in the tarball; its postinstall would
+# only download optional GPU parts, so it is told to skip (scoped to this RUN;
+# no global ignore-scripts — better-sqlite3 still needs its install step).
+# Afterwards every platform binary except linux/<this arch> is deleted.
+ARG TARGETARCH
+RUN ONNXRUNTIME_NODE_INSTALL=skip npm ci --omit=dev \
+ && case "${TARGETARCH:-amd64}" in arm64) ORT_KEEP=arm64 ;; *) ORT_KEEP=x64 ;; esac \
+ && ORT_BIN=node_modules/onnxruntime-node/bin/napi-v6 \
+ && test -f "$ORT_BIN/linux/$ORT_KEEP/onnxruntime_binding.node" \
+ && rm -rf "$ORT_BIN/win32" "$ORT_BIN/darwin" \
+ && find "$ORT_BIN/linux" -mindepth 1 -maxdepth 1 ! -name "$ORT_KEEP" -exec rm -rf {} +
 
 COPY apps/telegram-runtime/src/ ./src/
 RUN chown -R node:node /app

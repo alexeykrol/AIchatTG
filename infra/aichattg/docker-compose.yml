@@ -123,6 +123,13 @@ services:
     <<: *service-security
     profiles:
       - telegram-runtime
+    # Memory fence for the shared 3.9 GB / no-swap host: an OOM must kill only
+    # this container. Measured peak (VmHWM) of the hybrid retrieval process in
+    # the image: ~406 MB (linux, quantized embedder + tokenizer + package); the
+    # server around it adds roughly 50 MB; +150 MB headroom. Lexical mode never
+    # loads the model and stays far below.
+    mem_limit: 640m
+    memswap_limit: 640m
     image: "aichattg/telegram-runtime:${AICHATTG_SOURCE_SHA:?AICHATTG_SOURCE_SHA is required}"
     build:
       context: ../..
@@ -201,6 +208,18 @@ services:
       TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT: "${TELEGRAM_RUNTIME_ASSISTANT_DIALOGUE_TURN_LIMIT:-3}"
       TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ENABLED: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ENABLED:-false}"
       TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_REWRITE_ON_NO_SIGNAL:-false}"
+      # --- retrieval search (hybrid words+vectors, passage links) — BEGIN ---
+      # Defaults reproduce the lexical retriever exactly. hybrid needs a package
+      # built by scripts/kb/build_hybrid_package.mjs (vectors + model inside it).
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MODE: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MODE:-lexical}"
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_NO_CONCEPT_GATE: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_NO_CONCEPT_GATE:-refuse}"
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_COVERAGE_TEXT: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_COVERAGE_TEXT:-content}"
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_HYBRID_MAX_CONTEXT_TOKENS: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_HYBRID_MAX_CONTEXT_TOKENS:-12000}"
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_TYPES: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_TYPES:-contradicts,qualifies}"
+      TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_MAX: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_MAX:-0}"
+      # onnxruntime-node telemetry off (also set in the image).
+      ORT_DISABLE_TELEMETRY: "1"
+      # --- retrieval search — END ---
       TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE: "${TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE:-true}"
       TELEGRAM_RUNTIME_REWRITE_MODEL: "${TELEGRAM_RUNTIME_REWRITE_MODEL:-}"
       TELEGRAM_RUNTIME_REWRITE_REASONING_EFFORT: "${TELEGRAM_RUNTIME_REWRITE_REASONING_EFFORT:-minimal}"

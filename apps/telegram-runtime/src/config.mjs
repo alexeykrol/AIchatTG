@@ -32,6 +32,52 @@ function csv(env, name) {
   return String(env[name] || '').split(',').map((value) => value.trim()).filter(Boolean);
 }
 
+// ---- retrieval search options (hybrid words+vectors, passage links) — BEGIN ----
+// Separate block on purpose: the provider/vendor settings live elsewhere in this
+// file and are edited independently. Every default reproduces today's lexical
+// retriever exactly; hybrid and link expansion are switched on only by env.
+const RETRIEVAL_MODES = new Set(['lexical', 'hybrid']);
+const RETRIEVAL_NO_CONCEPT_GATES = new Set(['refuse', 'pass']);
+const RETRIEVAL_COVERAGE_TEXTS = new Set(['content', 'content+alias']);
+const RETRIEVAL_LINK_TYPES = new Set(['contradicts', 'qualifies', 'continues', 'applies']);
+
+function oneOf(env, name, allowed, fallback) {
+  const raw = String(env[name] ?? '').trim();
+  const value = raw || fallback;
+  if (!allowed.has(value)) throw new Error(`${name} must be one of ${[...allowed].join(', ')}`);
+  return value;
+}
+
+function retrievalSearchConfig(env) {
+  const linkTypes = Object.hasOwn(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_TYPES')
+    ? csv(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_TYPES')
+    : ['contradicts', 'qualifies'];
+  for (const type of linkTypes) {
+    if (!RETRIEVAL_LINK_TYPES.has(type)) {
+      throw new Error(`TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_TYPES must list only ${[...RETRIEVAL_LINK_TYPES].join(', ')}`);
+    }
+  }
+  const linkMax = nonNegativeInteger(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_MAX', 0, 16);
+  if (linkMax > 0 && !linkTypes.length) {
+    throw new Error('TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_MAX > 0 requires at least one link type');
+  }
+  return {
+    // lexical = today's FTS retriever byte for byte; hybrid = RRF of the lexical
+    // order with a local MiniLM vector ranking (falls back to lexical per query
+    // when the embedder or the package vectors are unavailable).
+    retrievalMode: oneOf(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MODE', RETRIEVAL_MODES, 'lexical'),
+    noConceptGate: oneOf(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_NO_CONCEPT_GATE', RETRIEVAL_NO_CONCEPT_GATES, 'refuse'),
+    coverageText: oneOf(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_COVERAGE_TEXT', RETRIEVAL_COVERAGE_TEXTS, 'content'),
+    // Token ceiling of the final hybrid/linked context. The lexical stage keeps
+    // MAX_CONTEXT_TOKENS, exactly as measured offline; this one bounds what the
+    // fusion and the links may add on top (12 000 ≈ 28 passages of this book).
+    hybridMaxContextTokens: integer(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_HYBRID_MAX_CONTEXT_TOKENS', 12_000, { min: 500, max: 60_000 }),
+    // 0 = off. Appends up to N passages linked (passage_links) to the context.
+    linkExpansion: { types: linkTypes, max: linkMax },
+  };
+}
+// ---- retrieval search options — END ----
+
 const ANALYZER_MODES = new Set(['off', 'observe', 'dispatch']);
 
 /**
@@ -307,6 +353,7 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
       // Contract self-check, on by default; the switch exists so an operator can
       // drop it without a code change if it ever becomes a latency problem.
       validatePacks: boolean(env, 'TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_VALIDATE_PACKS', true),
+      ...retrievalSearchConfig(env),
       rewrite: {
         model: String(env.TELEGRAM_RUNTIME_REWRITE_MODEL || ''),
         reasoningEffort: String(env.TELEGRAM_RUNTIME_REWRITE_REASONING_EFFORT || 'minimal'),

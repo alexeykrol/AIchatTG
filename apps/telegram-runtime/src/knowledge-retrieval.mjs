@@ -6,7 +6,43 @@ import {
   groundingFromPack,
   routeQuestionDomain,
 } from '@aichattg/telegram-core';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createRetrieverAdapter } from './retriever-adapter.mjs';
+import { createEmbedder, PACKAGE_MODEL_FILES } from './embedder.mjs';
+
+/**
+ * The question embedder for hybrid mode. The model must sit inside the admitted
+ * package (its sha256 is then proven by admission, like ai.db); a package
+ * without `files` (offline harness stub) is accepted when the files exist, and
+ * the model digest is computed here so the retriever can still check it against
+ * the digest recorded beside the passage vectors.
+ */
+function hybridEmbedderFor(pkg, { buildEmbedder, exists = existsSync, readFile = readFileSync }) {
+  const root = typeof pkg.root === 'string' && pkg.root ? pkg.root : dirname(String(pkg.databasePath || ''));
+  const paths = Object.fromEntries(Object.entries(PACKAGE_MODEL_FILES).map(([k, rel]) => [k, join(root, rel)]));
+  let modelSha256 = null;
+  if (Array.isArray(pkg.files)) {
+    const listed = new Map(pkg.files.map((file) => [file.path, file.sha256]));
+    if (!Object.values(PACKAGE_MODEL_FILES).every((rel) => listed.has(rel))) {
+      return { embedder: null, reason: 'embedder_model_not_in_package', modelSha256: null };
+    }
+    modelSha256 = listed.get(PACKAGE_MODEL_FILES.model);
+  } else {
+    if (!Object.values(paths).every((path) => exists(path))) {
+      return { embedder: null, reason: 'embedder_model_missing', modelSha256: null };
+    }
+    modelSha256 = createHash('sha256').update(readFile(paths.model)).digest('hex');
+  }
+  return {
+    embedder: buildEmbedder({
+      modelPath: paths.model, tokenizerPath: paths.tokenizer, tokenizerConfigPath: paths.tokenizerConfig,
+    }),
+    reason: null,
+    modelSha256,
+  };
+}
 
 /**
  * The assistant's path to the content domain: an admitted v2 package, the
@@ -52,11 +88,18 @@ export function createKnowledgeRetrieval(
     noConceptGate,
     coverageText,
     validatePacks = true,
+    // Hybrid search + passage links (config.mjs retrievalSearchConfig). The
+    // defaults keep the lexical retriever exactly as before.
+    retrievalMode = 'lexical',
+    hybridMaxContextTokens,
+    linkExpansion = null,
   } = {},
   {
     knowledge = null,
     buildRetriever = createRetrieverAdapter,
     rewriteQuestion = null,
+    buildEmbedder = createEmbedder,
+    log = (line) => console.warn(line),
   } = {},
 ) {
   const admission = typeof knowledge?.forPackage === 'function'
@@ -75,6 +118,36 @@ export function createKnowledgeRetrieval(
   }
 
   const pkg = admission.package;
+  const hybrid = retrievalMode === 'hybrid'
+    ? hybridEmbedderFor(pkg, { buildEmbedder })
+    : { embedder: null, reason: null, modelSha256: null };
+  if (retrievalMode === 'hybrid' && hybrid.reason) {
+    log(`[knowledge-retrieval] hybrid unavailable: ${hybrid.reason}; lexical only`);
+  }
+  // Never throws: a failed embedding is logged once per reason code and the
+  // question is answered lexically. The question text is never logged.
+  const embedFailures = new Set();
+  async function embedQuestion(text) {
+    if (!hybrid.embedder) return null;
+    try {
+      return await hybrid.embedder.embedOne(text);
+    } catch (error) {
+      const code = String(error?.code || error?.message || 'embedder_error').slice(0, 120);
+      if (!embedFailures.has(code)) {
+        embedFailures.add(code);
+        log(`[knowledge-retrieval] embedder failed (${code}); lexical fallback`);
+      }
+      return null;
+    }
+  }
+  const linksOn = Boolean(linkExpansion && linkExpansion.max > 0);
+  // Lexical without links passes exactly the options it always passed.
+  const searchOptions = retrievalMode === 'lexical' && !linksOn ? {} : {
+    retrievalMode,
+    ...(hybridMaxContextTokens !== undefined ? { hybridMaxContextTokens } : {}),
+    ...(linksOn ? { linkExpansion } : {}),
+    ...(hybrid.modelSha256 ? { vectorModelSha256: hybrid.modelSha256 } : {}),
+  };
   const retriever = buildRetriever(
     {
       databasePath: pkg.databasePath,
@@ -83,9 +156,18 @@ export function createKnowledgeRetrieval(
       validatePacks,
       ...(noConceptGate !== undefined ? { noConceptGate } : {}),
       ...(coverageText !== undefined ? { coverageText } : {}),
+      ...searchOptions,
     },
-    rewriteQuestion ? { rewriteQuestion } : {},
+    {
+      ...(rewriteQuestion ? { rewriteQuestion } : {}),
+      ...(hybrid.embedder ? { embedQuestion, log } : {}),
+    },
   );
+  const search = typeof retriever.searchStatus === 'function' ? retriever.searchStatus() : null;
+  const hybridLive = Boolean(hybrid.embedder) && search?.hybrid === true;
+  // The projection cap follows what the retriever may return: the fused width
+  // plus the linked passages it may append.
+  const groundingEntries = Math.min(128, maxEntries + (search?.links ? search.linkMax : 0));
 
   const openReason = typeof retriever.unavailableReason === 'function'
     ? retriever.unavailableReason() : null;
@@ -144,19 +226,21 @@ export function createKnowledgeRetrieval(
     // rewriter only after its free local search came back weak. The verdict,
     // reasons and traces below are the same either way.
     const rewriteAllowed = rewriteEnabled === true && (!noSignal || rewriteOnNoSignal === true);
+    const queryVector = hybridLive ? await embedQuestion(question) : null;
+    const vectorInput = queryVector ? { queryVector } : {};
     const answer = rewriteAllowed
       ? await retriever.forQuestionWithRewrite({
-        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail,
+        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail, ...vectorInput,
       })
       : retriever.forQuestion({
-        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail,
+        question, sessionId, domainId: pkg.domainId, maxContextTokens, maxEntries, dialogueTail, ...vectorInput,
       });
 
     if (!answer.available || !answer.pack) {
       return unavailable(answer.reason || 'retriever_pack_missing');
     }
 
-    const projected = groundingFromPack(answer.pack, { sourceId: pkg.sourceId, maxEntries });
+    const projected = groundingFromPack(answer.pack, { sourceId: pkg.sourceId, maxEntries: groundingEntries });
     // Both layers refused: the question names no domain concept AND the corpus
     // holds nothing for it. That pair is the positive out-of-coverage verdict,
     // surfaced as the domain reason so the reply layer can tell "topic not
