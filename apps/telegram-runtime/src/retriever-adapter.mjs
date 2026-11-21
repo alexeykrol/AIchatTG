@@ -42,11 +42,15 @@ import {
   tailEligible,
   tailTerms,
   tokenize,
+  tokensOf,
   unitOfChunkId,
   validateAgainstSchema,
   validateRewrite,
 } from '@aichattg/telegram-core';
 import { openReadOnlyRuntimeDatabase } from './database.mjs';
+import {
+  LINK_TYPES, expandLinks, linkNeighbours, rrfFuse, vectorRanking,
+} from './hybrid-retrieval.mjs';
 
 const DEFAULT_DOMAIN_ID = 'ai';
 const DEFAULT_MAX_CONTEXT_TOKENS = 6_000;
@@ -105,6 +109,20 @@ export function createRetrieverAdapter(
     // become a latency problem in production, and then the operator needs an
     // off switch that is not a code change.
     validatePacks = true,
+    // Hybrid search (offline recipe scripts/eval/hybrid_candidates.py): the
+    // lexical selection is fused by reciprocal rank with a vector ranking of the
+    // package's precomputed passage vectors. 'lexical' (default) leaves every
+    // code path of the lexical retriever untouched.
+    retrievalMode = 'lexical',
+    // Final token ceiling once fusion/links are applied (lexical stage keeps
+    // maxContextTokens).
+    hybridMaxContextTokens = 12_000,
+    // { types, max } — append up to `max` passages linked by passage_links
+    // (offline recipe scripts/eval/expand_links.py). null/max 0 = off.
+    linkExpansion = null,
+    // sha256 of the model file the question embedder loads; the package's
+    // passage_vectors_meta must name the same digest or hybrid stays off.
+    vectorModelSha256 = null,
   } = {},
   {
     openDatabase = openReadOnlyRuntimeDatabase,
@@ -113,6 +131,10 @@ export function createRetrieverAdapter(
     // stays a pure local component and the gold harness spends nothing.
     rewriteQuestion = null,
     readFile = readFileSync,
+    // Hybrid only: embeds a rewritten question for the second pass. The first
+    // pass receives its vector from the caller (`queryVector`).
+    embedQuestion = null,
+    log = (line) => console.warn(line),
   } = {},
 ) {
   if (noConceptGate !== 'refuse' && noConceptGate !== 'pass') {
@@ -121,6 +143,16 @@ export function createRetrieverAdapter(
   if (coverageText !== 'content' && coverageText !== 'content+alias') {
     throw new TypeError('coverageText must be content or content+alias');
   }
+  if (retrievalMode !== 'lexical' && retrievalMode !== 'hybrid') {
+    throw new TypeError('retrievalMode must be lexical or hybrid');
+  }
+  const linkMax = linkExpansion && Number.isInteger(linkExpansion.max) ? linkExpansion.max : 0;
+  const linkTypes = linkExpansion && Array.isArray(linkExpansion.types) ? linkExpansion.types : [];
+  if (linkMax < 0 || linkMax > 16) throw new TypeError('linkExpansion.max must be 0..16');
+  if (linkTypes.some((type) => !LINK_TYPES.includes(type))) {
+    throw new TypeError(`linkExpansion.types must be among ${LINK_TYPES.join(', ')}`);
+  }
+  const linksWanted = linkMax > 0 && linkTypes.length > 0;
   const includeAlias = coverageText === 'content+alias';
   const chunkColumns = SQL_CHUNK_COLUMNS + (includeAlias ? ', c.search_alias' : '');
   let db = null;
@@ -235,6 +267,81 @@ export function createRetrieverAdapter(
       openReason = 'retriever_package_invalid';
       statements = null;
     }
+  }
+
+  // Hybrid / link state. Loaded once; a package without vectors or links is not
+  // an error for the retriever — it degrades to lexical with a logged reason.
+  let vectorIndex = null;
+  let hybridReason = retrievalMode === 'hybrid' ? null : 'hybrid_disabled';
+  let neighbours = null;
+  let linkReason = linksWanted ? null : 'links_disabled';
+  const allowedByDomain = new Map();
+  if (db && !openReason && retrievalMode === 'hybrid') {
+    try {
+      const meta = new Map(db.prepare('SELECT key, value FROM passage_vectors_meta').all()
+        .map((row) => [row.key, row.value]));
+      if (typeof vectorModelSha256 === 'string' && vectorModelSha256
+        && meta.get('model_sha256') !== vectorModelSha256) {
+        hybridReason = 'search_vectors_model_mismatch';
+      } else {
+        const ids = db.prepare('SELECT chunk_id FROM chunks ORDER BY unit_id, ord').all()
+          .map((row) => row.chunk_id);
+        const position = new Map(ids.map((id, i) => [id, i]));
+        const rows = db.prepare(
+          `SELECT v.chunk_id, v.dim, v.vec FROM passage_vectors v
+             JOIN chunks c ON c.chunk_id = v.chunk_id
+            ORDER BY c.unit_id, c.ord, v.piece_ord`).all();
+        const dim = rows.length ? rows[0].dim : 0;
+        if (!rows.length || !dim) throw new Error('empty');
+        const matrix = new Float32Array(rows.length * dim);
+        const owner = new Int32Array(rows.length);
+        rows.forEach((row, p) => {
+          if (row.dim !== dim || row.vec.byteLength !== dim * 4) throw new Error('dim');
+          matrix.set(new Float32Array(row.vec.buffer.slice(row.vec.byteOffset,
+            row.vec.byteOffset + row.vec.byteLength)), p * dim);
+          owner[p] = position.get(row.chunk_id);
+        });
+        vectorIndex = { ids, owner, matrix, dim };
+        statements.chunkById = db.prepare(`SELECT ${chunkColumns} FROM chunks c WHERE c.chunk_id = ?`);
+        statements.domainChunks = db.prepare(
+          `SELECT c.chunk_id FROM chunks c
+             JOIN units u ON u.unit_id = c.unit_id
+             JOIN unit_domain d ON d.unit_id = c.unit_id
+            WHERE u.state = 'canonical' AND c.state = 'canonical' AND d.domain_id = ?`);
+      }
+    } catch {
+      vectorIndex = null;
+      hybridReason = 'search_vectors_missing';
+    }
+    if (hybridReason) log(`[retriever] hybrid unavailable: ${hybridReason}; lexical only`);
+  }
+  if (db && !openReason && linksWanted) {
+    try {
+      neighbours = linkNeighbours(db.prepare(
+        'SELECT type, a_chunk_id AS a, b_chunk_id AS b FROM passage_links ORDER BY rowid').all(), linkTypes);
+      statements.chunkById ??= db.prepare(`SELECT ${chunkColumns} FROM chunks c WHERE c.chunk_id = ?`);
+      statements.domainChunks ??= db.prepare(
+        `SELECT c.chunk_id FROM chunks c
+           JOIN units u ON u.unit_id = c.unit_id
+           JOIN unit_domain d ON d.unit_id = c.unit_id
+          WHERE u.state = 'canonical' AND c.state = 'canonical' AND d.domain_id = ?`);
+    } catch {
+      neighbours = null;
+      linkReason = 'search_links_missing';
+      log(`[retriever] link expansion unavailable: ${linkReason}`);
+    }
+  }
+
+  function allowedChunks(domain) {
+    if (!allowedByDomain.has(domain)) {
+      allowedByDomain.set(domain, new Set(statements.domainChunks.all(domain).map((row) => row.chunk_id)));
+    }
+    return allowedByDomain.get(domain);
+  }
+
+  function validQueryVector(vector) {
+    return Boolean(vectorIndex) && vector != null && typeof vector.length === 'number'
+      && vector.length === vectorIndex.dim;
   }
 
   // Contracts live inside the signed package (`contracts/` beside ai.db), so the
@@ -438,6 +545,8 @@ export function createRetrieverAdapter(
     const wouldRefuse = run.noConceptSignalAbsent && run.strongUnits < NO_CONCEPT_MIN_UNITS;
     if (noConceptGate === 'refuse' && wouldRefuse) {
       run.gaps = notFoundGaps(terms, run.conceptMatches);
+      // An explicit refusal policy is not overruled by the vector side.
+      run.gateRefused = true;
       return run;
     }
     if (run.bestScore < THRESHOLD_NOT_FOUND) {
@@ -463,6 +572,76 @@ export function createRetrieverAdapter(
     run.confidence = decided.confidence;
     run.gaps = decided.gaps;
     return run;
+  }
+
+  function candidateById(id, known) {
+    if (known.has(id)) return known.get(id);
+    const row = statements.chunkById.get(id);
+    return row ? candidateFromRow(row) : null;
+  }
+
+  /**
+   * Hybrid fusion and link expansion on top of a finished lexical run. Pure
+   * ranking lives in hybrid-retrieval.mjs; here the run's selection is replaced
+   * by the fused one and re-budgeted under `hybridMaxContextTokens`.
+   * Returns the step record for the trace, or null when nothing applied.
+   */
+  function widen(run, { queryVector, domain, maxEntries }) {
+    const useVectors = validQueryVector(queryVector) && !run.gateRefused;
+    const useLinks = Boolean(neighbours) && !run.gateRefused;
+    if (!useVectors && !useLinks) return null;
+    const allowed = allowedChunks(domain);
+    const known = new Map(run.selected.map((cand) => [cand.chunkId, cand]));
+    const lexicalIds = run.selected.map((cand) => cand.chunkId);
+    let ordered = lexicalIds.map((id) => ({ id, reason: null }));
+    const step = { mode: useVectors ? 'hybrid' : 'lexical', lexical: lexicalIds.length,
+      vectorOnly: 0, linksAdded: 0, budgetSkipped: 0 };
+    if (useVectors) {
+      const vector = vectorRanking(vectorIndex, queryVector, { allowed });
+      const cosine = new Map(vector.map((v) => [v.id, v.score]));
+      const fused = rrfFuse(lexicalIds, vector.map((v) => v.id), {
+        vectorDepth: maxEntries * 3, top: maxEntries,
+      });
+      ordered = fused.map((f) => ({
+        id: f.id,
+        cosine: cosine.get(f.id) ?? null,
+        reason: `hybrid:rrf=${f.score.toFixed(5)};lex_rank=${f.lexRank ?? '-'};vec_rank=${f.vecRank ?? '-'}`,
+      }));
+      step.vectorOnly = fused.filter((f) => f.lexRank === null).length;
+    }
+    if (useLinks) {
+      const added = expandLinks(ordered.map((o) => o.id), neighbours, linkMax)
+        .filter((link) => allowed.has(link.id));
+      for (const link of added) {
+        ordered.push({ id: link.id, reason: `link:${link.type}_of=${link.via}` });
+      }
+    }
+
+    const selected = [];
+    let used = 0;
+    for (const item of ordered) {
+      const cand = candidateById(item.id, known);
+      if (!cand) continue;
+      const cost = tokensOf(cand);
+      if (used + cost > hybridMaxContextTokens) { step.budgetSkipped += 1; continue; }
+      if (!known.has(item.id)) {
+        // Not a lexical candidate: its score is the vector cosine (clamped to
+        // the contract's [0, 1]); link-only passages score 0.
+        cand.score = Math.max(0, item.cosine ?? 0);
+      }
+      if (item.reason) cand.reasonExtra = cand.reasonExtra ? `${cand.reasonExtra};${item.reason}` : item.reason;
+      if (item.reason?.startsWith('link:')) step.linksAdded += 1;
+      selected.push(cand);
+      used += cost;
+    }
+    run.selected = selected;
+    run.usedTokens = used;
+    if (selected.length && run.status === 'not_found') {
+      // Words found nothing usable, vectors did: grounded, but honestly weak.
+      run.status = 'insufficient_context';
+      run.confidence = 'low';
+    }
+    return step;
   }
 
   function session(sessionId) {
@@ -553,6 +732,9 @@ export function createRetrieverAdapter(
     maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
     maxEntries = DEFAULT_MAX_ENTRIES,
     dialogueTail = null,
+    // Hybrid only: the L2-normalized embedding of `question`. Absent or
+    // malformed → this question is answered lexically (logged by the caller).
+    queryVector = null,
   } = {}) {
     if (openReason) return unavailable(openReason);
     if (typeof question !== 'string' || !question.trim()) {
@@ -601,7 +783,13 @@ export function createRetrieverAdapter(
     }
 
     const tail = eligible ? tailTerms(dialogueTail) : [];
-    const key = cacheKey(request, { q: allTokens.join(' ') }, tail);
+    const hybridQuery = validQueryVector(queryVector);
+    const widening = hybridQuery || Boolean(neighbours);
+    // Lexical mode keeps the original key byte for byte; a widened pack is keyed
+    // apart so a lexical fallback is never served as a hybrid answer or back.
+    const key = cacheKey(request, widening
+      ? { q: allTokens.join(' '), hybrid: hybridQuery, links: Boolean(neighbours) }
+      : { q: allTokens.join(' ') }, tail);
     let cacheReason = 'no_cached_pack';
     const cached = sess.packs.get(key);
     if (cached) {
@@ -619,8 +807,11 @@ export function createRetrieverAdapter(
     if (topicSwitch) cacheReason = 'topic_switch_reset';
 
     const run = runQuery(question, tail, requestDomain, maxContextTokens, maxEntries);
+    const widened = widening
+      ? widen(run, { queryVector: hybridQuery ? queryVector : null, domain: requestDomain, maxEntries })
+      : null;
     const pack = buildPack({
-      request,
+      request: widened ? { ...request, max_context_tokens: hybridMaxContextTokens } : request,
       run,
       packRole: 'fresh',
       subqueries: 0,
@@ -638,9 +829,18 @@ export function createRetrieverAdapter(
     pack.citations = citationsFor(pack);
 
     // The package contract closes both the pack and its retrieval_trace.
-    const trace = noConceptGate === 'pass' ? Object.freeze({
-      noConceptSignalAbsent: run.noConceptSignalAbsent,
-      noConceptGateBypassed: run.noConceptGateBypassed,
+    const searchTrace = retrievalMode === 'hybrid' || linksWanted
+      ? { search: Object.freeze(widened ? { ...widened } : {
+        mode: 'lexical',
+        fallback: retrievalMode === 'hybrid' ? (hybridReason || 'query_vector_missing') : null,
+      }) }
+      : {};
+    const trace = noConceptGate === 'pass' || searchTrace.search ? Object.freeze({
+      ...(noConceptGate === 'pass' ? {
+        noConceptSignalAbsent: run.noConceptSignalAbsent,
+        noConceptGateBypassed: run.noConceptGateBypassed,
+      } : {}),
+      ...searchTrace,
     }) : null;
     sess.packs.set(key, { pack: structuredClone(pack), at: now(), trace });
     while (sess.packs.size > PACKS_PER_SESSION_MAX) {
@@ -706,7 +906,11 @@ export function createRetrieverAdapter(
       }));
     }
 
-    const second = forQuestion({ ...input, question: checked.question });
+    let secondVector = null;
+    if (vectorIndex && typeof embedQuestion === 'function') {
+      try { secondVector = await embedQuestion(checked.question); } catch { secondVector = null; }
+    }
+    const second = forQuestion({ ...input, question: checked.question, queryVector: secondVector });
     if (!second.available || !second.pack) {
       return withTrace(first, rewriteTrace({
         attempted: true,
@@ -751,6 +955,18 @@ export function createRetrieverAdapter(
      * valid" is never inferred from the absence of an error.
      */
     contractStatus() { return schemas.status; },
+
+    /** Whether hybrid vectors / link expansion are live, and why not if not. */
+    searchStatus() {
+      return Object.freeze({
+        mode: retrievalMode,
+        hybrid: Boolean(vectorIndex),
+        hybridReason,
+        links: Boolean(neighbours),
+        linkReason,
+        linkMax: neighbours ? linkMax : 0,
+      });
+    },
 
     /**
      * The concept dictionary this adapter already built from the package, in the
