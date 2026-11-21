@@ -19,8 +19,15 @@
  * Run (repo root):
  *   set -a; eval "$(grep -E '^ANTHROPIC_API_KEY=' ../agi2claude/.env | sed 's/^ANTHROPIC_API_KEY=/EVAL_ANTHROPIC_KEY=/')"; set +a
  *   node scripts/aichattg/runtime-smoke.mjs [--package <dir>] [--dry]
+ *
+ * Two-slot mode (generic package registry, 2.4.48+):
+ *   node scripts/aichattg/runtime-smoke.mjs --two-slot [--course-package <dir>] [--package <dir>] [--dry]
+ * The course slot (built-in env, lexical) gets the old `ai` package, the book is
+ * one registry entry (`book-tcr-v1`, hybrid live recipe). Both package dirs are
+ * linked (directory symlinks, files untouched) into one temporary knowledge
+ * root. Every question prints which slot served it.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +40,7 @@ const { createProviderAdapter } = await import(join(SRC, 'provider-adapter.mjs')
 const { createKnowledgeAdapter } = await import(join(SRC, 'knowledge-adapter.mjs'));
 const { assertSlicesAdmitted, composeKnowledgeSlices } = await import(join(SRC, 'knowledge-slices.mjs'));
 const { createKnowledgeRetrieval } = await import(join(SRC, 'knowledge-retrieval.mjs'));
+const { assertPackageSlotsAdmitted, bindRetrievalsToDomains } = await import(join(SRC, 'knowledge-packages.mjs'));
 const { createTelegramAdapter } = await import(join(SRC, 'telegram-adapter.mjs'));
 const { createTelegramRuntime } = await import(join(SRC, 'runtime.mjs'));
 const { loadDomainCatalog } = await import(join(SRC, 'assistant-domains.mjs'));
@@ -44,8 +52,16 @@ const argValue = (name, fallback) => {
   return at >= 0 ? args[at + 1] : fallback;
 };
 const DRY = args.includes('--dry');
-const PACKAGE_DIR = resolve(argValue('--package', join(REPO, 'output/kb/tcr-passages-v1/pkg-hybrid-36b8db92318b')));
-const KNOWLEDGE_ROOT = dirname(PACKAGE_DIR);
+const TWO_SLOT = args.includes('--two-slot');
+// In a git worktree the ignored output/ and the sibling allcourses checkout live
+// beside the main checkout, so defaults fall back to it when absent here.
+const MAIN_REPO = REPO.includes(join('.claude', 'worktrees')) ? resolve(REPO, '..', '..', '..') : REPO;
+const firstExisting = (...paths) => paths.find((path) => existsSync(path)) || paths[0];
+const PACKAGE_DIR = resolve(argValue('--package', firstExisting(
+  join(REPO, 'output/kb/tcr-passages-v1/pkg-hybrid-36b8db92318b'),
+  join(MAIN_REPO, 'output/kb/tcr-passages-v1/pkg-hybrid-36b8db92318b'))));
+const COURSE_PACKAGE_DIR = resolve(argValue('--course-package',
+  join(MAIN_REPO, '..', 'allcourses/code/data/knowledge/packages/ai-140310bf9472')));
 const EXPECTED_DIGEST = '36b8db92318b181686daff477eb9017b3a6f6e3be29d59fcd07c1e8a8c6df709';
 const MAX_ANTHROPIC_CALLS = 5;
 const PRICE_IN = 2 / 1e6;
@@ -55,7 +71,13 @@ const ANSWER_MODEL = 'claude-sonnet-5-5';
 
 // Scripted router choice per question = substitution 1. Domain ids come from
 // the runtime catalog (content / operations / ... ); [] = no subject domain.
-const QUESTIONS = [
+const QUESTIONS = TWO_SLOT ? [
+  { q: 'Почему я пашу как проклятый, а бизнес не растёт?', domains: ['book'] },
+  { q: 'Что такое RAG простыми словами?', domains: ['content'] },
+  { q: 'Чем каста отличается от роли и может ли ИИ-агент помочь мне сменить роль?', domains: ['book', 'content'] },
+  { q: 'Сколько стоит курс и как его оплатить?', domains: ['operations'] },
+  { q: 'Как выбрать хорошего стоматолога?', domains: [] },
+] : [
   { q: 'Почему я пашу как проклятый, а бизнес не растёт?', domains: ['content'] },
   { q: 'Что такое касты в теории каст и ролей и чем каста отличается от роли?', domains: ['content'] },
   { q: 'Сколько стоит курс и как его оплатить?', domains: ['operations'] },
@@ -70,6 +92,38 @@ if (!DRY && !anthropicKey) {
 }
 
 const workdir = mkdtempSync(join(tmpdir(), 'aichattg-runtime-smoke-'));
+// Two-slot: one temporary knowledge root holding links to both packages and the
+// registry file. Package files are never copied or modified.
+let KNOWLEDGE_ROOT = dirname(PACKAGE_DIR);
+let COURSE_DIGEST = null;
+if (TWO_SLOT) {
+  if (!existsSync(join(COURSE_PACKAGE_DIR, 'knowledge.manifest.json'))) {
+    console.error(`--two-slot needs the course package: ${COURSE_PACKAGE_DIR} (use --course-package <dir>)`);
+    process.exit(2);
+  }
+  KNOWLEDGE_ROOT = join(workdir, 'knowledge');
+  mkdirSync(KNOWLEDGE_ROOT);
+  symlinkSync(COURSE_PACKAGE_DIR, join(KNOWLEDGE_ROOT, 'course'), 'dir');
+  symlinkSync(PACKAGE_DIR, join(KNOWLEDGE_ROOT, 'book'), 'dir');
+  COURSE_DIGEST = JSON.parse(readFileSync(join(COURSE_PACKAGE_DIR, 'knowledge.manifest.json'), 'utf8')).packageDigest;
+  writeFileSync(join(KNOWLEDGE_ROOT, 'packages.json'), JSON.stringify([{
+    sourceId: 'book-tcr-v1', manifestPath: 'book/knowledge.manifest.json', digestSha256: EXPECTED_DIGEST,
+    retrieval: { mode: 'hybrid', maxEntries: 24, maxContextTokens: 6000, hybridMaxContextTokens: 12000,
+      noConceptGate: 'pass', coverageText: 'content+alias', linkTypes: ['contradicts', 'qualifies'], linkMax: 4 },
+  }], null, 2));
+}
+// Course slot in two-slot mode = the old production course recipe (env defaults:
+// lexical, 12 entries, refuse gate, content coverage, no links).
+const courseSlotEnv = TWO_SLOT ? {
+  TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_MANIFEST_PATH: join(KNOWLEDGE_ROOT, 'course/knowledge.manifest.json'),
+  TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256: COURSE_DIGEST,
+  TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGES: join(KNOWLEDGE_ROOT, 'packages.json'),
+  TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MODE: 'lexical',
+  TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_ENTRIES: '12',
+  TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_NO_CONCEPT_GATE: 'refuse',
+  TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_COVERAGE_TEXT: 'content',
+  TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_LINK_MAX: '0',
+} : {};
 const env = {
   TELEGRAM_RUNTIME_DATA_ROOT: workdir,
   TELEGRAM_RUNTIME_DATABASE_PATH: join(workdir, 'telegram-runtime.db'),
@@ -117,6 +171,7 @@ const env = {
   TELEGRAM_RUNTIME_ANTHROPIC_API_KEY: anthropicKey || 'smoke-dry-key-never-sent',
   TELEGRAM_RUNTIME_ANTHROPIC_ENDPOINT: 'https://api.anthropic.com/v1/',
   ORT_DISABLE_TELEMETRY: '1',
+  ...courseSlotEnv,
 };
 process.env.ORT_DISABLE_TELEMETRY = '1';
 
@@ -167,7 +222,11 @@ async function fetchFn(url, init = {}) {
         target: 'none', context_used: false,
       }));
     }
-    const scripted = QUESTIONS.find((item) => user.includes(item.q) || init.body.includes(JSON.stringify(item.q).slice(1, -1)));
+    // Match only the non-system messages: the router's system prompt carries the
+    // domain index, whose examples may repeat a smoke question verbatim.
+    const turnText = JSON.stringify((body.messages || []).filter((m) => m.role !== 'system'));
+    const scripted = QUESTIONS.filter((item) => user.includes(item.q) || turnText.includes(JSON.stringify(item.q).slice(1, -1)))
+      .sort((a, b) => b.q.length - a.q.length)[0];
     if (scripted) {
       openaiLog.push({ kind: 'router', model: body.model, domains: scripted.domains });
       return fakeChatCompletion(body.model, JSON.stringify({ domains: scripted.domains, riskFlags: [] }));
@@ -197,22 +256,42 @@ const composed = composeKnowledgeSlices(createKnowledgeAdapter(config.knowledge)
 });
 assertSlicesAdmitted(composed.slices);
 const retrievalLog = [];
-const contentRetrievalReal = createKnowledgeRetrieval(config.assistantRetrieval, {
+const embedderCache = new Map();
+const retrievalOptions = {
   knowledge: composed.baseKnowledge,
+  embedderCache,
   log: (line) => { retrievalLog.push(line); console.warn(line); },
-});
+};
+const contentRetrievalReal = createKnowledgeRetrieval(config.assistantRetrieval, retrievalOptions);
 const retrievals = [];
-// Observation wrapper only: forwards the call unchanged and records the trace.
-const contentRetrieval = Object.freeze({
-  ...contentRetrievalReal,
-  async forQuestion(input) {
-    const t0 = Date.now();
-    const result = await contentRetrievalReal.forQuestion(input);
-    retrievals.push({ question: current?.q, ms: Date.now() - t0, grounded: result.grounded, reason: result.reason,
-      search: result.trace?.search || null, packEntries: result.pack?.entries?.length ?? 0 });
-    return result;
-  },
-});
+// Observation wrapper only: forwards the call unchanged and records the trace
+// plus the slot (the retrieval's own sourceId) that served it.
+function observed(real) {
+  return Object.freeze({
+    ...real,
+    async forQuestion(input) {
+      const t0 = Date.now();
+      const result = await real.forQuestion(input);
+      retrievals.push({ question: current?.q, slot: real.sourceId || 'none', ms: Date.now() - t0,
+        grounded: result.grounded, reason: result.reason,
+        search: result.trace?.search || null, packEntries: result.pack?.entries?.length ?? 0 });
+      return result;
+    },
+  });
+}
+const contentRetrieval = observed(contentRetrievalReal);
+// Same slot assembly as server.mjs: registry slots + binding by domain source.
+const packageSlots = composed.baseKnowledge.packageSlots?.() || [];
+assertPackageSlotsAdmitted(packageSlots);
+const slotRetrievals = new Map([[contentRetrievalReal.sourceId || 'course-knowledge-v2', contentRetrieval]]);
+const slotReals = [contentRetrievalReal];
+for (const slot of config.knowledge.packages.slots) {
+  const real = createKnowledgeRetrieval({ ...slot.retrieval, sourceId: slot.sourceId, rewriteEnabled: false,
+    validatePacks: config.assistantRetrieval.validatePacks }, retrievalOptions);
+  slotReals.push(real);
+  slotRetrievals.set(slot.sourceId, observed(real));
+}
+const sourceRetrievals = bindRetrievalsToDomains(domainCatalog, slotRetrievals);
 const realProvider = createProviderAdapter(config.provider, { domainCatalog, fetchFn });
 const answers = [];
 const provider = Object.freeze({
@@ -247,6 +326,7 @@ const runtime = createTelegramRuntime({
   domainCatalog,
   knowledge: composed.knowledge,
   contentRetrieval,
+  sourceRetrievals,
   moderatorTelegram: createTelegramAdapter({ ...config.moderator, fetchFn }),
   guard,
   assistantTelegram: createTelegramAdapter({ ...config.assistant, fetchFn }),
@@ -255,6 +335,13 @@ const runtime = createTelegramRuntime({
 const pkgManifest = JSON.parse(readFileSync(join(PACKAGE_DIR, 'knowledge.manifest.json'), 'utf8'));
 console.log('=== runtime smoke ===');
 console.log(`package=${relative(REPO, PACKAGE_DIR)} digest=${pkgManifest.packageDigest.slice(0, 12)} retrieval.available=${contentRetrievalReal.available} reason=${contentRetrievalReal.reason || 'none'}`);
+for (const real of slotReals) {
+  console.log(`slot ${real.sourceId || 'none'}: available=${real.available} reason=${real.reason || 'none'} domain=${real.domainId || 'none'} mode=${real.retrievalMode || 'n/a'} hybridLive=${real.hybridLive ?? 'n/a'} embedderShared=${real.embedderShared ?? 'n/a'}`);
+}
+for (const slot of packageSlots) {
+  console.log(`registry ${slot.sourceId}: configured=${slot.configured} admitted=${slot.admitted} reason=${slot.reason || 'none'} digest=${slot.digest.slice(0, 12)}`);
+}
+console.log(`bindings: ${domainCatalog.domains.filter((d) => d.sourceKind === 'retrieval').map((d) => `${d.id}->${sourceRetrievals.get(d.sourceId)?.sourceId || 'none'}`).join(' ')}`);
 console.log(`retrieval config: mode=${config.assistantRetrieval.retrievalMode} maxEntries=${config.assistantRetrieval.maxEntries} ctx=${config.assistantRetrieval.maxContextTokens} hybridCtx=${config.assistantRetrieval.hybridMaxContextTokens} gate=${config.assistantRetrieval.noConceptGate} coverage=${config.assistantRetrieval.coverageText} links=${config.assistantRetrieval.linkExpansion.types.join('+')}x${config.assistantRetrieval.linkExpansion.max}`);
 console.log(`provider: answerVendor=${config.provider.answerVendor} model=${config.provider.modelTuples.assistantAnswer.model}/${config.provider.modelTuples.assistantAnswer.reasoningEffort}/${config.provider.modelTuples.assistantAnswer.maxOutputTokens}`);
 console.log(`slices: ${composed.slices.map((s) => `${s.name}:configured=${s.configured},admitted=${s.admitted}`).join(' ')}`);
@@ -281,7 +368,8 @@ for (const [index, item] of QUESTIONS.entries()) {
     failure = error?.stack || String(error);
   }
   const ms = Date.now() - t0;
-  const retrieval = retrievals.filter((r) => r.question === item.q).at(-1) || null;
+  const served = retrievals.filter((r) => r.question === item.q);
+  const retrieval = served.at(-1) || null;
   const answer = answers.filter((a) => a.question === item.q).at(-1) || null;
   const sends = telegramLog.filter((t) => t.question === item.q && t.method === 'sendMessage');
   const delivered = sends.map((s) => String(s.body.text || '')).join('\n---\n');
@@ -292,7 +380,8 @@ for (const [index, item] of QUESTIONS.entries()) {
   totalCost += cost;
   console.log(`\n--- Q${index + 1}: ${item.q}`);
   console.log(`router(scripted)=${JSON.stringify(item.domains)} result.kind=${result?.kind ?? 'n/a'} route=${typeof result?.route === 'string' ? result.route : JSON.stringify(result?.route ?? null)} reason=${result?.reason ?? 'none'}`);
-  console.log(`retrieval: ${retrieval ? `mode=${retrieval.search?.mode ?? 'n/a'} fallback=${retrieval.search?.fallback ?? 'none'} vectorOnly=${retrieval.search?.vectorOnly ?? '-'} linksAdded=${retrieval.search?.linksAdded ?? '-'} grounded=${retrieval.grounded} reason=${retrieval.reason ?? 'none'} packEntries=${retrieval.packEntries} ${retrieval.ms}ms` : 'not called'}`);
+  console.log(`slots served: ${served.length ? served.map((r) => `${r.slot}(grounded=${r.grounded},entries=${r.packEntries})`).join(' + ') : 'none'}`);
+  console.log(`retrieval: ${retrieval ? `slot=${retrieval.slot} mode=${retrieval.search?.mode ?? 'n/a'} fallback=${retrieval.search?.fallback ?? 'none'} vectorOnly=${retrieval.search?.vectorOnly ?? '-'} linksAdded=${retrieval.search?.linksAdded ?? '-'} grounded=${retrieval.grounded} reason=${retrieval.reason ?? 'none'} packEntries=${retrieval.packEntries} ${retrieval.ms}ms` : 'not called'}`);
   console.log(`answer input: ${answer ? `entries=${answer.entries} chars=${answer.chars}` : 'no model call'}${answer?.error ? ` ERROR=${answer.error}` : ''}`);
   if (r) console.log(`receipt: model=${r.modelId} http=${r.httpStatus} in=${r.inputTokens} out=${r.outputTokens} cacheRead=${r.cacheReadInputTokens ?? 0} cost=$${cost.toFixed(4)} modelLatency=${answer.ms}ms`);
   console.log(`telegram: ${sends.length} message(s), ${delivered.length} chars; footer="${footer}" footerOk=${footer.includes(ASSISTANT_RELEASE_LINE)}`);
@@ -306,6 +395,6 @@ console.log('\n=== totals ===');
 console.log(`anthropic calls=${anthropicCalls}/${MAX_ANTHROPIC_CALLS} total cost=$${totalCost.toFixed(4)}`);
 console.log(`openai fake calls: ${openaiLog.map((o) => o.kind).join(',') || 'none'}; unexpected=${openaiLog.filter((o) => o.kind === 'unexpected').length}`);
 console.log(`retrieval log lines: ${retrievalLog.length ? retrievalLog.join(' | ') : 'none'}`);
-contentRetrievalReal.close?.();
+for (const real of slotReals) real.close?.();
 database.close();
 rmSync(workdir, { recursive: true, force: true });

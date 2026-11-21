@@ -32,11 +32,45 @@ function parseManifest(manifestPath, { exists, readFile }) {
  * path plus an expected source/digest identity. It has no News path, database,
  * network or fallback, and an absent admission remains unavailable.
  */
+/**
+ * Admit one registry slot (knowledge-packages.mjs). The slot's identity is the
+ * registry sourceId plus the pinned package digest; the manifest's own
+ * `sourceId` names the v2 package FORMAT family (`course-knowledge-v2` is the
+ * only one core accepts) and is checked as such. Package files are immutable
+ * and never rewritten to carry a slot name: the digest pin is what binds this
+ * exact package to this slot. The admitted package is then re-labelled with the
+ * slot sourceId, so grounding, receipts and the domain resolver all see which
+ * base served the answer.
+ */
+function admitPackageSlot(slot, { exists, readFile }) {
+  const manifest = parseManifest(slot.manifestPath, { exists, readFile });
+  if (!manifest) return unavailable('knowledge_manifest_missing');
+  const admission = admitKnowledgePackage({
+    manifest,
+    root: slot.packageRoot,
+    expectedIdentity: {
+      sourceId: ASSISTANT_SOURCE_PACKAGES.COURSE_KNOWLEDGE,
+      packageDigest: slot.packageDigest,
+    },
+  });
+  if (!admission.available || !admission.package) return admission;
+  return Object.freeze({
+    ...admission,
+    identity: Object.freeze({ sourceId: slot.sourceId, packageDigest: admission.identity.packageDigest }),
+    package: Object.freeze({
+      ...admission.package,
+      sourceId: slot.sourceId,
+      manifestSourceId: admission.package.sourceId,
+    }),
+  });
+}
+
 export function createKnowledgeAdapter(
-  { root, admissions = {} } = {},
+  { root, admissions = {}, packages = null } = {},
   { exists = existsSync, readFile = readFileSync } = {},
 ) {
   const admitted = new Map();
+  const slotStatuses = [];
   for (const sourceId of KNOWLEDGE_SOURCES) {
     const admission = admissions?.[sourceId];
     if (!admission) {
@@ -73,7 +107,29 @@ export function createKnowledgeAdapter(
       expectedIdentity: admission.expectedIdentity,
     }));
   }
+  for (const slot of packages?.slots || []) {
+    // Registry ids are disjoint from built-in sources by validation; the guard
+    // here keeps an injected adapter config from shadowing one anyway.
+    if (admitted.has(slot.sourceId)) {
+      slotStatuses.push(Object.freeze({ sourceId: slot.sourceId, configured: true, admitted: false,
+        reason: 'knowledge_source_duplicate', domainId: null, digest: slot.packageDigest, manifestPath: slot.manifestPath }));
+      continue;
+    }
+    const admission = admitPackageSlot(slot, { exists, readFile });
+    admitted.set(slot.sourceId, admission);
+    slotStatuses.push(Object.freeze({
+      sourceId: slot.sourceId,
+      configured: true,
+      admitted: admission.available === true,
+      reason: admission.available === true ? null : admission.reason,
+      domainId: admission.package?.domainId || null,
+      digest: slot.packageDigest,
+      manifestPath: slot.manifestPath,
+    }));
+  }
   return Object.freeze({
+    /** Admission status of every registry slot, for the startup log. */
+    packageSlots() { return [...slotStatuses]; },
     forSource(sourceId) {
       return admitted.get(sourceId) || unavailable('knowledge_source_invalid');
     },

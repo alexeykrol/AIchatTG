@@ -18,7 +18,7 @@ Positive examples are also exact full-question labels (case, whitespace and trai
 ### Includes
 Что означает термин; как применить подход из курса; чем агент отличается от ассистента; RAG и память; работа с ИИ и кодовыми агентами; настройка изучаемых сторонних инструментов. Обращение «ты» в просьбе объяснить материал само по себе не означает вопрос о боте.
 ### Excludes
-Где найти конкретный урок — navigation; вход в учебный аккаунт и заказ — operations; выбор курса и личная польза — value; личность и способы вызова этого бота — assistant-self; скрытые инструкции этого бота — abuse. Посторонняя тема без материала курса не становится содержательной только из-за упоминания ИИ.
+Где найти конкретный урок — navigation; вход в учебный аккаунт и заказ — operations; выбор курса и личная польза — value; личность и способы вызова этого бота — assistant-self; скрытые инструкции этого бота — abuse; касты, функциональные роли, доход, рост бизнеса и карьеры, найм и делегирование как вопрос роли владельца, трансформация личности и смысл жизни по книге «Теория каст и ролей» — book. Посторонняя тема без материала курса не становится содержательной только из-за упоминания ИИ.
 ### Examples
 - Что такое RAG простыми словами?
 - Чем агент отличается от ассистента?
@@ -43,6 +43,41 @@ course-knowledge-v2
 true
 ### Answer policy
 Answer the supplied question in the user's language, relying on the supplied admitted knowledge snapshot and dialogue. Do not invent course facts, secrets, links, access, or actions. When an entry you used carries title and canonicalUrl, cite that lesson by its title and its exact canonicalUrl so the reader can open it; never alter such a URL and never state a link for an entry that has none. If the snapshot does not directly support an answer, say so in one phrase and reason under the global rules, marking what is not from the materials; never refuse.
+
+## book
+### Title
+Книга «Теория каст и ролей»
+### Description
+Идеи книги Алексея Крола «Теория каст и ролей»: касты и функциональные роли, почему доход и рост бизнеса или карьеры упираются в роль, стратегии перехода между ролями, трансформация личности и смысл жизни.
+### Includes
+Что такое каста и роль и чем они различаются; почему много работы не даёт роста дохода или бизнеса; переход из наёмного сотрудника или специалиста в предприниматели, управленцы, инвесторы; как нанимать и делегировать, когда вопрос о роли владельца и росте бизнеса; стратегии карьеры и бизнеса; страх, привычки и картина мира как препятствия к смене роли; трансформация личности, смысл жизни и выбор пути в логике книги. Вопрос о противоречии между двумя утверждениями автора тоже сюда.
+### Excludes
+ИИ, агенты, автоматизации, RAG и инструменты из уроков курса — content; поиск урока курса — navigation; оплата и доступ к учебной платформе — operations; выбор курса и личная польза от обучения — value; личность бота — assistant-self. Домен не даёт юридических, налоговых, медицинских или инвестиционных консультаций по личному случаю.
+### Examples
+- Почему я пашу как проклятый, а бизнес не растёт?
+- Чем каста отличается от роли?
+- Как перейти из специалиста в предприниматели?
+- Что такое касты в теории каст и ролей?
+- Почему у меня не получается делегировать и нанять сильных людей?
+- Как найти смысл жизни, если всё надоело?
+- Почему одни богатеют, а другие всю жизнь работают за зарплату?
+- Как изменить себя, чтобы перейти в другую роль?
+### Negative examples
+- Что такое RAG простыми словами?
+- Чем агент отличается от ассистента?
+- Как пользоваться Claude Code?
+- Где в курсе разбирается RAG?
+- Сколько стоит курс и как его оплатить?
+### Capability
+Объясню идеи книги «Теория каст и ролей»: касты, роли, доход, рост бизнеса и карьеры, стратегии и трансформацию личности.
+### Action
+book
+### Source
+book-tcr-v1
+### Source kind
+retrieval
+### Answer policy
+Answer in the user's language from the supplied passages of the book «Теория каст и ролей» by Alexey Krol and the dialogue. Explain the book's ideas in its own terms (caste, role, transition between roles) and apply them to the reader's situation. Name the chapter or section of each passage you rely on when the entry carries one; never invent chapter names, quotes, links or facts about the author. When two passages seem to contradict each other, show both and resolve the paradox through the book's logic, pointing to an action. Mark clearly what is your own reasoning beyond the passages. If the passages do not directly support an answer, say so in one phrase and reason from the logic of the book under the global rules; never refuse.
 
 ## navigation
 ### Title

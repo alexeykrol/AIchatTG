@@ -118,6 +118,24 @@ export function selectDomainRoutes(selection, { catalog, hints = { domains: [] }
   return { routes, arbitration };
 }
 
+/**
+ * Character budget for the merged knowledge of a compound question. Each
+ * retrieval slot respects its own token budget, but N bases together could
+ * exceed the answer model's 60 000-character input ceiling
+ * (ASSISTANT_PROVIDER_INPUT_MAX_CHARS) and lose the whole answer. Below the
+ * budget nothing changes; above it every snapshot gets an equal share and keeps
+ * its best-ranked entries, so no routed base is crowded out by another.
+ */
+export const MERGED_KNOWLEDGE_MAX_CHARS = 40_000;
+
+function mergeQuotas(snapshots) {
+  const total = snapshots.reduce((sum, { snapshot }) => sum
+    + snapshot.entries.reduce((n, entry) => n + entry.content.length, 0), 0);
+  if (total <= MERGED_KNOWLEDGE_MAX_CHARS) return null;
+  const share = Math.floor(MERGED_KNOWLEDGE_MAX_CHARS / snapshots.length);
+  return snapshots.map(() => share);
+}
+
 export async function resolveDomainSelection(selection, {
   catalog, knowledge, retrievals, question, dialogue = [], hints = { domains: [] },
 }) {
@@ -128,6 +146,11 @@ export async function resolveDomainSelection(selection, {
   const coverage = [];
   const snapshots = [];
   const resolvedSources = new Map();
+  // Which retrieval slot served each routed domain (bounded ids only). A
+  // compound question touching several bases queries each slot once; the
+  // entries are merged below under the shared 128-entry ceiling, each one
+  // keeping its sourceId so the answer layer can tell the bases apart.
+  const retrievalSlots = [];
   let trace = null;
   for (const route of routes) {
     const domain = catalog.get(route.domainId);
@@ -151,6 +174,9 @@ export async function resolveDomainSelection(selection, {
         snapshot = result.grounded === true ? result.knowledge : null;
         reason = result.grounded === true ? null : result.reason || 'knowledge_unavailable';
         trace = result.trace || trace;
+        retrievalSlots.push({ domainId: domain.id,
+          slot: typeof retrieval.sourceId === 'string' ? retrieval.sourceId : domain.servedSourceId,
+          grounded: result.grounded === true, reason: result.grounded === true ? null : String(reason || '').slice(0, 80) });
         if (!snapshot && !isAbstentionReason(reason)) return { error: reason };
       }
     } else {
@@ -190,12 +216,18 @@ export async function resolveDomainSelection(selection, {
     ? { action: firstRoute.action, sourceId: firstRoute.sourceId } : firstRoute;
   const metadata = { route, domainRoutes: routes, domainCoverage: coverage,
     missingDomains: coverage.filter((d) => d.status === 'missing').map((d) => d.domainId),
-    riskFlags: selection.riskFlags, registryDigest: catalog.digest, trace, arbitration };
+    riskFlags: selection.riskFlags, registryDigest: catalog.digest, trace, arbitration,
+    ...(retrievalSlots.length ? { retrievalSlots } : {}) };
   if (!snapshots.length) return { ...metadata, knowledge: null, abstain: true, reason: 'domain_knowledge_missing' };
   if (snapshots.length === 1 && routes.length === 1) return { ...metadata, knowledge: snapshots[0].snapshot };
   const entries = [];
   const seen = new Map();
-  for (const { route: sourceRoute, snapshot } of snapshots) for (const entry of snapshot.entries) {
+  const quotas = mergeQuotas(snapshots);
+  for (const [index, { route: sourceRoute, snapshot }] of snapshots.entries()) for (const [rank, entry] of snapshot.entries.entries()) {
+    // Over the shared budget, each snapshot keeps its best-ranked entries up to
+    // an equal share (its first entry always survives).
+    if (quotas && rank > 0 && (quotas[index] -= entry.content.length) < 0) break;
+    if (quotas && rank === 0) quotas[index] -= entry.content.length;
     const identity = `${snapshot.sourceId}:${entry.id}`;
     if (seen.has(identity)) {
       seen.get(identity).domainIds.push(sourceRoute.domainId);
