@@ -20,7 +20,7 @@ import { SpendCapReached, createSpendGuard, inputTokenCeiling } from '../lib/spe
 import { loadQuestions, renderAnswersMarkdown } from '../lib/eval-io.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const BUILD = join(REPO, 'output/eval/tcr-book/build.json');
+const BUILD = process.env.AICHATTG_EVAL_BUILD || join(REPO, 'output/eval/tcr-book/build.json');
 const DONOR = process.env.AICHATTG_EVAL_DONOR || join(homedir(), 'Code/agi2claude');
 const haveBook = existsSync(BUILD) && existsSync(join(DONOR, 'evals/baseline/id_map.json'));
 const skipBook = haveBook ? false : 'book package or donor missing: run scripts/eval/book_to_master.py';

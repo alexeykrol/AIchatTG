@@ -5,7 +5,7 @@
  *   input ceiling  = UTF-8 bytes of system + messages + a fixed overhead. Claude's tokenizer is byte-level,
  *                    so a text cannot produce more tokens than it has bytes: this is an upper bound, not an
  *                    estimate (Russian text costs ~2 bytes per char, so the ceiling is generous);
- *   output ceiling = `max_tokens` of the request (thinking tokens are billed as output and are inside it).
+ *   output ceiling = the request's output limit (thinking and reasoning tokens are billed as output).
  * If money already settled + all open reservations + this ceiling would exceed the tranche cap, the call is
  * refused BEFORE the network and the run stops (`SpendCapReached`). After the response the reservation is
  * replaced by the actual cost from `usage`; a call whose usage is unknown keeps its full ceiling as spent.
@@ -15,13 +15,20 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const OVERHEAD_TOKENS = 64; // message framing; generous against the documented per-request overhead
+export const OPENAI_PRICE_SOURCE = 'https://developers.openai.com/api/docs/pricing (Standard tier, short context; charter snapshot 2026-11-21)';
+export const OPENAI_PUBLISHED_PRICES = Object.freeze({
+  'gpt-5.6-terra': Object.freeze({ input: 2.0, cacheRead: 0.20, output: 12.0 }),
+  'gpt-5.6-luna': Object.freeze({ input: 0.20, cacheRead: 0.02, output: 1.20 }),
+  'gpt-5.6-sol': Object.freeze({ input: 4.0, cacheRead: 0.40, output: 20.0 }),
+});
 
-/** USD per million tokens. Source: claude-api skill `shared/models.md` (Claude Code 2.1.326 bundle),
+/** USD per million tokens. Claude source: claude-api skill `shared/models.md` (Claude Code 2.1.326 bundle),
  * read 2026-11-19, not a live fetch; same figures as agi2claude `pricing.yaml`. Override on the CLI. */
 export const PUBLISHED_PRICES = Object.freeze({
   'claude-sonnet-5-5': Object.freeze({ input: 2.0, output: 10.0, cacheRead: 0.1, cacheWrite: 2.5 }),
   'claude-opus-5-5': Object.freeze({ input: 4.0, output: 20.0, cacheRead: 0.2, cacheWrite: 5.0 }),
   'claude-haiku-5-5': Object.freeze({ input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }),
+  ...OPENAI_PUBLISHED_PRICES,
 });
 
 export class SpendCapReached extends Error {
@@ -38,8 +45,19 @@ export function inputTokenCeiling(messagesRequest) {
   return parts.reduce((n, s) => n + Buffer.byteLength(String(s), 'utf8'), 0) + OVERHEAD_TOKENS;
 }
 
-export function costUsd(usage, price) {
+function hasOpenAIUsage(usage) {
+  const cached = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+  return [usage?.prompt_tokens, usage?.completion_tokens, cached]
+    .every((count) => Number.isSafeInteger(count) && count >= 0) && cached <= usage.prompt_tokens;
+}
+
+export function costUsd(usage, price, vendor = 'anthropic') {
   const u = usage || {};
+  if (vendor === 'openai') {
+    const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+    return ((u.prompt_tokens - cached) * price.input + cached * (price.cacheRead ?? price.input)
+      + u.completion_tokens * price.output) / 1e6;
+  }
   return ((u.input_tokens || 0) * price.input + (u.output_tokens || 0) * price.output
     + (u.cache_read_input_tokens || 0) * (price.cacheRead ?? price.input)
     + (u.cache_creation_input_tokens || 0) * (price.cacheWrite ?? price.input)) / 1e6;
@@ -66,11 +84,16 @@ export function createSpendGuard({ capUsd, price, journalPath = null, alreadySpe
     if (journalPath) appendFileSync(journalPath, `${JSON.stringify(line)}\n`);
   }
 
-  /** Reserve the ceiling of one Messages request; throws SpendCapReached instead of allowing the call. */
-  function reserve(messagesRequest, tag = null, { kind = null, price: callPrice = price } = {}) {
+  /** Reserve the ceiling of one request; throws SpendCapReached instead of allowing the call. */
+  function reserve(request, tag = null, { kind = null, price: callPrice = price, vendor = 'anthropic' } = {}) {
     if (stopped) throw new SpendCapReached(stopped);
-    const inTok = inputTokenCeiling(messagesRequest);
-    const outTok = Number(messagesRequest.max_tokens) || 0;
+    const inTok = inputTokenCeiling(request);
+    const outTok = vendor === 'openai'
+      ? request.max_completion_tokens ?? request.max_tokens
+      : Number(request.max_tokens) || 0;
+    if (vendor === 'openai' && (!Number.isSafeInteger(outTok) || outTok < 1)) {
+      throw new Error('openai_output_limit_required');
+    }
     const ceiling = (inTok * callPrice.input + outTok * callPrice.output) / 1e6;
     if (settled + reserved + ceiling > capUsd) {
       stopped = { capUsd, settledUsd: settled, openReservationsUsd: reserved, nextCeilingUsd: ceiling, tag,
@@ -79,13 +102,14 @@ export function createSpendGuard({ capUsd, price, journalPath = null, alreadySpe
       throw new SpendCapReached(stopped);
     }
     reserved += ceiling;
-    return { tag, ceiling, inTok, outTok, kind, price: callPrice };
+    return { tag, ceiling, inTok, outTok, kind, price: callPrice, vendor };
   }
 
   /** Replace a reservation by the actual cost; usage null = unknown, the full ceiling counts as spent. */
   function settle(r, { usage = null, status = null, stopReason = null, model = null } = {}) {
     reserved -= r.ceiling;
-    const actual = usage ? costUsd(usage, r.price || price) : r.ceiling;
+    if (r.vendor === 'openai' && !hasOpenAIUsage(usage)) usage = null;
+    const actual = usage ? costUsd(usage, r.price || price, r.vendor) : r.ceiling;
     settled += actual;
     write({ event: 'call', tag: r.tag, ...(r.kind ? { kind: r.kind } : {}), model, status, stopReason, ceilingUsd: r.ceiling,
       costUsd: actual, costKnown: Boolean(usage), usage, settledUsd: settled, capUsd });
@@ -93,15 +117,15 @@ export function createSpendGuard({ capUsd, price, journalPath = null, alreadySpe
   }
 
   /**
-   * Wrap a transport that speaks the Messages API. `kind` labels the journal rows of this wrapper (e.g.
+   * Wrap a provider transport. `kind` labels the journal rows of this wrapper (e.g.
    * `rewrite`, kept apart from answer cost); `price` overrides the guard price for a different model. Both
    * wrappers of one run share the same cap and the same settled total.
    */
-  function wrapFetch(fetchFn, { tagOf = () => null, kind = null, price: callPrice = price } = {}) {
+  function wrapFetch(fetchFn, { tagOf = () => null, kind = null, price: callPrice = price, vendor = 'anthropic' } = {}) {
     if (!(callPrice?.input > 0) || !(callPrice?.output > 0)) throw new Error('spend_price_required');
     return async function guardedFetch(url, init = {}) {
       const body = JSON.parse(init.body);
-      const r = reserve(body, tagOf(body), { kind, price: callPrice });
+      const r = reserve(body, tagOf(body), { kind, price: callPrice, vendor });
       let res;
       try { res = await fetchFn(url, init); } catch (error) {
         settle(r, { status: 'transport_failed' });
@@ -111,7 +135,8 @@ export function createSpendGuard({ capUsd, price, journalPath = null, alreadySpe
       let raw = null;
       try { raw = await res.json(); } catch { raw = null; }
       settle(r, { usage: res.ok ? raw?.usage ?? null : null, status: res.status,
-        stopReason: raw?.stop_reason ?? null, model: raw?.model ?? null });
+        stopReason: (vendor === 'openai' ? raw?.choices?.[0]?.finish_reason : raw?.stop_reason) ?? null,
+        model: raw?.model ?? null });
       return { ok: res.ok, status: res.status, headers: res.headers, json: async () => raw };
     };
   }
