@@ -187,6 +187,12 @@ CREATE TABLE IF NOT EXISTS runtime_assistant_request_reservations (
 );
 CREATE INDEX IF NOT EXISTS idx_runtime_assistant_request_rate
   ON runtime_assistant_request_reservations(chat_id, user_id, status, created_at);
+-- Additive (2026-11-21): the daily answer limit counts a person across all
+-- chats, and an optional global daily ceiling counts every reservation.
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_request_user_rate
+  ON runtime_assistant_request_reservations(user_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_runtime_assistant_request_global_rate
+  ON runtime_assistant_request_reservations(status, created_at);
 CREATE TABLE IF NOT EXISTS runtime_assistant_moderation_dispositions (
   chat_id TEXT NOT NULL,
   message_id TEXT NOT NULL,
@@ -896,6 +902,24 @@ export function createRuntimeStore(db, {
   const assistantRequest = db.prepare('SELECT * FROM runtime_assistant_request_reservations WHERE event_id = ?');
   const countAssistantRequests = db.prepare(`SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations
     WHERE chat_id = ? AND user_id = ? AND status IN ('reserved', 'completed', 'uncertain') AND created_at > ?`);
+  const countAssistantUserRequests = db.prepare(`SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations
+    WHERE user_id = ? AND status IN ('reserved', 'completed', 'uncertain') AND created_at > ?`);
+  const countAssistantAllRequests = db.prepare(`SELECT COUNT(*) AS count FROM runtime_assistant_request_reservations
+    WHERE status IN ('reserved', 'completed', 'uncertain') AND created_at > ?`);
+  /**
+   * Shared, read-only limit decision. Cooldown is per chat+user (pace); the
+   * daily cap is per USER across all chats (a person, not a chat, costs money);
+   * the optional global cap bounds all answers in a rolling day.
+   */
+  function assistantRequestBlock({ chatId, userId, cooldownSec, dailyCap, globalDailyCap, at }) {
+    const cooldown = Math.max(0, Number.parseInt(cooldownSec, 10) || 0);
+    const daily = Math.max(0, Number.parseInt(dailyCap, 10) || 0);
+    const globalDaily = Math.max(0, Number.parseInt(globalDailyCap, 10) || 0);
+    if (cooldown > 0 && countAssistantRequests.get(chatId, userId, at - cooldown).count > 0) return 'cooldown';
+    if (daily > 0 && countAssistantUserRequests.get(userId, at - 86_400).count >= daily) return 'daily_cap';
+    if (globalDaily > 0 && countAssistantAllRequests.get(at - 86_400).count >= globalDaily) return 'global_daily_cap';
+    return null;
+  }
   const insertAssistantRequest = db.prepare(`INSERT INTO runtime_assistant_request_reservations
     (event_id, chat_id, user_id, status, created_at) VALUES (?, ?, ?, 'reserved', ?)`);
   const completeAssistantRequest = db.prepare(`UPDATE runtime_assistant_request_reservations
@@ -1628,23 +1652,24 @@ export function createRuntimeStore(db, {
       const syntheticMessageId = `compat:${randomUUID()}`;
       return reserveWeakStrike(String(chatId), String(userId), syntheticMessageId, syntheticMessageId, syntheticMessageId, now());
     },
-    reserveAssistantRequest({ eventId, chatId, userId, cooldownSec = 0, dailyCap = 0 }) {
+    reserveAssistantRequest({ eventId, chatId, userId, cooldownSec = 0, dailyCap = 0, globalDailyCap = 0 }) {
       if (!eventId || userId == null || String(userId) === '') return { allowed: false, reason: 'missing_user' };
       const at = now();
       const normalizedChatId = String(chatId);
       const normalizedUserId = String(userId);
       const existing = assistantRequest.get(String(eventId));
       if (existing) return { allowed: false, reason: 'already_reserved', existing };
-      const cooldown = Math.max(0, Number.parseInt(cooldownSec, 10) || 0);
-      const daily = Math.max(0, Number.parseInt(dailyCap, 10) || 0);
-      if (cooldown > 0 && countAssistantRequests.get(normalizedChatId, normalizedUserId, at - cooldown).count > 0) {
-        return { allowed: false, reason: 'cooldown' };
-      }
-      if (daily > 0 && countAssistantRequests.get(normalizedChatId, normalizedUserId, at - 86_400).count >= daily) {
-        return { allowed: false, reason: 'daily_cap' };
-      }
+      const blocked = assistantRequestBlock({ chatId: normalizedChatId, userId: normalizedUserId,
+        cooldownSec, dailyCap, globalDailyCap, at });
+      if (blocked) return { allowed: false, reason: blocked };
       insertAssistantRequest.run(String(eventId), normalizedChatId, normalizedUserId, at);
       return { allowed: true };
+    },
+    /** Read-only twin of reserveAssistantRequest: would a new request be refused? */
+    assistantRequestLimitReason({ chatId, userId, cooldownSec = 0, dailyCap = 0, globalDailyCap = 0 }) {
+      if (userId == null || String(userId) === '') return 'missing_user';
+      return assistantRequestBlock({ chatId: String(chatId), userId: String(userId),
+        cooldownSec, dailyCap, globalDailyCap, at: now() });
     },
     completeAssistantRequest(eventId) {
       return { completed: completeAssistantRequest.run(now(), String(eventId)).changes === 1 };

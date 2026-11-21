@@ -6,8 +6,12 @@ function transport({ guardMember, authorMember, calls }) {
   return {
     async getChatMember({ userId }) {
       calls.push(['get_member', userId]);
-      if (userId === 'guard') return guardMember;
-      return authorMember;
+      const answer = userId === 'guard' ? guardMember : authorMember;
+      // Telegram names the member it answers about; fixtures opt out via `user: null`.
+      if (answer?.ok === true && answer.data && typeof answer.data === 'object' && !('user' in answer.data)) {
+        return { ...answer, data: { user: { id: userId }, ...answer.data } };
+      }
+      return answer;
     },
     async deleteMessage(input) { calls.push(['delete', input]); return { ok: true, data: true }; },
     async unpinMessage(input) { calls.push(['unpin', input]); return { ok: true, data: true }; },
@@ -103,4 +107,54 @@ test('Guard fails closed when pin rights are absent and does not call Telegram u
     ok: false, skipped: 'guard_pin_rights_unproven', uncertain: false,
   });
   assert.deepEqual(calls, [['get_member', 'guard']]);
+});
+
+test('Guard never issues a success receipt for a positive flag without the method result', async () => {
+  for (const reply of [{ ok: true }, { ok: true, data: false }, { ok: true, data: { ok: true } }]) {
+    const calls = [];
+    const telegram = transport({
+      guardMember: { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } },
+      authorMember: { ok: true, data: { status: 'member' } }, calls,
+    });
+    telegram.deleteMessage = async (input) => { calls.push(['delete', input]); return reply; };
+    telegram.banMember = async (input) => { calls.push(['ban_member', input]); return reply; };
+    telegram.sendMessage = async (input) => { calls.push(['warning', input]); return reply; };
+    const guard = createGuardAdapter({ telegram, guardBotId: 'guard', guardChatIds: ['chat-a'] });
+    for (const result of [
+      await guard.deleteMessage({ chatId: 'chat-a', messageId: 'm' }),
+      await guard.banAuthor({ chatId: 'chat-a', userId: 'author' }),
+      await guard.sendWarning({ chatId: 'chat-a', messageId: 'm', text: 'w' }),
+    ]) {
+      assert.equal(result.ok, false, JSON.stringify(reply));
+      assert.equal(result.uncertain, true, 'unconfirmed receipt goes to reconciliation');
+    }
+    assert.equal(calls.filter(([kind]) => kind === 'delete').length, 1, 'no repeated mutation');
+    assert.equal(calls.filter(([kind]) => kind === 'ban_member').length, 1, 'no repeated mutation');
+  }
+});
+
+test('Guard does not accept membership about another user or with an unknown status', async () => {
+  for (const authorMember of [
+    { ok: true, data: { user: { id: 'someone-else' }, status: 'administrator' } },
+    { ok: true, data: { user: null, status: 'administrator' } },
+    { ok: true, data: { status: 'superadmin' } },
+  ]) {
+    const calls = [];
+    const telegram = transport({
+      guardMember: { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } },
+      authorMember, calls,
+    });
+    const guard = createGuardAdapter({ telegram, guardBotId: 'guard', guardChatIds: ['chat-a'] });
+    assert.deepEqual(await guard.senderDisposition({ chatId: 'chat-a', userId: 'author' }), {
+      proven: false, exempt: false, reason: 'telegram_membership_unconfirmed',
+    }, JSON.stringify(authorMember));
+  }
+  const calls = [];
+  const telegram = transport({
+    guardMember: { ok: true, data: { user: { id: 'impostor' }, status: 'creator' } },
+    authorMember: { ok: true, data: { status: 'member' } }, calls,
+  });
+  const guard = createGuardAdapter({ telegram, guardBotId: 'guard', guardChatIds: ['chat-a'] });
+  assert.equal((await guard.deleteMessage({ chatId: 'chat-a', messageId: 'm' })).skipped, 'telegram_membership_unconfirmed');
+  assert.equal(calls.some(([kind]) => kind === 'delete'), false);
 });

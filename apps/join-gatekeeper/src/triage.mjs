@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PRECHECK_REASONS } from './scenario.mjs';
+import { RESTRICT_UNCONFIRMED } from './store.mjs';
 import { precheckApplicant } from './screening.mjs';
 import {
   isAmbiguousTelegramError, isAuthOrRateError, isDeactivatedUserError, isNoRequestError, permissions,
@@ -314,9 +315,10 @@ export async function executeTriage({
     const restrictState = restrict.state === 'done' ? 'restricted' : (restrict.state === 'inconclusive' ? 'inconclusive' : 'failed');
     store.createApplication({
       ...base,
-      state: 'probation',
+      // Unconfirmed restriction is not probation: it joins the discrepancy queue.
+      state: restrict.state === 'done' ? 'probation' : 'manual_review',
       screeningVerdict: 'clean',
-      decisionReason: 'triage_accept_restricted',
+      decisionReason: restrict.state === 'done' ? 'triage_accept_restricted' : RESTRICT_UNCONFIRMED,
       extra: {
         telegram_action_state: restrict.state === 'done' ? 'done' : (restrict.state === 'inconclusive' ? 'inconclusive' : 'failed'),
         restrict_state: restrictState,

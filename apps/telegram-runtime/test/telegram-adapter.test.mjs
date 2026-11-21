@@ -280,3 +280,57 @@ test('invalid footer metadata is refused before any Telegram call', async () => 
   }
   assert.equal(calls.length, 0);
 });
+
+test('sanction methods count as done only on ok === true with literal true result', async () => {
+  const cases = [
+    [{ ok: true, result: true }, true],
+    [{ ok: true }, false],
+    [{ ok: true, result: false }, false],
+    [{ ok: true, result: { ok: true } }, false],
+    [{ ok: 1, result: true }, false],
+    [{ result: true }, false],
+  ];
+  for (const method of ['deleteMessage', 'banMember', 'banSenderChat', 'unpinMessage']) {
+    for (const [reply, done] of cases) {
+      const { calls, fetchFn } = recorder([reply]);
+      const adapter = createTelegramAdapter({ botToken: 'T', fetchFn });
+      const result = await adapter[method]({ chatId: -1, messageId: 5, userId: 7, senderChatId: -9 });
+      assert.equal(calls.length, 1, 'never repeats a mutation');
+      if (done) assert.deepEqual(result, { ok: true, data: true });
+      else {
+        assert.equal(result.ok, false, `${method} ${JSON.stringify(reply)}`);
+        assert.equal(result.uncertain, true, 'an unconfirmed receipt is undetermined, not refused');
+      }
+    }
+  }
+});
+
+test('an explicit Telegram refusal stays a definite refusal, not an uncertain receipt', async () => {
+  const { fetchFn } = recorder([{ ok: false, description: 'Bad Request: message to delete not found' }]);
+  const adapter = createTelegramAdapter({ botToken: 'T', fetchFn });
+  const result = await adapter.deleteMessage({ chatId: -1, messageId: 5 });
+  assert.deepEqual(result, { ok: false, error: 'Bad Request: message to delete not found' });
+});
+
+test('getChatMember is a receipt only for the requested user with a documented status', async () => {
+  const good = { ok: true, result: { user: { id: 7 }, status: 'member' } };
+  const bad = [
+    { ok: true, result: { user: { id: 8 }, status: 'member' } },
+    { ok: true, result: { status: 'member' } },
+    { ok: true, result: { user: { id: 7 }, status: 'superuser' } },
+    { ok: true, result: { user: { id: 7 } } },
+    { ok: true, result: null },
+  ];
+  {
+    const { fetchFn } = recorder([good]);
+    const result = await createTelegramAdapter({ botToken: 'T', fetchFn }).getChatMember({ chatId: -1, userId: '7' });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.status, 'member');
+  }
+  for (const reply of bad) {
+    const { fetchFn } = recorder([reply]);
+    const result = await createTelegramAdapter({ botToken: 'T', fetchFn }).getChatMember({ chatId: -1, userId: '7' });
+    assert.equal(result.ok, false, JSON.stringify(reply));
+    assert.equal(result.uncertain, true);
+  }
+});

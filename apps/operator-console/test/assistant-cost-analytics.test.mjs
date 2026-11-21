@@ -89,6 +89,19 @@ test('one durable Q&A event prices analyzer, router and answer once across rolli
   near(analytics.total.averageCostUsd, (0.003424 + 0.000032 + 0.000064) / 2);
 });
 
+test('a Claude Sonnet 5.5 answer is priced at $2 / $10 per million tokens', (t) => {
+  const { db, config } = fixture(t);
+  answer(db, 'sonnet', NOW - 60, { model: 'claude-sonnet-5-5', input: 10_000, output: 1_000, total: 11_000 });
+  observation(db, 'sonnet', NOW - 61, {
+    router: 'gpt-5.6-luna', routerInput: 200, routerOutput: 20, routerTotal: 220,
+  });
+  db.close();
+  const analytics = assistantCostAnalytics(config, { nowSeconds: NOW });
+  assert.equal(analytics.today.pricedCount, 1);
+  // Sonnet answer .02 + .01; Luna analyzer .00016; Luna router .000064.
+  near(analytics.today.cost, 0.03 + 0.00016 + 0.000064);
+});
+
 test('unknown usage, missing observation and unverified delivery stay outside the priced mean', (t) => {
   const { db, config } = fixture(t);
   answer(db, 'known', NOW - 10);

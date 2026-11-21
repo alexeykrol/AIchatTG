@@ -8,7 +8,7 @@ import { runTriageCli } from '../src/triage-cli.mjs';
 import { classifyExport, executeTriage, sha256 } from '../src/triage.mjs';
 import { TelegramApiError } from '../src/telegram-api.mjs';
 import {
-  ambiguousError, authError, CHAT_ID, FakeTelegram, noRequestError, scenario, T0, tempDir, TOKEN,
+  ambiguousError, authError, CHAT_ID, definiteError, FakeTelegram, noRequestError, scenario, T0, tempDir, TOKEN,
 } from './helpers.mjs';
 
 const SC = scenario();
@@ -215,6 +215,18 @@ describe('triage execute', () => {
     assert.equal(store.listByUserAndStates(3, ['approved_token']).length, 1);
     assert.equal(receipt.schema, 'joingate-triage-receipt-v1');
     assert.equal(store.listJournal('triage_receipt').length, 1);
+  });
+
+  test('confirm accept_restricted: unconfirmed restriction goes to the discrepancy queue, not probation', async () => {
+    const { files, telegram } = setup([request(1)]);
+    telegram.failNext('restrictChatMember', definiteError('restrictChatMember'));
+    const { receipt } = await run(files['accept_restricted.json'], 'accept_restricted', { telegram });
+    assert.deepEqual(receipt.counts, { approved_restrict_failed: 1 });
+    assert.equal(store.listByUserAndStates(1, ['probation']).length, 0);
+    const queue = store.listRestrictionDiscrepancies();
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].decision_reason, 'restrict_unconfirmed');
+    assert.equal(queue[0].restrict_state, 'failed');
   });
 
   test('pacing below 1 s and non-allowlisted chat are refused', async () => {

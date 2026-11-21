@@ -1467,6 +1467,27 @@ export function createTelegramRuntime({
     return { routing, observation, routedByVerdict: Boolean(mapped) };
   }
 
+  /**
+   * Spend ceiling before the paid judge. An over-limit question would only be
+   * refused after the judgement, so where that judgement exists solely for the
+   * assistant answer (chat outside the Moderator's scope) it is not scheduled.
+   * In a Moderator chat the same judgement IS the moderation of the message and
+   * runs unchanged; the reservation in handleAssistant still enforces the cap.
+   */
+  function assistantPreJudgeLimit(role, update, projection) {
+    const question = projection?.question;
+    if (role !== BOT_ROLES.ASSISTANT || !update.message || !question || projection.judgeEligible === false) return null;
+    if (question.command !== 'ask' || !question.text?.trim()) return null;
+    if ((config.moderator?.chatIds || []).map(String).includes(String(question.chatId))) return null;
+    if (typeof store.assistantRequestLimitReason !== 'function') return null;
+    return store.assistantRequestLimitReason({
+      chatId: question.chatId, userId: question.userId, cooldownSec: config.assistantCooldownSec,
+      dailyCap: (config.syntheticTestingEnabled === true && question.isSyntheticSender === true)
+        ? config.assistantSyntheticDailyPerUser : config.assistantDailyPerUser,
+      globalDailyCap: config.assistantDailyGlobalAnswers,
+    });
+  }
+
   async function handleAssistant(eventId, question, routingContext) {
     // A correctly bound non-command reply ends only the *idle* 30-second
     // timer before the moderation/provider boundary. It never changes reply
@@ -1522,6 +1543,7 @@ export function createTelegramRuntime({
           dailyCap: (config.syntheticTestingEnabled === true && question.isSyntheticSender === true)
             ? config.assistantSyntheticDailyPerUser
             : config.assistantDailyPerUser,
+          globalDailyCap: config.assistantDailyGlobalAnswers,
         });
         if (!request.allowed) {
           store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: request.reason });
@@ -1571,6 +1593,7 @@ export function createTelegramRuntime({
         dailyCap: (config.syntheticTestingEnabled === true && question.isSyntheticSender === true)
           ? config.assistantSyntheticDailyPerUser
           : config.assistantDailyPerUser,
+        globalDailyCap: config.assistantDailyGlobalAnswers,
       });
       if (!request.allowed) {
         store.completeAssistantQuestion({ chatId: question.chatId, messageId: question.messageId, claim: question.answerClaim, outcome: request.reason });
@@ -1808,7 +1831,10 @@ export function createTelegramRuntime({
         const projection = (role === BOT_ROLES.ASSISTANT || role === BOT_ROLES.MODERATOR)
           && adapterConfig.chatIds.map(String).includes(String(scopedMessage?.chat?.id))
           ? buildJudgementEnvelope(config, update) : null;
-        if (projection || classified.kind === 'comment' || classified.kind === 'question') {
+        const preJudgeLimit = assistantPreJudgeLimit(role, update, projection);
+        if (preJudgeLimit) {
+          result = { kind: 'skipped', reason: preJudgeLimit, preJudge: true };
+        } else if (projection || classified.kind === 'comment' || classified.kind === 'question') {
           const observation = projection ? store.observeJudgementEnvelope({ envelope: projection, eventId, receiptId,
             snapshotTtlSec: config.moderatorRecoverySnapshotTtlSec }) : null;
           if (!observation?.current) {

@@ -25,6 +25,17 @@ export const TOKEN_STATUSES = Object.freeze(['issued', 'used', 'revoked']);
 // DM-failure reasons: an undecided manual_review with one of these may run the
 // questionnaire after the user starts the bot (contract v2 §2).
 export const DM_FAILURE_REASONS = Object.freeze(['dm_failed', 'dm_inconclusive', 'missing_user_chat_id']);
+// Join request approved but the restriction was not confirmed by Telegram:
+// the person may be in the group WITHOUT probation rights. Such an
+// application is kept out of `probation` (state manual_review + this reason)
+// and listed in the discrepancy queue until an operator reconciles it.
+export const RESTRICT_UNCONFIRMED = 'restrict_unconfirmed';
+// Restriction states that prove Telegram applied the probation restriction.
+const RESTRICTION_CONFIRMED_STATES = Object.freeze(['restricted', 'lifted', 'lift_failed', 'lift_inconclusive']);
+// Older rows (before restrict_unconfirmed existed) may sit in `probation`
+// with an unconfirmed restriction; the queue shows them too.
+const DISCREPANCY_WHERE = `((state = 'manual_review' AND decision_reason = '${RESTRICT_UNCONFIRMED}')
+  OR (state = 'probation' AND restrict_state IN ('failed', 'inconclusive')))`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const SCHEMA = `
@@ -345,6 +356,42 @@ export class JoinStore {
     ).all(now).map(rowToApplication);
   }
 
+  // Visible queue: approved members whose restriction is not confirmed.
+  listRestrictionDiscrepancies() {
+    return this.db.prepare(
+      `SELECT * FROM join_applications WHERE ${DISCREPANCY_WHERE} ORDER BY decided_at, created_at, rowid`,
+    ).all().map(rowToApplication);
+  }
+
+  listRestrictionDiscrepanciesByUser(userId) {
+    return this.db.prepare(
+      `SELECT * FROM join_applications WHERE user_id = ? AND ${DISCREPANCY_WHERE} ORDER BY created_at, rowid`,
+    ).all(String(userId)).map(rowToApplication);
+  }
+
+  // Three admission metrics counted separately (audit 2026-11-21 §4):
+  // - approved: Telegram accepted the join-request approval;
+  // - restriction_confirmed: probation restriction confirmed by Telegram;
+  // - can_ask_first_question: confirmed able to write (approved without
+  //   probation, or probation restriction confirmed lifted).
+  // restriction_unconfirmed is the size of the discrepancy queue.
+  admissionMetrics() {
+    const confirmed = RESTRICTION_CONFIRMED_STATES.map((s) => `'${s}'`).join(', ');
+    return this.db.prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN state = 'approved'
+           OR (state = 'approved_token' AND telegram_action_state = 'done')
+           OR state IN ('probation', 'probation_passed', 'probation_removed')
+           OR (state = 'manual_review' AND decision_reason = '${RESTRICT_UNCONFIRMED}') THEN 1 ELSE 0 END), 0) AS approved,
+         COALESCE(SUM(CASE WHEN restrict_state IN (${confirmed}) THEN 1 ELSE 0 END), 0) AS restriction_confirmed,
+         COALESCE(SUM(CASE WHEN state = 'approved'
+           OR (state = 'approved_token' AND telegram_action_state = 'done')
+           OR restrict_state = 'lifted' THEN 1 ELSE 0 END), 0) AS can_ask_first_question,
+         COALESCE(SUM(CASE WHEN ${DISCREPANCY_WHERE} THEN 1 ELSE 0 END), 0) AS restriction_unconfirmed
+       FROM join_applications`,
+    ).get();
+  }
+
   countByState() {
     const rows = this.db.prepare('SELECT state, COUNT(*) AS n FROM join_applications GROUP BY state').all();
     return Object.fromEntries(rows.map((row) => [row.state, row.n]));
@@ -356,7 +403,11 @@ export class JoinStore {
   // a restriction). Tokens, verified members and the journal are never purged.
   purgeExpired(now, retentionDays) {
     const cutoff = now - retentionDays * DAY_MS;
-    const decided = `state NOT IN ('screening', 'asking', 'probation') AND COALESCE(decided_at, created_at) < @cutoff`;
+    // An unresolved restriction discrepancy is not "decided" either: the
+    // operator still needs to see who it is.
+    const decided = `state NOT IN ('screening', 'asking', 'probation')
+      AND NOT (state = 'manual_review' AND decision_reason = '${RESTRICT_UNCONFIRMED}')
+      AND COALESCE(decided_at, created_at) < @cutoff`;
     return this.db.transaction(() => {
       const answers = this.db.prepare(
         `DELETE FROM join_answers WHERE application_id IN (SELECT id FROM join_applications WHERE ${decided})`,

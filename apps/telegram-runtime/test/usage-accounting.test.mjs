@@ -90,7 +90,7 @@ function availableKnowledge() {
 function adapters(actions) {
   return {
     moderatorTelegram: {
-      async getChatMember() { return { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } }; },
+      async getChatMember({ userId }) { return { ok: true, data: { user: { id: userId }, status: 'administrator', can_delete_messages: true, can_restrict_members: true } }; },
       async banMember() { return { ok: true }; },
       async banSenderChat() { return { ok: true }; },
       async deleteMessage() { return { ok: true }; },

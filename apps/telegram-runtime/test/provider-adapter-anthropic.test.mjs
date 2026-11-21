@@ -7,6 +7,7 @@ import {
   ANSWER_DISCIPLINE_RULES,
   ANTHROPIC_API_VERSION,
   ANTHROPIC_DEFAULT_ENDPOINT,
+  ANTHROPIC_ENDPOINT_ALLOWLIST,
   answerSystemPrompt,
   anthropicRequestFor,
   createProviderAdapter,
@@ -191,7 +192,7 @@ test('anthropic response and usage map into the shared receipt contract', async 
     vendor: 'anthropic', operation: 'assistantAnswer', modelId: 'claude-sonnet-5-5', configuredModelId: 'claude-sonnet-5-5',
     reasoningEffort: 'low', httpStatus: 200, requestId: 'req_ant_fixture',
     inputTokens: 135, outputTokens: 40, totalTokens: 175, cacheReadInputTokens: 30, cacheCreationInputTokens: 5,
-    costUsd: null, retryCount: 0,
+    costUsd: null, retryCount: 0, stopReason: 'end_turn', incomplete: false,
   });
   assert.deepEqual({ ...providerCallUsage(answered.receipt) },
     { modelId: 'claude-sonnet-5-5', inputTokens: 135, outputTokens: 40, totalTokens: 175 });
@@ -257,6 +258,7 @@ test('router, moderator safety and analyzer stay on OpenAI when the answer vendo
   assert.deepEqual(openaiCalls[1], openaiCalls[0]);
   assert.equal(openaiCalls[1].url, 'https://provider.example.test/v1/chat/completions');
   assert.equal(openaiCalls[1].init.headers.authorization, `Bearer ${OPENAI_KEY}`);
+  assert.equal(openaiCalls[1].init.redirect, 'error', 'a keyed OpenAI request never follows a redirect');
 
   await adapter.analyze({ system: 'analyzer system', input: 'analyzer input' });
   assert.equal(anthropicCalls.length, 0);
@@ -322,4 +324,43 @@ test('configuration fingerprint is unchanged for an OpenAI-only answer route', (
       { fetchFn: async () => {} });
     assert.equal(adapter.configurationFingerprint, legacy);
   }
+});
+
+test('anthropic max_tokens truncation is an incomplete answer, never a finished one', async () => {
+  for (const [stopReason, expected] of [['max_tokens', 'max_tokens'], ['refusal', 'refusal'], [undefined, 'missing'],
+    ['pause_turn', 'pause_turn'], ['model_context_window_exceeded', 'model_context_window_exceeded']]) {
+    const body = { ...messagesBody({ text: 'Обрезанный, но непустой ответ' }), stop_reason: stopReason };
+    if (stopReason === undefined) delete body.stop_reason;
+    const adapter = createProviderAdapter(anthropicConfig(), { async fetchFn() { return response(body); } });
+    await assert.rejects(adapter.answer(answerPayload()), (error) => {
+      assert.ok(error instanceof ProviderRequestError);
+      assert.equal(error.code, 'provider_response_incomplete');
+      assert.equal(error.receipt.stopReason, expected);
+      assert.equal(error.receipt.incomplete, true);
+      assert.equal(error.receipt.outputTokens, 40, 'the paid usage stays on the receipt');
+      return true;
+    });
+  }
+  const stopSequence = createProviderAdapter(anthropicConfig(), {
+    async fetchFn() { return response({ ...messagesBody(), stop_reason: 'stop_sequence' }); },
+  });
+  const done = await stopSequence.answer(answerPayload());
+  assert.equal(done.receipt.stopReason, 'stop_sequence');
+  assert.equal(done.receipt.incomplete, false);
+});
+
+test('anthropic endpoint must be on the allowlist and keyed requests never follow redirects', async () => {
+  assert.deepEqual([...ANTHROPIC_ENDPOINT_ALLOWLIST], ['https://api.anthropic.com/v1/']);
+  for (const anthropicEndpoint of ['https://evil.example.com/v1/', 'https://api.anthropic.com.evil.test/v1/',
+    'https://proxy.anthropic.example/v1/']) {
+    assert.equal(validateProviderRuntimeConfig(anthropicConfig({ anthropicEndpoint })).code,
+      'provider_anthropic_endpoint_invalid', anthropicEndpoint);
+  }
+  const inits = [];
+  const adapter = createProviderAdapter(anthropicConfig(), {
+    async fetchFn(url, init) { inits.push([url, init]); return response(messagesBody()); },
+  });
+  await adapter.answer(answerPayload());
+  assert.equal(inits[0][0], 'https://api.anthropic.com/v1/messages');
+  assert.equal(inits[0][1].redirect, 'error');
 });

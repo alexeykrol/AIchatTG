@@ -243,9 +243,9 @@ test('a stale threat cannot cross the real Guard final rights boundary after an 
   const releaseRights = deferred();
   const externalActions = [];
   let guardProofs = 0;
-  const member = { status: 'member' };
+  const member = { user: { id: 7 }, status: 'member' };
   const administrator = {
-    status: 'administrator', can_delete_messages: true, can_restrict_members: true,
+    user: { id: 123 }, status: 'administrator', can_delete_messages: true, can_restrict_members: true,
   };
   const guard = createGuardAdapter({
     guardBotId: '123', guardChatIds: ['-100'],
@@ -259,9 +259,9 @@ test('a stale threat cannot cross the real Guard final rights boundary after an 
         }
         return { ok: true, data: administrator };
       },
-      async deleteMessage(input) { externalActions.push({ name: 'delete', input }); return { ok: true }; },
-      async sendMessage(input) { externalActions.push({ name: 'warning', input }); return { ok: true }; },
-      async banMember(input) { externalActions.push({ name: 'ban', input }); return { ok: true }; },
+      async deleteMessage(input) { externalActions.push({ name: 'delete', input }); return { ok: true, data: true }; },
+      async sendMessage(input) { externalActions.push({ name: 'warning', input }); return { ok: true, data: { message_id: 1 } }; },
+      async banMember(input) { externalActions.push({ name: 'ban', input }); return { ok: true, data: true }; },
     },
   });
   const h = harness(t, {

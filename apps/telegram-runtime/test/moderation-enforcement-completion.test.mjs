@@ -24,26 +24,26 @@ function harness(t, {
   let modelCalls = 0;
   const moderatorTelegram = {
     async getChatMember({ userId }) {
-      if (userId !== '123') return { ok: true, data: { status: 'member' } };
+      if (userId !== '123') return { ok: true, data: { user: { id: userId }, status: 'member' } };
       const restrict = !skipNextGuardProof;
       skipNextGuardProof = false;
       return { ok: true, data: {
-        status: 'administrator', can_delete_messages: true, can_restrict_members: restrict,
+        user: { id: userId }, status: 'administrator', can_delete_messages: true, can_restrict_members: restrict,
       } };
     },
     async banMember(input) {
       actions.push(['ban', input]);
       skipNextGuardProof = skipDeleteRights;
-      return banUncertain ? { ok: false, error: 'telegram_transport_unknown' } : { ok: true };
+      return banUncertain ? { ok: false, error: 'telegram_transport_unknown' } : { ok: true, data: true };
     },
     async deleteMessage(input) {
       actions.push(['delete', input]);
-      return deleteUncertain ? { ok: false, error: 'telegram_transport_unknown' } : { ok: true };
+      return deleteUncertain ? { ok: false, error: 'telegram_transport_unknown' } : { ok: true, data: true };
     },
   };
   if (!unsupportedSenderChat) moderatorTelegram.banSenderChat = async (input) => {
     actions.push(['ban_sender_chat', input]);
-    return { ok: true };
+    return { ok: true, data: true };
   };
   const guard = createGuardAdapter({ telegram: moderatorTelegram, guardBotId: '123', guardChatIds: ['-100'] });
   const createRuntime = () => createTelegramRuntime({

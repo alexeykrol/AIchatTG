@@ -60,8 +60,14 @@ The token CLI needs only `JOIN_GATEKEEPER_DATA_ROOT` (and optional
   `restrictChatMember` (no sending) → `probation` with a deadline of
   `limits.probationDays` (default 7). If approve fails, the request stays with
   an admin. If
-  restrict fails or is unknown, the state is still `probation` and the failure
-  is logged as an error: the person is in the group without restriction.
+  restrict fails or is unknown, the application is **not** `probation`: it
+  becomes `manual_review` with `decision_reason = restrict_unconfirmed`, a
+  `restrict_unconfirmed` journal entry and an error log, and appears in the
+  discrepancy queue (`store.listRestrictionDiscrepancies()`, which also lists
+  older `probation` rows with an unconfirmed restriction). The person may be in
+  the group without restriction; an operator reconciles. A verified token lifts
+  it like probation. `store.admissionMetrics()` counts `approved`,
+  `restriction_confirmed` and `can_ask_first_question` separately.
 - An admin pins a message with `https://t.me/<bot>?start=gate` in the group
   (the bot never posts there). `/start gate` or bare `/start` from a user in
   probation → intro + the same questions (no 5-minute limit). `/start` from a
