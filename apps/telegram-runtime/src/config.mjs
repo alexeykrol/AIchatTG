@@ -1,6 +1,7 @@
 import { dirname, relative, resolve, sep } from 'node:path';
 import { ASSISTANT_SOURCE_PACKAGES } from '@aichattg/telegram-core';
 import { ANTHROPIC_DEFAULT_ENDPOINT, validateProviderRuntimeConfig } from './provider-adapter.mjs';
+import { loadKnowledgePackageRegistry } from './knowledge-packages.mjs';
 
 const roleNames = ['MODERATOR', 'ASSISTANT'];
 
@@ -296,6 +297,9 @@ export function loadRuntimeConfig(env = process.env, { cwd = process.cwd() } = {
         orgPath: knowledgeSlicePath(env, cwd, knowledgeRoot, 'TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH'),
         valuePath: knowledgeSlicePath(env, cwd, knowledgeRoot, 'TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH'),
       },
+      // Additional retrieval bases (generic registry, knowledge-packages.mjs).
+      // Unset = no extra slots; the built-in course slot above is unaffected.
+      packages: loadKnowledgePackageRegistry(env, cwd, knowledgeRoot),
     },
     ingressEnabled,
     moderationMode,

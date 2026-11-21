@@ -55,13 +55,18 @@ test('default registry preserves existing admitted pair bindings and public-only
   assert.equal(catalog.get('content').servedSourceId, 'course-knowledge-v2');
   assert.equal(catalog.get('navigation').servedSourceId, 'course-knowledge-v2');
   assert.equal(catalog.get('operations').servedSourceId, 'course-operations-v1');
+  // The book is a retrieval domain bound to its own package slot.
+  assert.equal(catalog.get('book').sourceId, 'book-tcr-v1');
+  assert.equal(catalog.get('book').servedSourceId, 'book-tcr-v1');
+  assert.equal(catalog.get('book').sourceKind, 'retrieval');
+  assert.equal(catalog.get('book').snapshotFallback, false);
   assert.match(catalog.markdownKnowledge('assistant-self').entries[0].content, /не Алексей Крол/);
   assert.match(catalog.markdownKnowledge('assistant-self').entries[0].content, /Причина.*не указана/);
   assert.match(catalog.markdownKnowledge('assistant-self').entries[0].content, /Общие вопросы.*правилах/);
   assert.match(catalog.markdownKnowledge('abuse').entries[0].content, /не предоставляет разрешения на санкции/);
 });
 
-test('arbitrary seventh domain needs only registry and knowledge files; existing domains remain usable', (t) => {
+test('an arbitrary additional domain needs only registry and knowledge files; existing domains remain usable', (t) => {
   const f = fixture(t);
   const original = readFileSync(DEFAULT_DOMAIN_INDEX, 'utf8');
   f.writeIndex(`${original}\n${block('new-unrelated-domain')}`);
@@ -70,7 +75,7 @@ test('arbitrary seventh domain needs only registry and knowledge files; existing
   }
   f.write('new-unrelated-domain.md', '# New subject\n\nThis statement exists only in the new subject.\n');
   const catalog = f.load();
-  assert.equal(catalog.domains.length, 7);
+  assert.equal(catalog.domains.length, DEFAULT_DOMAIN_CATALOG.domains.length + 1);
   assert.deepEqual(catalog.routeFor('new-unrelated-domain'), {
     domainId: 'new-unrelated-domain', action: 'new-unrelated-domain', sourceId: 'new-unrelated-domain-v1',
   });

@@ -4,6 +4,7 @@ import { createProviderAdapter } from './provider-adapter.mjs';
 import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
 import { assertSlicesAdmitted, composeKnowledgeSlices } from './knowledge-slices.mjs';
 import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
+import { assertPackageSlotsAdmitted, bindRetrievalsToDomains } from './knowledge-packages.mjs';
 import { createAnalyzerAdapter } from './analyzer-adapter.mjs';
 import { loadAnalyzerSpec } from './analyzer-spec.mjs';
 import { createRewriterAdapter } from './rewriter-adapter.mjs';
@@ -54,9 +55,12 @@ const knowledge = composed.knowledge;
 // The content retriever is built only when explicitly enabled. When it is off
 // the assistant keeps its previous path exactly, so this cutover is a switch,
 // not a rewrite of a running deployment.
+// One lazy embedder per identical model, shared by every hybrid slot.
+const embedderCache = new Map();
 const contentRetrieval = config.assistantRetrieval.enabled === true
   ? createKnowledgeRetrieval(config.assistantRetrieval, {
     knowledge: composed.baseKnowledge,
+    embedderCache,
     rewriteQuestion: config.assistantRetrieval.rewriteEnabled === true
       ? createRewriterAdapter({
         enabled: true,
@@ -70,6 +74,43 @@ const contentRetrieval = config.assistantRetrieval.enabled === true
   : null;
 if (contentRetrieval && !contentRetrieval.available) {
   console.error(`[telegram-runtime] content retrieval unavailable: ${contentRetrieval.reason}`);
+}
+// Generic package registry (TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGES): every listed
+// base is admitted by its pinned digest and gets its own retriever. A listed
+// but unadmitted slot fails startup, like a configured-but-broken slice.
+const packageSlots = composed.baseKnowledge.packageSlots?.() || [];
+for (const slot of packageSlots) {
+  console.log(`[telegram-runtime] knowledge package ${slot.sourceId}: configured=${slot.configured}; admitted=${slot.admitted}; `
+    + `reason=${slot.reason || 'none'}; domain=${slot.domainId || 'none'}; digest=${String(slot.digest || '').slice(0, 12) || 'none'}`);
+}
+assertPackageSlotsAdmitted(packageSlots);
+const slotRetrievals = new Map();
+if (contentRetrieval) slotRetrievals.set(contentRetrieval.sourceId || 'course-knowledge-v2', contentRetrieval);
+for (const slot of config.knowledge.packages.slots) {
+  const retrieval = createKnowledgeRetrieval({
+    ...slot.retrieval,
+    sourceId: slot.sourceId,
+    rewriteEnabled: false,
+    validatePacks: config.assistantRetrieval.validatePacks,
+  }, { knowledge: composed.baseKnowledge, embedderCache });
+  if (!retrieval.available) throw new Error(`knowledge package ${slot.sourceId} retrieval unavailable: ${retrieval.reason}`);
+  console.log(`[telegram-runtime] knowledge package ${slot.sourceId} retrieval: mode=${slot.retrieval.retrievalMode}; `
+    + `hybrid=${retrieval.hybridLive}; embedderShared=${retrieval.embedderShared}; maxEntries=${slot.retrieval.maxEntries}`);
+  slotRetrievals.set(slot.sourceId, retrieval);
+}
+const sourceRetrievals = bindRetrievalsToDomains(domainCatalog, slotRetrievals);
+for (const domain of domainCatalog.domains.filter((d) => d.sourceKind === 'retrieval')) {
+  const bound = sourceRetrievals.get(domain.sourceId);
+  console.log(`[telegram-runtime] domain ${domain.id} -> slot=${bound?.sourceId || 'none'}`);
+  if (!bound && !domain.snapshotFallback && config.assistantKnowledgeEnabled) {
+    // Routed questions of this domain will exit with domain_retrieval_unavailable.
+    console.warn(`[telegram-runtime] domain ${domain.id}: no admitted package serves ${domain.servedSourceId}; its questions will be skipped`);
+  }
+}
+for (const slot of config.knowledge.packages.slots) {
+  if (![...sourceRetrievals.values()].includes(slotRetrievals.get(slot.sourceId))) {
+    console.warn(`[telegram-runtime] knowledge package ${slot.sourceId}: no domain names it as Source/Served source; unreachable`);
+  }
 }
 // Анализатор запроса. Спецификация — данные выката: её дайджест печатается в
 // лог, потому что тот же файл живёт в лаборатории, и расхождение стенда с боем
@@ -96,6 +137,7 @@ const runtime = createTelegramRuntime({
   domainCatalog,
   knowledge,
   contentRetrieval,
+  sourceRetrievals,
   analyzer,
   moderatorTelegram,
   guard,

@@ -1615,6 +1615,14 @@ export function createTelegramRuntime({
       // В dispatch-чате журнал уже записан внутри dispatchAssistantQuestion —
       // event_id уникален, второй строки на ход не бывает.
       if (!dispatched) await observeAssistantQuestion({ eventId, question, hints, routing, dialogue, workingState });
+      if (Array.isArray(routing.retrievalSlots) && routing.retrievalSlots.length) {
+        // Which knowledge base served the turn. Ids and codes only — no
+        // question, chat or user identifier.
+        try {
+          console.log(JSON.stringify({ event: 'assistant_retrieval', eventId: String(eventId),
+            slots: routing.retrievalSlots }));
+        } catch { /* журнал не важнее ответа */ }
+      }
       if (routing.error) {
         // Классификация по цене (§2.3) с учётом вызова анализатора: локальный
         // доказуемый выход возвращает квоту, только если и вызов анализатора

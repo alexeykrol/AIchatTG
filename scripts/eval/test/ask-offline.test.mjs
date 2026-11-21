@@ -387,7 +387,10 @@ test('mock run with --rewrite --rewrite-no-signal: no-signal questions may be re
 // across runs.
 const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c0eb0976992';
 // Re-pinned 2026-11-21: the runtime answer prompt now ends with the v2-cited discipline (merge of 358f6dc).
-const PINNED_DEFAULT_REQUESTS_SHA256 = 'a624de3f1c27f9354e30b9ddb291c468e945eb2ca072401f2754383ac429cd71';
+// Re-pinned 2026-11-21 (a624de3f… -> e0ad2dbe…), 2.4.48: the domain registry gained the `book` domain
+// and the `content` Excludes now name it; the catalog is part of the answer request. Request count and
+// routing of the harness (fixed to `content`) are unchanged.
+const PINNED_DEFAULT_REQUESTS_SHA256 = 'e0ad2dbe494708942ad62ead9862999d03f1038d1447cebed3a1cb81e7c2dbe3';
 const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
 
 test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {

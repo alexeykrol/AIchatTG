@@ -200,6 +200,9 @@ services:
       TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256: "${TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGE_DIGEST_SHA256:-}"
       TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH: "${TELEGRAM_RUNTIME_KNOWLEDGE_ORG_SLICE_PATH:-}"
       TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH: "${TELEGRAM_RUNTIME_KNOWLEDGE_VALUE_SLICE_PATH:-}"
+      # Generic retrieval-package registry (JSON file below the knowledge root);
+      # empty = no extra bases. Adding a base needs no compose change.
+      TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGES: "${TELEGRAM_RUNTIME_KNOWLEDGE_PACKAGES:-}"
       # Значения, на которых измерены R@5 и воздержание. Менять их — значит
       # запускать систему, для которой замеров нет.
       TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_ENTRIES: "${TELEGRAM_RUNTIME_ASSISTANT_RETRIEVAL_MAX_ENTRIES:-12}"
