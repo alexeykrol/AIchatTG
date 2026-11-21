@@ -43,17 +43,19 @@ Answer in Russian inside the JSON strings. Return only this JSON object:
 {"relation": "...", "expected_fair": "...", "must_say": ["..."], "book_chunks": ["..."], "reason": "..."}"""
 
 
-def user_message(case: dict) -> str:
+def user_message(case: dict, hide_expected: bool = False) -> str:
     quotes = "\n".join(f"- [{s.get('unit_id', '?')}] «{s.get('quote', '')}»" for s in case.get("support") or [])
+    expected = ("(withheld: judge the book's places on your own; set expected_fair to \"fair\")" if hide_expected
+                else case.get('expected', ''))
     return (f"Question:\n{case['question']}\n\nQuotes the test treats as the answer's places:\n{quotes}\n\n"
-            f"The test's expected answer:\n{case.get('expected', '')}\n\nReturn the JSON object only.")
+            f"The test's expected answer:\n{expected}\n\nReturn the JSON object only.")
 
 
-def build_request(book: J.Book, case: dict, model: str) -> dict:
+def build_request(book: J.Book, case: dict, model: str, hide_expected: bool = False) -> dict:
     return {"model": model, "max_tokens": J.MAX_TOKENS,
             "system": [{"type": "text", "text": SYSTEM},
                        {"type": "text", "text": book.text, "cache_control": {"type": "ephemeral"}}],
-            "messages": [{"role": "user", "content": user_message(case)}]}
+            "messages": [{"role": "user", "content": user_message(case, hide_expected)}]}
 
 
 def parse(text: str) -> dict:
@@ -110,6 +112,7 @@ def main(argv=None, send=None) -> int:
     ap.add_argument("--cap-usd", type=float, required=True)
     ap.add_argument("--already-spent-usd", type=float, default=0.0)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--hide-expected", action="store_true", help="do not show the test's expected answer (blind check)")
     args = ap.parse_args(argv)
     prices = J.load_prices()
     if args.model not in prices:
@@ -129,7 +132,7 @@ def main(argv=None, send=None) -> int:
     for row in rows:
         case = cases[row["case_id"]]
         try:
-            res = call(send, guard, build_request(book, case, args.model), prices[args.model], row["q"])
+            res = call(send, guard, build_request(book, case, args.model, args.hide_expected), prices[args.model], row["q"])
         except J.SpendCapReached as e:
             stop = e.args[0] if e.args else "cap"
             break

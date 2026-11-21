@@ -245,7 +245,7 @@ def join(answers: list[dict], cases: dict[str, dict], id_map: list[dict]) -> tup
             problems.append(f"{row['q']}: id map kind {row['kind']} != case kind {case['kind']}")
         a = by_case.get(cid)
         item = {"q": row["q"], "case_id": cid, "kind": case["kind"], "question": case["question"],
-                "reference": case.get("expected", ""), "support": case.get("support") or [], "answer": None,
+                "reference": case.get("expected", ""), "relation": case.get("relation"), "support": case.get("support") or [], "answer": None,
                 "status": "pending"}
         if a is None:
             item["status"] = "missing_answer"
@@ -376,7 +376,8 @@ class Book:
 def user_message(item: dict, book: Book | None = None) -> str:
     quotes = "\n".join(f"- [{s.get('unit_id', '?')}] «{s.get('quote', '')}»" for s in item["support"]) or "(none)"
     had = book.material_list(item) if book else "(not supplied)"
-    return (f"Case kind: {item['kind']}\n\nQuestion:\n{item['question']}\n\nReference (what a good answer contains, "
+    rel = f"Relation of the book's places (checked against the book): {item['relation']}\n\n" if item.get("relation") else ""
+    return (f"Case kind: {item['kind']}\n\n{rel}Question:\n{item['question']}\n\nReference (what a good answer contains, "
             f"from the book):\n{item['reference']}\n\nSupporting book quotes:\n{quotes}\n\n"
             f"Material the assistant had when answering (ids and titles only; the text is in THE BOOK):\n{had}\n\n"
             f"<reply>\n{item['answer']}\n</reply>\n\nReturn the JSON object only.")
@@ -625,6 +626,7 @@ def parse_args(argv):
     ap.add_argument("--id-map", type=Path, default=DEFAULT_ID_MAP)
     ap.add_argument("--key-env", help="environment variable holding the Anthropic key (live only)")
     ap.add_argument("--model", default="claude-sonnet-5-5")
+    ap.add_argument("--rubric", type=Path, default=None, help="rubric file (default: rubric.md)")
     ap.add_argument("--audit-model", default="claude-opus-5-5")
     ap.add_argument("--audit-every", type=int, default=10, help="re-judge every Nth case; 0 = no audit")
     ap.add_argument("--cap-usd", type=float, required=True, help="tranche cap, USD")
@@ -661,10 +663,11 @@ def main(argv=None, send=None, sleep=time.sleep) -> int:
                        (stamp + ("-calibration" if args.calibrate else "") + ("-mock" if args.mock else "")))
     out.mkdir(parents=True, exist_ok=True)
     guard = SpendGuard(args.cap_usd, args.already_spent_usd, out / "journal.jsonl")
-    rubric = RUBRIC.read_text("utf-8")
+    rubric_path = args.rubric or RUBRIC
+    rubric = rubric_path.read_text("utf-8")
     cases = load_cases(args.cases)
     book = None if args.no_book else Book(resolve_package(args.package))
-    meta = {"model": args.model, "mock": args.mock, "rubric_sha256": sha256(RUBRIC),
+    meta = {"model": args.model, "mock": args.mock, "rubric_sha256": sha256(args.rubric or RUBRIC), "rubric": str(args.rubric or RUBRIC),
             "cases_sha256": sha256(args.cases), "created_at": stamp,
             "package_db": str(book.db) if book else None,
             "package_db_sha256": sha256(book.db) if book else None,
