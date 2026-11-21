@@ -10,6 +10,26 @@ function disabledResult() { return { ok: false, skipped: 'telegram_transport_dis
 
 export const TELEGRAM_REQUEST_TIMEOUT_MS = 15_000;
 
+/** Every chat-member status the Bot API documents. Anything else is unknown. */
+export const TELEGRAM_MEMBER_STATUSES = Object.freeze(['creator', 'administrator', 'member', 'restricted', 'left', 'kicked']);
+const KNOWN_MEMBER_STATUSES = new Set(TELEGRAM_MEMBER_STATUSES);
+
+/**
+ * A mutation receipt is the method's documented result, not merely `ok`.
+ * `deleteMessage`, `banChatMember`, `banChatSenderChat`, `restrictChatMember`
+ * and `unpinChatMessage` return literal `true`. Any other shape is an
+ * undetermined outcome: the caller reconciles, it never counts it as done.
+ */
+export function isLiteralTrueReceipt(result) { return result === true; }
+
+/** A membership answer must name the requested user and a documented status. */
+export function isChatMemberReceipt(result, userId) {
+  return Boolean(result) && typeof result === 'object'
+    && result.user != null && typeof result.user === 'object'
+    && result.user.id != null && String(result.user.id) === String(userId)
+    && KNOWN_MEMBER_STATUSES.has(result.status);
+}
+
 /**
  * Telegram I/O is demand-only. This module deliberately exposes neither polling
  * nor command/webhook registration methods, so constructing it cannot cut over a bot.
@@ -32,7 +52,7 @@ export function createTelegramAdapter({
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
     throw new Error('Telegram adapter requestTimeoutMs must be an integer between 100 and 120000');
   }
-  async function call(method, body, beforeSend = null) {
+  async function call(method, body, beforeSend = null, validate = null) {
     const request = {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       // A timed-out Telegram mutation is deliberately ambiguous: the adapter
@@ -59,7 +79,17 @@ export function createTelegramAdapter({
     // missing/malformed body is therefore an ambiguous transport failure, not
     // a synthetic success derived from HTTP 200.
     const data = await response.json();
-    return response.ok && data.ok !== false ? { ok: true, data: data.result } : { ok: false, error: data.description || `http_${response.status}` };
+    if (data?.ok === false || !response.ok) {
+      return { ok: false, error: data?.description || `http_${response.status}` };
+    }
+    // Only an explicit `ok: true` with the method's documented result shape is
+    // a receipt. A missing flag or an unexpected result is undetermined: it is
+    // reported as uncertain so callers keep the reconciliation path and never
+    // repeat the mutation blindly.
+    if (data?.ok !== true || (validate && !validate(data.result))) {
+      return { ok: false, error: `telegram_receipt_unconfirmed:${method}`, uncertain: true };
+    }
+    return { ok: true, data: data.result };
   }
   /**
    * Ответ модели написан в markdown, а Telegram его не разбирает без
@@ -142,10 +172,11 @@ export function createTelegramAdapter({
           ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : {}),
         }, beforeSend)
     ),
-    banMember: ({ chatId, userId }) => call('banChatMember', { chat_id: chatId, user_id: userId }),
-    banSenderChat: ({ chatId, senderChatId }) => call('banChatSenderChat', { chat_id: chatId, sender_chat_id: senderChatId }),
-    deleteMessage: ({ chatId, messageId }) => call('deleteMessage', { chat_id: chatId, message_id: messageId }),
-    unpinMessage: ({ chatId, messageId }) => call('unpinChatMessage', { chat_id: chatId, message_id: messageId }),
-    getChatMember: ({ chatId, userId }) => call('getChatMember', { chat_id: chatId, user_id: userId }),
+    banMember: ({ chatId, userId }) => call('banChatMember', { chat_id: chatId, user_id: userId }, null, isLiteralTrueReceipt),
+    banSenderChat: ({ chatId, senderChatId }) => call('banChatSenderChat', { chat_id: chatId, sender_chat_id: senderChatId }, null, isLiteralTrueReceipt),
+    deleteMessage: ({ chatId, messageId }) => call('deleteMessage', { chat_id: chatId, message_id: messageId }, null, isLiteralTrueReceipt),
+    unpinMessage: ({ chatId, messageId }) => call('unpinChatMessage', { chat_id: chatId, message_id: messageId }, null, isLiteralTrueReceipt),
+    getChatMember: ({ chatId, userId }) => call('getChatMember', { chat_id: chatId, user_id: userId }, null,
+      (result) => isChatMemberReceipt(result, userId)),
   };
 }

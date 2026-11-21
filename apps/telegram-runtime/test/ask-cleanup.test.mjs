@@ -50,7 +50,7 @@ function harness(t, options = {}) {
     async deleteMessage(input) {
       actions.push({ kind: 'guard_delete', ...input });
       if (options.commandThrows) throw new Error('fixture transport timeout');
-      return options.commandResult || { ok: true };
+      return options.commandResult || { ok: true, data: true };
     },
   };
   const assistant = {
@@ -519,11 +519,11 @@ for (const [name, predicate] of [
     const calls = [];
     const guard = createGuardAdapter({
       guardBotId: 111, guardChatIds: ['-100'], telegram: {
-        async getChatMember() {
+        async getChatMember({ userId }) {
           calls.push('rights');
-          return { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } };
+          return { ok: true, data: { user: { id: userId }, status: 'administrator', can_delete_messages: true, can_restrict_members: true } };
         },
-        async deleteMessage() { calls.push('delete'); return { ok: true }; },
+        async deleteMessage() { calls.push('delete'); return { ok: true, data: true }; },
       },
     });
     const result = await guard.deleteMessage({ chatId: '-100', messageId: '10', beforeDelete: () => {

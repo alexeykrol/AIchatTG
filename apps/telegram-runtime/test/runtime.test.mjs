@@ -74,7 +74,7 @@ function availableKnowledge() {
 
 function adapters(actions) {
   const moderatorTelegram = {
-    async getChatMember() { return { ok: true, data: { status: 'administrator', can_delete_messages: true, can_restrict_members: true } }; },
+    async getChatMember({ userId }) { return { ok: true, data: { user: { id: userId }, status: 'administrator', can_delete_messages: true, can_restrict_members: true } }; },
     async banMember(input) { actions.push(['ban', input]); return { ok: true }; },
     async banSenderChat(input) { actions.push(['ban_sender_chat', input]); return { ok: true }; },
     async deleteMessage(input) { actions.push(['delete', input]); return { ok: true }; },

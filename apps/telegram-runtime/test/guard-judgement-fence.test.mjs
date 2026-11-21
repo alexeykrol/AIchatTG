@@ -15,12 +15,12 @@ function fixture({ onRights = async () => {} } = {}) {
     'deleteMessage', 'sendMessage', 'banMember', 'banSenderChat',
   ].map((name) => [name, async (input) => {
     calls.push({ name, input });
-    return { ok: true };
+    return { ok: true, data: name === 'sendMessage' ? { message_id: 1 } : true };
   }]));
-  transport.getChatMember = async () => {
+  transport.getChatMember = async ({ userId }) => {
     await onRights(++rightsCalls);
     return { ok: true, data: {
-      status: 'administrator', can_delete_messages: true, can_restrict_members: true,
+      user: { id: userId }, status: 'administrator', can_delete_messages: true, can_restrict_members: true,
     } };
   };
   const guard = createGuardAdapter({

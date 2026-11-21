@@ -35,7 +35,7 @@ function update(updateId, messageId, text) {
 
 function adapters(actions = []) {
   const moderatorTelegram = {
-    async getChatMember() { return { ok: true, data: { status: 'member' } }; },
+    async getChatMember({ userId }) { return { ok: true, data: { user: { id: userId }, status: 'member' } }; },
     async deleteMessage() { actions.push('delete'); return { ok: true }; },
     async sendMessage() { actions.push('warning'); return { ok: true }; },
     async banMember() { actions.push('ban'); return { ok: true }; },

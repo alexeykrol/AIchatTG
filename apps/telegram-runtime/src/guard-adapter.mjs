@@ -1,16 +1,31 @@
 const ADMIN_STATUSES = new Set(['administrator', 'creator', 'owner']);
+// Documented Bot API statuses (plus the historical `owner` alias the guard
+// already honours). An unknown status is not evidence of anything.
+const KNOWN_MEMBER_STATUSES = new Set(['creator', 'owner', 'administrator', 'member', 'restricted', 'left', 'kicked']);
+
+/** Literal `true` is the documented receipt of delete/ban/unpin/restrict. */
+function literalTrueReceipt(data) { return data === true; }
+/** A sent warning must come back as a message with an integer id. */
+function sentMessageReceipt(data) {
+  return Boolean(data) && typeof data === 'object' && Number.isSafeInteger(data.message_id);
+}
 
 function normalizedIds(values) {
   return new Set((values || []).map((value) => String(value).trim()).filter(Boolean));
 }
 
-function normalizedResult(result, fallback) {
+function normalizedResult(result, fallback, receiptValid = literalTrueReceipt) {
   if (!result || result.ok !== true) {
     return {
       ok: false,
       error: String(result?.error || fallback).slice(0, 120),
       uncertain: true,
     };
+  }
+  // A positive flag without the method's documented result is undetermined:
+  // it goes to reconciliation, never into a success receipt.
+  if (!receiptValid(result.data)) {
+    return { ok: false, error: `${fallback}:receipt_unconfirmed`.slice(0, 120), uncertain: true };
   }
   return { ok: true };
 }
@@ -57,6 +72,13 @@ export function createGuardAdapter({
       const result = await telegram.getChatMember({ chatId: String(chatId), userId: String(userId) });
       if (result?.ok !== true || !result.data || typeof result.data !== 'object') {
         return { ok: false, reason: 'telegram_membership_unavailable' };
+      }
+      // The answer must be about the user we asked for, with a status the
+      // Bot API documents; otherwise it proves neither rights nor exemption.
+      const memberId = result.data.user?.id;
+      if (memberId == null || String(memberId) !== String(userId)
+        || !KNOWN_MEMBER_STATUSES.has(String(result.data.status || '').toLowerCase())) {
+        return { ok: false, reason: 'telegram_membership_unconfirmed' };
       }
       return { ok: true, member: result.data };
     } catch {
@@ -129,7 +151,7 @@ export function createGuardAdapter({
     return { proven: true, exempt: false, reason: null };
   }
 
-  async function callWithProof(chatId, invoke, fallback, beforeInvoke = null, preconditionFailure = 'action_precondition_unproven') {
+  async function callWithProof(chatId, invoke, fallback, beforeInvoke = null, preconditionFailure = 'action_precondition_unproven', receiptValid = literalTrueReceipt) {
     const proof = await verifyEnforcement({ chatId });
     if (!proof.proven) return { ok: false, skipped: proof.reason, uncertain: false };
     if (beforeInvoke != null) {
@@ -149,7 +171,7 @@ export function createGuardAdapter({
       }
     }
     try {
-      return normalizedResult(await invoke(), fallback);
+      return normalizedResult(await invoke(), fallback, receiptValid);
     } catch {
       return { ok: false, error: fallback, uncertain: true };
     }
@@ -175,7 +197,7 @@ export function createGuardAdapter({
     sendWarning({ chatId, messageId, text, beforeAction = null }) {
       return callWithProof(chatId, () => telegram.sendMessage({
         chatId: String(chatId), text: String(text), replyToMessageId: String(messageId),
-      }), 'warning_failed', beforeAction);
+      }), 'warning_failed', beforeAction, 'action_precondition_unproven', sentMessageReceipt);
     },
     banAuthor({ chatId, userId = null, senderChatId = null, beforeAction = null }) {
       if (senderChatId != null && String(senderChatId)) {
