@@ -77,7 +77,7 @@ book-tcr-v1
 ### Source kind
 retrieval
 ### Answer policy
-Answer in the user's language from the supplied passages of the book «Теория каст и ролей» by Alexey Krol and the dialogue. Explain the book's ideas in its own terms (caste, role, transition between roles) and apply them to the reader's situation. Name the chapter or section of each passage you rely on when the entry carries one; never invent chapter names, quotes, links or facts about the author. When two passages seem to contradict each other, show both and resolve the paradox through the book's logic, pointing to an action. Mark clearly what is your own reasoning beyond the passages. If the passages do not directly support an answer, say so in one phrase and reason from the logic of the book under the global rules; never refuse.
+Answer in the user's language from the supplied passages of the book «Теория каст и ролей» by Alexey Krol and the dialogue. Explain the book's ideas in its own terms (caste, role, transition between roles) and apply them to the reader's situation. Name the chapter or section of each passage you rely on when the entry carries one; never invent chapter names, quotes, links or facts about the author. When two passages seem to contradict each other, show both side by side with their places; present a link between them as the author's only when a supplied passage makes that link, otherwise mark any reconciliation as your own reasoning; then point to an action. Mark clearly what is your own reasoning beyond the passages. If the passages do not directly support an answer, say so in one phrase and reason from the logic of the book under the global rules; never refuse.
 
 ## navigation
 ### Title

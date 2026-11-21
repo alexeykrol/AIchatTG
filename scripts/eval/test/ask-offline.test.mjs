@@ -390,7 +390,8 @@ const PINNED_DB_SHA256 = 'cb57b2ae9ccf2a5960328c770c44428921b98a11121b2c168b511c
 // Re-pinned 2026-11-21 (a624de3f… -> e0ad2dbe…), 2.4.48: the domain registry gained the `book` domain
 // and the `content` Excludes now name it; the catalog is part of the answer request. Request count and
 // routing of the harness (fixed to `content`) are unchanged.
-const PINNED_DEFAULT_REQUESTS_SHA256 = 'e0ad2dbe494708942ad62ead9862999d03f1038d1447cebed3a1cb81e7c2dbe3';
+// Re-pinned again 2026-11-21 (2.4.49): book Answer policy no longer tells the model to resolve paradoxes on the author's behalf (Codex follow-up §2).
+const PINNED_DEFAULT_REQUESTS_SHA256 = 'd8a48d2582e762914260621f0c87201711999cb716e05f53ec5425eec1a79481';
 const sameBook = haveBook && createHash('sha256').update(readFileSync(database)).digest('hex') === PINNED_DB_SHA256;
 
 test('default run (no lever flags) sends byte-identical requests to the pre-lever code', {
