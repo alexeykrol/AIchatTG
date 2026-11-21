@@ -48,28 +48,30 @@ export function packageKnowledge({ databasePath, domainId = 'tcr', sourceId = AS
 }
 
 /** Record ids behind the knowledge entries handed to the model (registry entries are not records). */
-export function usedIds(knowledge) {
-  const chunkIds = (knowledge?.entries || []).map((e) => e.id).filter((id) => !id.startsWith('registry:'));
-  return { chunkIds, unitIds: [...new Set(chunkIds.map((id) => unitOfChunkId(id)))] };
+export function usedIds(knowledge, fixedContext = null) {
+  const chunkIds = (knowledge?.entries || []).map((e) => e.id)
+    .filter((id) => fixedContext || !id.startsWith('registry:'));
+  const unitOfChunk = fixedContext?.unitOfChunk ?? unitOfChunkId;
+  return { chunkIds, unitIds: [...new Set(chunkIds.map(unitOfChunk))] };
 }
 
 export function createOfflineAssistant({
   databasePath, domainId = 'tcr', provider = null, catalog = DEFAULT_DOMAIN_CATALOG,
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
   rewriteQuestion = null, rewriteOnNoSignal = false,
-  noConceptGate, coverageText,
+  noConceptGate, coverageText, fixedContext = null,
   // runtime.mjs: config.assistantNeverRefuse (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE), default true.
   neverRefuse = true,
 }) {
   const rewriteEnabled = typeof rewriteQuestion === 'function';
   if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
-  const retrieval = createKnowledgeRetrieval(
+  const retrieval = fixedContext ? null : createKnowledgeRetrieval(
     { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true,
       noConceptGate, coverageText,
       ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}) },
     { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );
-  if (!retrieval.available) throw new Error(`retrieval unavailable: ${retrieval.reason}`);
+  if (retrieval && !retrieval.available) throw new Error(`retrieval unavailable: ${retrieval.reason}`);
   // runtime.mjs: the compatibility adapter maps the content retrieval under the content source id.
   const retrievals = new Map([[ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, retrieval]]);
   const route = catalog.routeFor('content');
@@ -77,23 +79,26 @@ export function createOfflineAssistant({
 
   // Every question is a fresh conversation: its own session key, so the retriever's per-session pack cache
   // and topic continuity never carry one question into the next (production keys sessions by chat:user).
-  async function routeQuestion(text, { userId = EVAL_USER_ID } = {}) {
+  async function routeQuestion(text, { userId = EVAL_USER_ID, q } = {}) {
     const question = { text, chatId: EVAL_CHAT_ID, userId };
     const hints = domainQuestionHints(text, catalog);
     const selection = { routes: [route], riskFlags: [], legacy: false };
+    const sources = fixedContext ? new Map([[ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, {
+      available: true, forQuestion: () => fixedContext.resultFor(q),
+    }]]) : retrievals;
     return resolveDomainSelection(selection, {
-      catalog, knowledge: packageKnowledge({ databasePath, domainId }), retrievals, question, dialogue: [], hints,
+      catalog, knowledge: packageKnowledge({ databasePath, domainId }), retrievals: sources, question, dialogue: [], hints,
     });
   }
 
   /** One question through the answer branch. Never throws for a provider failure: it is a status. */
-  async function ask(text, { userId = EVAL_USER_ID } = {}) {
-    let routing = await routeQuestion(text, { userId });
+  async function ask(text, { userId = EVAL_USER_ID, q } = {}) {
+    let routing = await routeQuestion(text, { userId, q });
     const routeReason = routing.reason ?? null;
     // runtime.mjs: a knowledge gap (in_domain_gap | off_domain) goes to the model with its instruction.
     const gapped = routing.abstain === true && neverRefuse !== false ? knowledgeGapRouting(routing) : null;
     if (gapped) routing = gapped.routing;
-    const ids = usedIds(routing.knowledge);
+    const ids = usedIds(routing.knowledge, fixedContext);
     const base = { ...ids, routeReason, trace: routing.trace ?? null,
       knowledgeGap: Boolean(gapped), gapReason: gapped ? gapped.gap.kind : null,
       gapDetail: gapped ? gapped.gap.detail : null };
@@ -121,8 +126,9 @@ export function createOfflineAssistant({
   }
 
   /** $0 diagnostics: why the retriever said what it said (gates of retriever-adapter runQuery). */
-  async function diagnose(text, { userId = EVAL_USER_ID } = {}) {
-    const r = await retrieval.forQuestion({ question: text, sessionId: `diag:${userId}` });
+  async function diagnose(text, { userId = EVAL_USER_ID, q } = {}) {
+    const r = fixedContext ? fixedContext.resultFor(q)
+      : await retrieval.forQuestion({ question: text, sessionId: `diag:${userId}` });
     const t = r.pack?.retrieval_trace || {};
     return {
       grounded: r.grounded, reason: r.reason, packStatus: r.pack?.status ?? null,
@@ -138,5 +144,5 @@ export function createOfflineAssistant({
     };
   }
 
-  return Object.freeze({ ask, routeQuestion, diagnose, close: () => retrieval.close() });
+  return Object.freeze({ ask, routeQuestion, diagnose, close: () => retrieval?.close() });
 }
