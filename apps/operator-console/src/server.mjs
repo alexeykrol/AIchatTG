@@ -121,6 +121,17 @@ function content(response, statusCode, type, body, extraHeaders = {}) {
   response.end(body);
 }
 
+const DEFAULT_PAGE = '/moderation-v3.html';
+/**
+ * Login/logout `next` may only name an internal page of this console: an
+ * exact served page or a known legacy alias. Anything else (absolute URLs,
+ * `//host`, backslashes, unknown paths) falls back to the default page.
+ */
+export function safeNextPath(value) {
+  const next = typeof value === 'string' ? value : '';
+  return PUBLIC.has(next) || PAGE_REDIRECTS.has(next) ? next : DEFAULT_PAGE;
+}
+
 function redirect(response, location) {
   response.writeHead(302, { location, 'cache-control': 'no-store', 'content-length': '0' });
   response.end();
@@ -235,11 +246,11 @@ export function createOperatorConsoleServer({ config, logger = console, review =
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/auth/login') {
-        redirect(response, url.searchParams.get('next') || '/moderation-v3.html');
+        redirect(response, safeNextPath(url.searchParams.get('next')));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/auth/logout') {
-        redirect(response, url.searchParams.get('next') || '/moderation-v3.html');
+        redirect(response, safeNextPath(url.searchParams.get('next')));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/operator/settings') {

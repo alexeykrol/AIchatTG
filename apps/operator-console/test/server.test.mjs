@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { loadOperatorConsoleConfig } from '../src/config.mjs';
-import { createOperatorConsoleServer, validOperatorAuthorization } from '../src/server.mjs';
+import { createOperatorConsoleServer, safeNextPath, validOperatorAuthorization } from '../src/server.mjs';
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'aichattg-operator-server-'));
 const safetyPromptPath = join(fixtureRoot, 'moderation-tg-v3.md');
@@ -257,4 +257,24 @@ test('integrated review stays disabled behind existing auth without storage or w
     assert.equal((await fetch(url + '/api/operator/analytics', { headers })).status, 200);
     assert.deepEqual(readdirSync(candidateRoot), [], 'no review DB, collector or synthetic seed is bootstrapped');
   }, { ...config, candidateRoot });
+});
+
+test('login and logout redirect only to allowlisted internal pages', async () => {
+  for (const hostile of ['https://evil.example/', '//evil.example/x', '/\\evil.example', 'javascript:alert(1)',
+    '/moderation-v3.html?x=1', '/../etc/passwd', '/api/operator/settings', '', null, undefined]) {
+    assert.equal(safeNextPath(hostile), '/moderation-v3.html', String(hostile));
+  }
+  assert.equal(safeNextPath('/legacy/v1/eval.html'), '/legacy/v1/eval.html');
+  assert.equal(safeNextPath('/eval.html'), '/eval.html');
+  await withServer(async (url) => {
+    for (const path of ['/api/auth/login', '/api/auth/logout']) {
+      const hostile = await fetch(`${url}${path}?next=${encodeURIComponent('https://evil.example/')}`,
+        { headers: { authorization: auth() }, redirect: 'manual' });
+      assert.equal(hostile.status, 302);
+      assert.equal(hostile.headers.get('location'), '/moderation-v3.html');
+      const internal = await fetch(`${url}${path}?next=${encodeURIComponent('/assistant-v3.html')}`,
+        { headers: { authorization: auth() }, redirect: 'manual' });
+      assert.equal(internal.headers.get('location'), '/assistant-v3.html');
+    }
+  });
 });
