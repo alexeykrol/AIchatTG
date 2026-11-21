@@ -4,6 +4,7 @@ import { createProviderAdapter } from './provider-adapter.mjs';
 import { createKnowledgeAdapter } from './knowledge-adapter.mjs';
 import { assertSlicesAdmitted, composeKnowledgeSlices } from './knowledge-slices.mjs';
 import { createKnowledgeRetrieval } from './knowledge-retrieval.mjs';
+import { deepReadFromEnv } from './deep-read.mjs';
 import { createAnalyzerAdapter } from './analyzer-adapter.mjs';
 import { loadAnalyzerSpec } from './analyzer-spec.mjs';
 import { createRewriterAdapter } from './rewriter-adapter.mjs';
@@ -54,7 +55,9 @@ const knowledge = composed.knowledge;
 // The content retriever is built only when explicitly enabled. When it is off
 // the assistant keeps its previous path exactly, so this cutover is a switch,
 // not a rewrite of a running deployment.
-const contentRetrieval = config.assistantRetrieval.enabled === true
+// Deep read (TELEGRAM_RUNTIME_ASSISTANT_DEEP_READ, default off = this exact
+// retrieval object): a 2nd/3rd pass only for hard questions, see deep-read.mjs.
+const contentRetrieval = deepReadFromEnv(config.assistantRetrieval.enabled === true
   ? createKnowledgeRetrieval(config.assistantRetrieval, {
     knowledge: composed.baseKnowledge,
     rewriteQuestion: config.assistantRetrieval.rewriteEnabled === true
@@ -67,7 +70,7 @@ const contentRetrieval = config.assistantRetrieval.enabled === true
       })
       : null,
   })
-  : null;
+  : null, { knowledge: composed.baseKnowledge, provider: config.provider });
 if (contentRetrieval && !contentRetrieval.available) {
   console.error(`[telegram-runtime] content retrieval unavailable: ${contentRetrieval.reason}`);
 }

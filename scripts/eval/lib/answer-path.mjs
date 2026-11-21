@@ -17,6 +17,7 @@
  * `rewriteOnNoSignal: true` (experiment only, never set in production) also lets no-signal questions reach it.
  */
 import { createKnowledgeRetrieval } from '../../../apps/telegram-runtime/src/knowledge-retrieval.mjs';
+import { withDeepRead } from '../../../apps/telegram-runtime/src/deep-read.mjs';
 import {
   domainBoundaryReply, domainQuestionHints, knowledgeGapRouting, resolveDomainSelection,
 } from '../../../apps/telegram-runtime/src/assistant-domain-routing.mjs';
@@ -60,17 +61,30 @@ export function createOfflineAssistant({
   maxEntries = RETRIEVAL_MAX_ENTRIES, maxContextTokens = RETRIEVAL_MAX_CONTEXT_TOKENS,
   rewriteQuestion = null, rewriteOnNoSignal = false,
   noConceptGate, coverageText, fixedContext = null,
+  // Production search levers (config.mjs retrievalSearchConfig); absent = lexical as before.
+  retrievalMode, hybridMaxContextTokens, linkExpansion,
+  // Deep read (apps/telegram-runtime/src/deep-read.mjs): { mode: 'off'|'on'|'force', suggestQueries, caseSink }.
+  deepRead = null,
   // runtime.mjs: config.assistantNeverRefuse (TELEGRAM_RUNTIME_ASSISTANT_NEVER_REFUSE), default true.
   neverRefuse = true,
 }) {
   const rewriteEnabled = typeof rewriteQuestion === 'function';
   if (rewriteOnNoSignal === true && !rewriteEnabled) throw new Error('rewriteOnNoSignal needs a rewriteQuestion');
-  const retrieval = fixedContext ? null : createKnowledgeRetrieval(
+  const baseRetrieval = fixedContext ? null : createKnowledgeRetrieval(
     { maxEntries, maxContextTokens, rewriteEnabled, validatePacks: true,
       noConceptGate, coverageText,
-      ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}) },
+      ...(rewriteOnNoSignal === true ? { rewriteOnNoSignal: true } : {}),
+      ...(retrievalMode ? { retrievalMode } : {}),
+      ...(hybridMaxContextTokens != null ? { hybridMaxContextTokens } : {}),
+      ...(linkExpansion ? { linkExpansion } : {}) },
     { knowledge: packageKnowledge({ databasePath, domainId }), rewriteQuestion: rewriteEnabled ? rewriteQuestion : null },
   );
+  const deepOn = deepRead?.mode === 'on' || deepRead?.mode === 'force';
+  if (deepOn && fixedContext) throw new Error('deep read needs live retrieval, not --context-from');
+  const retrieval = baseRetrieval && deepOn
+    ? withDeepRead(baseRetrieval, { mode: deepRead.mode, databasePath, suggestQueries: deepRead.suggestQueries ?? null,
+      caseSink: deepRead.caseSink ?? null, log: deepRead.log ?? (() => {}) })
+    : baseRetrieval;
   if (retrieval && !retrieval.available) throw new Error(`retrieval unavailable: ${retrieval.reason}`);
   // runtime.mjs: the compatibility adapter maps the content retrieval under the content source id.
   const retrievals = new Map([[ASSISTANT_SOURCE_PACKAGES.COURSE_CONTENT, retrieval]]);
